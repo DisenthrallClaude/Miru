@@ -38,6 +38,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool playerDisableAnimations;
   late bool forceAdBlocker;
   late bool autoPlayNext;
+  late bool autoSwitchPlaybackRoad;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
   late int playerButtonSkipTime;
@@ -385,6 +386,19 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   title: Text('自动连播'),
                   description: Text('当前视频播放完毕后自动播放下一集'),
                   initialValue: autoPlayNext,
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.alt_route_rounded,
+                  onToggle: (value) async {
+                    autoSwitchPlaybackRoad = value ?? !autoSwitchPlaybackRoad;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.autoSwitchPlaybackRoad,
+                        autoSwitchPlaybackRoad);
+                    setState(() {});
+                  },
+                  title: Text('解析失败自动换线路'),
+                  description: Text('当前线路打不开时，自动尝试同一集的下一条播放线路'),
+                  initialValue: autoSwitchPlaybackRoad,
                 ),
                 if (Platform.isAndroid)
                   SettingsTile.switchTile(

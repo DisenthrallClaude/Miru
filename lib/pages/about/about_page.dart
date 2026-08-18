@@ -8,6 +8,7 @@ import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/pages/my/my_controller.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
 import 'package:kazumi/utils/dandan_credentials.dart';
+import 'package:kazumi/services/storage/feed_cache.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -98,7 +99,10 @@ class _AboutPageState extends State<AboutPage> {
 
   Future<void> _clearCache() async {
     final Directory libCacheDir = await _getCacheDir();
-    await libCacheDir.delete(recursive: true);
+    if (await libCacheDir.exists()) {
+      await libCacheDir.delete(recursive: true);
+    }
+    await FeedCache.clear();
     _getCacheSize();
   }
 
@@ -165,7 +169,8 @@ class _AboutPageState extends State<AboutPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('缓存管理'),
-          content: const Text('缓存为番剧封面, 清除后加载时需要重新下载,确认要清除缓存吗?'),
+          content: const Text(
+              '将清除番剧封面缓存，以及推荐页 / 时间表的本地列表。下次进入对应页面会重新联网。'),
           actions: [
             TextButton(
               onPressed: () {

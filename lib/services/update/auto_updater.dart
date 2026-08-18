@@ -190,12 +190,26 @@ class AutoUpdater {
   }
 
   Future<Map<String, dynamic>> _latestRelease() async {
-    final raw = await _downloadClient.getPlain(ApiEndpoints.latestAppMirror);
-    final data = json.decode(raw);
-    if (data is! Map) {
-      throw Exception('Invalid update response');
+    // 不再走需要密钥的 Kazumi mirror。先打 GitHub，国内不通再走 ghproxy。
+    final urls = <String>[
+      ApiEndpoints.latestApp,
+      ApiEndpoints.latestAppGithubProxy,
+    ];
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        final raw = await _downloadClient.getPlain(url);
+        final data = json.decode(raw);
+        if (data is! Map || !data.containsKey('tag_name')) {
+          throw Exception('Invalid update response');
+        }
+        return Map<String, dynamic>.from(data);
+      } catch (e) {
+        lastError = e;
+        KazumiLogger().w('Update: fetch $url failed', error: e);
+      }
     }
-    return Map<String, dynamic>.from(data);
+    throw lastError ?? Exception('检查更新失败');
   }
 
   /// 自动检查更新（仅在启用自动更新时）
@@ -813,6 +827,6 @@ class AutoUpdater {
     } else if (Platform.isAndroid) {
       extension = '.apk';
     }
-    return 'Kazumi-$version$extension';
+    return 'Miru-$version$extension';
   }
 }

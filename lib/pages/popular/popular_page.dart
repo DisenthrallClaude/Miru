@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -5,6 +6,7 @@ import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
 import 'package:kazumi/bean/widget/custom_dropdown_menu.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/popular/popular_controller.dart';
+import 'package:kazumi/services/storage/feed_cache.dart';
 import 'package:kazumi/bean/card/bangumi_feed_card.dart';
 import 'package:kazumi/bean/card/bangumi_hero_carousel.dart';
 import 'package:kazumi/bean/widget/frosted_surface.dart';
@@ -93,11 +95,12 @@ class _PopularPageState extends State<PopularPage> {
       initialScrollOffset: popularController.scrollOffset,
     );
     scrollController.addListener(scrollListener);
-    // 先尝试读本地缓存；命中就完全不联网，
-    // 只有第一次使用（或用户主动刷新）才走网络。
+    // 先读本地缓存秒开。缓存过期则后台静默刷新，失败时旧数据还在。
     if (popularController.trendList.isEmpty) {
       if (!popularController.restoreFromCache()) {
         popularController.queryBangumiByTrend();
+      } else if (FeedCache.isPopularStale) {
+        unawaited(popularController.refreshInBackground());
       }
     }
   }

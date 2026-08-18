@@ -14,12 +14,10 @@ abstract final class BangumiImageUrlRewriter {
     final uri = Uri.tryParse(url);
     if (uri == null || !_isHttp(uri)) return url;
 
-    // 把 next 反代的图床归一到搜索反代的图床。
-    //
-    // 两条反代各自返回不同图床的封面，其中 lain.bangumi.lol 在部分网络下
-    // 不可达，表现为「置顶的那批番剧没有封面，搜索出来的却有」。
-    // 路径完全相同，换主机即可，无需经第三方图片代理。
-    if (uri.host == _nextProxyImageHost) {
+    // 官方图床 lain.bgm.tv 和 next 反代图床 lain.bangumi.lol
+    // 路径结构与 bgmimg.anibt.net 完全一致，直接换主机即可。
+    // 之前 lain.bgm.tv 走 wsrv.nl，多一跳也多一个故障点。
+    if (uri.host == _nextProxyImageHost || uri.host == 'lain.bgm.tv') {
       return uri.replace(host: _preferredImageHost).toString();
     }
 
@@ -35,8 +33,7 @@ abstract final class BangumiImageUrlRewriter {
 
   static bool _isHttp(Uri uri) => uri.scheme == 'http' || uri.scheme == 'https';
 
-  static bool _isMirrorable(Uri uri) =>
-      uri.host == 'lain.bgm.tv' || _isApiImage(uri);
+  static bool _isMirrorable(Uri uri) => _isApiImage(uri);
 
   static bool _isApiImage(Uri uri) {
     if (uri.host != 'api.bgm.tv') return false;

@@ -30,9 +30,13 @@ class ApiEndpoints {
   static const String pluginShopMirror =
       'https://raw.gitcode.com/gh_mirrors/ka/KazumiRules/raw/main/';
 
-  /// 在线升级
+  /// 在线升级（本仓库 Releases，不再去上游 Kazumi 拉包）
   static const String latestApp =
-      'https://api.github.com/repos/Predidit/Kazumi/releases/latest';
+      'https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
+
+  /// GitHub API 在国内可能不通，走一层公共反代再试一次。
+  static const String latestAppGithubProxy =
+      'https://ghproxy.net/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
   /// Bangumi 镜像测试后端（需 KAZUMI_APPID/KEY 签名，自建包无法使用）
   static const String bangumiMirrorDomain = 'https://api.kazumi.fyi';
@@ -49,7 +53,7 @@ class ApiEndpoints {
   /// 想切回日番或改成其它产地，只改这一个常量即可。
   static const String bangumiRegionTag = '中国';
 
-  /// Kazumi 镜像后端应用更新
+  /// 旧版 Kazumi 镜像更新接口（需密钥，自建包不可用，仅作文档遗留）。
   static const String latestAppMirror =
       '$bangumiMirrorDomain/kazumi/v1/app/latest';
 

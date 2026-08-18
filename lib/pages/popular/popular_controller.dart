@@ -73,6 +73,14 @@ abstract class _PopularController with Store {
     await queryBangumiByTrend(type: 'init');
   }
 
+  /// 缓存过期后的静默刷新：先展示旧数据，新数据到了再整表替换。
+  /// 两端都空则保留旧列表，避免一次网络失败把首页刷白。
+  @action
+  Future<void> refreshInBackground() async {
+    if (isLoadingMore) return;
+    await queryBangumiByTrend(type: 'replace');
+  }
+
   @action
   Future<void> queryBangumiByTrend({String type = 'add'}) async {
     if (type == 'init') {
@@ -82,28 +90,49 @@ abstract class _PopularController with Store {
     }
     isLoadingMore = true;
 
+    final replace = type == 'replace';
+    final featured = <BangumiItem>[];
+
     // 首屏先铺置顶清单：封面轮播取列表前几条，因此这里决定了「封面推荐」的内容。
-    if (!_featuredLoaded) {
+    if (replace || !_featuredLoaded) {
       _featuredLoaded = true;
-      final featured =
-          await BangumiApi.getBangumiListByIds(kFeaturedBangumiIds);
-      final seen = trendList.map((e) => e.id).toSet();
-      trendList.addAll(featured.where((e) => seen.add(e.id)));
+      featured.addAll(await BangumiApi.getBangumiListByIds(kFeaturedBangumiIds));
+      if (!replace) {
+        final seen = trendList.map((e) => e.id).toSet();
+        trendList.addAll(featured.where((e) => seen.add(e.id)));
+      }
     }
 
     // 置顶之后再接算法推荐（按热度的国漫），域名由拦截器重写到公共反代。
     final result = await BangumiApi.getBangumiList(
       limit: _trendPageSize,
-      offset: _trendOffset,
+      offset: replace ? 0 : _trendOffset,
     );
-    // 必须按**实际返回条数**推进 offset。
-    // 之前固定 += _trendPageSize，而接口返回数可能小于请求的 limit，
-    // 会导致每翻一页跳过若干条目（内容凭空消失）。
-    if (result.isNotEmpty) {
-      _trendOffset += result.length;
+
+    if (replace) {
+      if (featured.isEmpty && result.isEmpty) {
+        isLoadingMore = false;
+        return;
+      }
+      final merged = <BangumiItem>[];
+      final seen = <int>{};
+      for (final item in [...featured, ...result]) {
+        if (seen.add(item.id)) merged.add(item);
+      }
+      trendList
+        ..clear()
+        ..addAll(merged);
+      _trendOffset = result.length;
+    } else {
+      // 必须按**实际返回条数**推进 offset。
+      // 之前固定 += _trendPageSize，而接口返回数可能小于请求的 limit，
+      // 会导致每翻一页跳过若干条目（内容凭空消失）。
+      if (result.isNotEmpty) {
+        _trendOffset += result.length;
+      }
+      final existingIds = trendList.map((item) => item.id).toSet();
+      trendList.addAll(result.where((item) => existingIds.add(item.id)));
     }
-    final existingIds = trendList.map((item) => item.id).toSet();
-    trendList.addAll(result.where((item) => existingIds.add(item.id)));
     // 落盘：下次启动直接读这份，不再联网
     await FeedCache.savePopular(trendList.toList(), offset: _trendOffset);
     isLoadingMore = false;

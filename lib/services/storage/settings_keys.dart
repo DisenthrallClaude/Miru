@@ -436,6 +436,30 @@ class SettingsKeys {
     '',
     group: SettingGroup.bangumi,
   );
+  /// 推荐页缓存写入时间（毫秒）。用于 stale-while-revalidate。
+  static const popularCacheUpdatedAt = SettingKey<int>(
+    'popularCacheUpdatedAt',
+    0,
+    group: SettingGroup.bangumi,
+  );
+  /// 时间表缓存写入时间（毫秒）。
+  static const calendarCacheUpdatedAt = SettingKey<int>(
+    'calendarCacheUpdatedAt',
+    0,
+    group: SettingGroup.bangumi,
+  );
+  /// 兼容弹弹play 协议的自定义弹幕基址。空则走官方接口。
+  static const danmakuCustomApi = SettingKey<String>(
+    'danmakuCustomApi',
+    '',
+    group: SettingGroup.danmaku,
+  );
+  /// 当前线路解析失败时，自动尝试同一集的下一条播放线路。
+  static const autoSwitchPlaybackRoad = SettingKey<bool>(
+    'autoSwitchPlaybackRoad',
+    true,
+    group: SettingGroup.player,
+  );
   static const showRating = SettingKey<bool>(
     _SettingBoxKey.showRating,
     true,
@@ -613,6 +637,10 @@ class SettingsKeys {
     proxyTestUrl,
     calendarCacheSeason,
     popularCacheOffset,
+    popularCacheUpdatedAt,
+    calendarCacheUpdatedAt,
+    danmakuCustomApi,
+    autoSwitchPlaybackRoad,
     showRating,
     showAnimeCounter,
     downloadParallelEpisodes,

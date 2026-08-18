@@ -1,5 +1,6 @@
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/storage/feed_cache_policy.dart';
 import 'package:kazumi/services/storage/storage.dart';
 
 /// 推荐页与时间表的本地持久化缓存。
@@ -8,8 +9,9 @@ import 'package:kazumi/services/storage/storage.dart';
 /// 避免每次进 App 都重新拉取（尤其推荐页的置顶清单是几十个请求）。
 ///
 /// 失效策略：
-/// * 推荐页 —— 不自动失效，只有用户主动刷新时才重新联网；
-/// * 时间表 —— 以「季度」为键，季度没变就一直用缓存，换季自动重取。
+/// * 推荐页 —— 先读缓存秒开，超过 [FeedCachePolicy.popularTtl] 后后台静默刷新；
+/// * 时间表 —— 以「季度」为键，换季必重取；同季度超过
+///   [FeedCachePolicy.calendarTtl] 后后台静默刷新。
 ///
 /// `BangumiItem` 本身是 HiveType，可直接存入 Box，无需序列化。
 abstract final class FeedCache {
@@ -27,6 +29,11 @@ abstract final class FeedCache {
   static int get popularOffset =>
       GStorage.getSetting(SettingsKeys.popularCacheOffset);
 
+  static bool get isPopularStale => FeedCachePolicy.isStale(
+        updatedAtMs: GStorage.getSetting(SettingsKeys.popularCacheUpdatedAt),
+        ttl: FeedCachePolicy.popularTtl,
+      );
+
   static Future<void> savePopular(
     List<BangumiItem> items, {
     required int offset,
@@ -43,6 +50,10 @@ abstract final class FeedCache {
       );
       await box.flush();
       await GStorage.putSetting(SettingsKeys.popularCacheOffset, offset);
+      await GStorage.putSetting(
+        SettingsKeys.popularCacheUpdatedAt,
+        DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (e) {
       KazumiLogger().w('FeedCache: save popular failed', error: e);
     }
@@ -57,6 +68,11 @@ abstract final class FeedCache {
       season.isNotEmpty &&
       season == cachedCalendarSeason &&
       GStorage.calendarCache.isNotEmpty;
+
+  static bool get isCalendarStale => FeedCachePolicy.isStale(
+        updatedAtMs: GStorage.getSetting(SettingsKeys.calendarCacheUpdatedAt),
+        ttl: FeedCachePolicy.calendarTtl,
+      );
 
   /// 按 airWeekday 还原成 7 天分组。
   /// 与 `BangumiApi.getCalendarBySearch` 的分组方式一致，
@@ -84,6 +100,10 @@ abstract final class FeedCache {
       await box.addAll(flat);
       await box.flush();
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, season);
+      await GStorage.putSetting(
+        SettingsKeys.calendarCacheUpdatedAt,
+        DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (e) {
       KazumiLogger().w('FeedCache: save calendar failed', error: e);
     }

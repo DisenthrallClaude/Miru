@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:kazumi/request/config/danmaku_api_config.dart';
 import 'package:kazumi/request/core/dio_factory.dart';
 import 'package:kazumi/request/core/network_error_mapper.dart';
 import 'package:kazumi/utils/dandan_credentials.dart';
@@ -21,12 +22,17 @@ class DanmakuClient {
     final requestHeaders = <String, dynamic>{
       'user-agent': getRandomUA(),
       'referer': '',
-      'X-Auth': 1,
-      'X-AppId': dandanCredentials['id'],
-      'X-Timestamp': timestamp,
-      'X-Signature': generateDandanSignature(uri.path, timestamp),
       ...headers,
     };
+    // 官方弹弹play 必须带签名；自定义兼容接口（如 danmu_api）不认这套头。
+    if (DanmakuApiConfig.shouldSignRequest(url)) {
+      requestHeaders.addAll({
+        'X-Auth': 1,
+        'X-AppId': dandanCredentials['id'],
+        'X-Timestamp': timestamp,
+        'X-Signature': generateDandanSignature(uri.path, timestamp),
+      });
+    }
 
     try {
       final response = await DioFactory.apiDio.get(

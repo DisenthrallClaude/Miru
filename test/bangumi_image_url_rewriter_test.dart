@@ -9,20 +9,20 @@ void main() {
       expect(BangumiImageUrlRewriter.rewrite(url, enabled: false), url);
     });
 
-    test('rewrites lain images and preserves GIF animation', () {
+    test('rewrites official lain images onto the community image proxy', () {
       expect(
         BangumiImageUrlRewriter.rewrite(
           'https://lain.bgm.tv/pic/cover/l/cover.jpg',
           enabled: true,
         ),
-        'https://wsrv.nl/?url=lain.bgm.tv%2Fpic%2Fcover%2Fl%2Fcover.jpg',
+        'https://bgmimg.anibt.net/pic/cover/l/cover.jpg',
       );
       expect(
         BangumiImageUrlRewriter.rewrite(
           'https://lain.bgm.tv/pic/cover/l/animated.gif',
           enabled: true,
         ),
-        'https://wsrv.nl/?url=lain.bgm.tv%2Fpic%2Fcover%2Fl%2Fanimated.gif&n=-1',
+        'https://bgmimg.anibt.net/pic/cover/l/animated.gif',
       );
     });
 

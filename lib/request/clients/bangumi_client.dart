@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:kazumi/request/core/bangumi_proxy_router.dart';
 import 'package:kazumi/request/core/dio_factory.dart';
 import 'package:kazumi/request/core/network_error_mapper.dart';
+import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/bangumi_mirror_credentials.dart';
@@ -18,9 +20,10 @@ class BangumiClient {
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = false,
     CancelToken? cancelToken,
-  }) async {
-    try {
-      final response = await DioFactory.apiDio.get(
+  }) {
+    return _withProxyFallback(
+      url,
+      (attempt) => DioFactory.apiDio.get(
         url,
         queryParameters: queryParameters,
         options: Options(
@@ -29,13 +32,11 @@ class BangumiClient {
             url: url,
             method: 'GET',
           ),
+          extra: {kBangumiProxyAttemptExtra: attempt},
         ),
         cancelToken: cancelToken,
-      );
-      return response.data;
-    } on DioException catch (e) {
-      throw await NetworkErrorMapper.mapException(e);
-    }
+      ),
+    );
   }
 
   Future<dynamic> post(
@@ -44,9 +45,10 @@ class BangumiClient {
     Map<String, dynamic>? queryParameters,
     bool requiresAuth = false,
     CancelToken? cancelToken,
-  }) async {
-    try {
-      final response = await DioFactory.apiDio.post(
+  }) {
+    return _withProxyFallback(
+      url,
+      (attempt) => DioFactory.apiDio.post(
         url,
         data: data,
         queryParameters: queryParameters,
@@ -57,13 +59,52 @@ class BangumiClient {
             method: 'POST',
             data: data,
           ),
+          extra: {kBangumiProxyAttemptExtra: attempt},
         ),
         cancelToken: cancelToken,
-      );
-      return response.data;
-    } on DioException catch (e) {
-      throw await NetworkErrorMapper.mapException(e);
+      ),
+    );
+  }
+
+  /// 反代挂了就换下一个候选，最后打官方原站。
+  Future<dynamic> _withProxyFallback(
+    String url,
+    Future<Response<dynamic>> Function(int attempt) send,
+  ) async {
+    final attempts = _attemptCount(url);
+    DioException? lastError;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        final response = await send(attempt);
+        return response.data;
+      } on DioException catch (e) {
+        lastError = e;
+        final canRetry =
+            attempt < attempts - 1 && BangumiProxyRouter.isRetryableDio(e);
+        if (!canRetry) {
+          throw await NetworkErrorMapper.mapException(e);
+        }
+        KazumiLogger().w(
+          'Bangumi: attempt $attempt failed, trying next endpoint',
+          error: e,
+        );
+      }
     }
+    throw await NetworkErrorMapper.mapException(
+      lastError ??
+          DioException(
+            requestOptions: RequestOptions(path: url),
+          ),
+    );
+  }
+
+  int _attemptCount(String url) {
+    if (!GStorage.getSetting(SettingsKeys.enableBangumiProxy)) {
+      return 1;
+    }
+    final host = Uri.tryParse(url)?.host;
+    if (host == null || host.isEmpty) return 1;
+    return BangumiProxyRouter.attemptCount(host);
   }
 
   Map<String, dynamic> _headers({

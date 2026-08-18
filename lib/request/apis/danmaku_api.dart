@@ -1,6 +1,8 @@
 import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:kazumi/request/config/danmaku_api_config.dart';
 import 'package:kazumi/request/clients/danmaku_client.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/modules/danmaku/danmaku_module.dart';
 import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
 import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
@@ -9,11 +11,15 @@ import 'package:kazumi/utils/string_similarity.dart';
 class DanmakuApi {
   static final DanmakuClient _client = DanmakuClient.instance;
 
+  static String get _domain => DanmakuApiConfig.resolveBaseUrl(
+        GStorage.getSetting(SettingsKeys.danmakuCustomApi),
+      );
+
   // 从BgmBangumiID获取DanDanBangumiID
   static Future<int> getDanDanBangumiIDByBgmBangumiID(int bgmBangumiID) async {
     var path = ApiEndpoints.formatUrl(
         ApiEndpoints.dandanAPIInfoByBgmBangumiId, [bgmBangumiID]);
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     final jsonData = await _client.get(endPoint);
     DanmakuEpisodeResponse danmakuEpisodeResponse =
         DanmakuEpisodeResponse.fromJson(jsonData);
@@ -57,7 +63,7 @@ class DanmakuApi {
       int bangumiID) async {
     var path = ApiEndpoints.formatUrl(
         ApiEndpoints.dandanAPIInfoByBgmBangumiId, [bangumiID]);
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     final jsonData = await _client.get(endPoint);
     DanmakuEpisodeResponse danmakuEpisodeResponse =
         DanmakuEpisodeResponse.fromJson(jsonData);
@@ -68,7 +74,7 @@ class DanmakuApi {
   static Future<DanmakuEpisodeResponse> getDanDanEpisodesByDanDanBangumiID(
       int bangumiID) async {
     var path = ApiEndpoints.dandanAPIInfo + bangumiID.toString();
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     final jsonData = await _client.get(endPoint);
     DanmakuEpisodeResponse danmakuEpisodeResponse =
         DanmakuEpisodeResponse.fromJson(jsonData);
@@ -79,7 +85,7 @@ class DanmakuApi {
   static Future<DanmakuSearchResponse> getDanmakuSearchResponse(
       String title) async {
     var path = ApiEndpoints.dandanAPISearch;
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     Map<String, String> keywordMap = {
       'keyword': title,
     };
@@ -100,7 +106,7 @@ class DanmakuApi {
     var path = ApiEndpoints.dandanAPIComment +
         bangumiID.toString() +
         episode.toString().padLeft(4, '0');
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     Map<String, String> withRelated = {
       'withRelated': 'true',
     };
@@ -118,7 +124,7 @@ class DanmakuApi {
   static Future<List<DanmakuEntry>> getDanDanmakuByEpisodeID(
       int episodeID) async {
     var path = ApiEndpoints.dandanAPIComment + episodeID.toString();
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
+    var endPoint = _domain + path;
     List<DanmakuEntry> danmakus = [];
     Map<String, String> withRelated = {
       'withRelated': 'true',

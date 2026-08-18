@@ -1,10 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:kazumi/request/core/bangumi_proxy_router.dart';
 import 'package:kazumi/request/core/dio_logger_interceptor.dart';
 import 'package:kazumi/request/core/network_config.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/http_headers.dart';
+
+/// BangumiClient 把重试序号写在 extra 里，拦截器按序号挑反代或官方原站。
+const String kBangumiProxyAttemptExtra = 'bangumiProxyAttempt';
 
 class DioFactory {
   DioFactory._();
@@ -88,17 +92,6 @@ class DioFactory {
 }
 
 class _BangumiMirrorInterceptor extends Interceptor {
-  /// 官方 host → 社区公共反代。
-  ///
-  /// 原先统一重写到 api.kazumi.fyi，但那个 mirror 需要 KAZUMI_APPID/KEY 签名，
-  /// 自建包拿不到密钥，导致搜索/评论/热门/时间表全部 403。
-  /// 这里改用无需鉴权的公共反代，并且按原始 host 分别映射
-  /// （两个反代的后端不同，不能混用）。
-  static const _hostProxies = <String, String>{
-    'api.bgm.tv': ApiEndpoints.bangumiApiProxyDomain,
-    'next.bgm.tv': ApiEndpoints.bangumiNextProxyDomain,
-  };
-
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final enableBangumiProxy =
@@ -109,16 +102,14 @@ class _BangumiMirrorInterceptor extends Interceptor {
     }
 
     final uri = options.uri;
-    final proxy = _hostProxies[uri.host];
-    if (proxy == null) {
+    final attempt = options.extra[kBangumiProxyAttemptExtra] as int? ?? 0;
+    final mirrored = BangumiProxyRouter.rewrite(uri, attempt: attempt);
+    if (mirrored == null) {
       handler.next(options);
       return;
     }
 
-    // path 与 query 原样保留，只替换域名
-    final mirrored =
-        proxy + uri.path + (uri.hasQuery ? '?${uri.query}' : '');
-    KazumiLogger().d('Bangumi proxy: $mirrored');
+    KazumiLogger().d('Bangumi proxy attempt $attempt: $mirrored');
     options.path = mirrored;
     handler.next(options);
   }

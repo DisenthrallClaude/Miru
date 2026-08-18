@@ -103,9 +103,12 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
         },
         child: OrientationBuilder(
           builder: (context, orientation) {
-            return orientation == Orientation.portrait
-                ? _bottomMenu(context, selectedIndex)
-                : _sideMenu(context, selectedIndex);
+            // 平板（最短边 >= 600）始终用侧栏，竖屏也不再挤一条底栏。
+            final useSideMenu = MediaQuery.sizeOf(context).shortestSide >= 600 ||
+                orientation == Orientation.landscape;
+            return useSideMenu
+                ? _sideMenu(context, selectedIndex)
+                : _bottomMenu(context, selectedIndex);
           },
         ),
       ),

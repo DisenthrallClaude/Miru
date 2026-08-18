@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:kazumi/services/storage/feed_cache.dart';
 import 'package:kazumi/request/config/featured_bangumi.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -83,6 +85,9 @@ abstract class _TimelineController with Store {
       isTimeOut = bangumiCalendar.every((innerList) => innerList.isEmpty);
       if (!isTimeOut) {
         changeSortType(sortType);
+        if (FeedCache.isCalendarStale) {
+          unawaited(_refreshCalendarInBackground(season));
+        }
         return;
       }
       // 缓存内容异常（全空）则回落到联网
@@ -91,20 +96,8 @@ abstract class _TimelineController with Store {
     isLoading = true;
     isTimeOut = false;
     bangumiCalendar.clear();
-    var time = 0;
-    const maxTime = 4;
-    const limit = 20;
-    var resBangumiCalendar = List.generate(7, (_) => <BangumiItem>[]);
-    for (time = 0; time < maxTime; time++) {
-      final offset = time * limit;
-      var newList = await BangumiApi.getCalendarBySearch(
-          AnimeSeason(selectedDate).toSeasonStartAndEnd(), limit, offset);
-      for (int i = 0; i < resBangumiCalendar.length; ++i) {
-        resBangumiCalendar[i].addAll(newList[i]);
-      }
-      bangumiCalendar.clear();
-      bangumiCalendar.addAll(resBangumiCalendar);
-    }
+    final resBangumiCalendar = await _fetchSeasonCalendar();
+    bangumiCalendar.addAll(resBangumiCalendar);
     isLoading = false;
     if (bangumiCalendar.isEmpty) {
       isTimeOut = true;
@@ -119,6 +112,55 @@ abstract class _TimelineController with Store {
         season,
       );
     }
+  }
+
+  bool _backgroundRefreshing = false;
+
+  /// 同季度缓存过期后的静默刷新：旧数据继续展示，新数据到了再替换。
+  Future<void> _refreshCalendarInBackground(String season) async {
+    if (_backgroundRefreshing) return;
+    _backgroundRefreshing = true;
+    try {
+      final resBangumiCalendar = await _fetchSeasonCalendar();
+      final empty =
+          resBangumiCalendar.every((innerList) => innerList.isEmpty);
+      if (empty) return;
+      if (AnimeSeason(selectedDate).toString() != season) return;
+      runInAction(() {
+        bangumiCalendar
+          ..clear()
+          ..addAll(resBangumiCalendar);
+      });
+      changeSortType(sortType);
+      await FeedCache.saveCalendar(
+        bangumiCalendar.map((e) => e.toList()).toList(),
+        season,
+      );
+    } finally {
+      _backgroundRefreshing = false;
+    }
+  }
+
+  /// 按页拉当季国漫，某一页空了就停，避免固定打满 4 次空请求。
+  Future<List<List<BangumiItem>>> _fetchSeasonCalendar() async {
+    const maxTime = 4;
+    const limit = 20;
+    final resBangumiCalendar = List.generate(7, (_) => <BangumiItem>[]);
+    for (var time = 0; time < maxTime; time++) {
+      final offset = time * limit;
+      final newList = await BangumiApi.getCalendarBySearch(
+        AnimeSeason(selectedDate).toSeasonStartAndEnd(),
+        limit,
+        offset,
+      );
+      var added = 0;
+      for (var i = 0; i < resBangumiCalendar.length; ++i) {
+        added += newList[i].length;
+        resBangumiCalendar[i].addAll(newList[i]);
+      }
+      if (added == 0) break;
+    }
+    return resBangumiCalendar;
   }
 
 

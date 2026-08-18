@@ -684,6 +684,14 @@ class _TimelinePageState extends State<TimelinePage>
         // 筛选原本是右下角 FAB，会被底部玻璃导航条挡住，移到顶栏
         actions: [
           IconButton(
+            tooltip: '刷新时间表',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () async {
+              KazumiDialog.showToast(message: '正在刷新时间表…', context: context);
+              await timelineController.getSchedulesBySeason(forceRefresh: true);
+            },
+          ),
+          IconButton(
             tooltip: '排序与筛选',
             icon: const Icon(Icons.tune_rounded),
             onPressed: () {

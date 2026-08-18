@@ -33,6 +33,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   late bool danmakuGamerSource;
   late bool danmakuDanDanSource;
   late bool danmakuFollowSpeed;
+  late String danmakuCustomApi;
 
   @override
   void initState() {
@@ -71,6 +72,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
         GStorage.getSetting<bool>(SettingsKeys.danmakuDanDanSource);
     danmakuFollowSpeed =
         GStorage.getSetting<bool>(SettingsKeys.danmakuFollowSpeed);
+    danmakuCustomApi = GStorage.getSetting<String>(SettingsKeys.danmakuCustomApi);
   }
 
   Future<void> resetDanmakuSettings() async {
@@ -148,6 +150,50 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     });
   }
 
+  Future<void> _editCustomApi() async {
+    final controller = TextEditingController(text: danmakuCustomApi);
+    final result = await KazumiDialog.show<String>(
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('自定义弹幕接口'),
+          content: TextField(
+            controller: controller,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              hintText: 'https://your-host/token',
+              helperText: '兼容弹弹play 协议，留空则使用官方接口',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: danmakuCustomApi),
+              child: Text(
+                '取消',
+                style: TextStyle(color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () => KazumiDialog.dismiss(popWith: ''),
+              child: const Text('清空'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  KazumiDialog.dismiss(popWith: controller.text.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (result == null || !mounted) return;
+    await GStorage.putSetting(SettingsKeys.danmakuCustomApi, result);
+    setState(() => danmakuCustomApi = result);
+    KazumiDialog.showToast(
+      message: result.isEmpty ? '已恢复官方弹幕接口' : '已保存自定义弹幕接口',
+    );
+  }
+
   void updateDanmakuBorderSize(double i) async {
     await GStorage.putSetting<double>(SettingsKeys.danmakuBorderSize, i);
     setState(() {
@@ -166,6 +212,25 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
         title: const Text('弹幕设置'),
         body: SettingsList(
           sections: [
+            SettingsSection(
+              title: Text('弹幕接口'),
+              bottomInfo: Text(
+                '自建包没有弹弹play 签名密钥，官方接口通常拉不到弹幕。'
+                '可填写兼容弹弹play /api/v2 协议的服务地址，例如自建 danmu_api。',
+              ),
+              tiles: [
+                SettingsTile(
+                  leading: Icons.dns_rounded,
+                  onPressed: (_) => _editCustomApi(),
+                  title: Text('自定义弹幕接口'),
+                  description: Text(
+                    danmakuCustomApi.isEmpty
+                        ? '未设置，将走官方接口（自建包通常不可用）'
+                        : danmakuCustomApi,
+                  ),
+                ),
+              ],
+            ),
             SettingsSection(
               title: Text('弹幕来源'),
               tiles: [

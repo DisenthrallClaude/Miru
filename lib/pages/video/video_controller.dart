@@ -12,6 +12,8 @@ import 'package:kazumi/repositories/download_repository.dart';
 import 'package:kazumi/services/download/download_manager.dart';
 import 'package:kazumi/services/video_source/services.dart';
 import 'package:mobx/mobx.dart';
+import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:kazumi/pages/video/playback_road_fallback.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:kazumi/modules/bangumi/episode_item.dart';
@@ -470,6 +472,15 @@ abstract class _VideoPageController with Store implements Disposable {
       resolvedEpisode: resolvedEpisode,
       session: session,
       playerController: playerController,
+      allowRoadFallback: true,
+    );
+  }
+
+  int? findNextRoadWithEpisode(int episode, {int? exceptRoad}) {
+    return PlaybackRoadFallback.firstAlternate(
+      currentRoad: exceptRoad ?? selectedEpisode.road,
+      roadCount: roadList.length,
+      hasEpisode: (road) => _resolveOnlineEpisode(episode, road: road) != null,
     );
   }
 
@@ -593,6 +604,7 @@ abstract class _VideoPageController with Store implements Disposable {
     required EpisodeRef resolvedEpisode,
     required AsyncSession session,
     required PlayerController playerController,
+    bool allowRoadFallback = false,
   }) async {
     _videoSourceService ??= WebViewVideoSourceService();
 
@@ -613,64 +625,147 @@ abstract class _VideoPageController with Store implements Disposable {
       if (session.isStale) {
         return;
       }
-      _finishLoading();
-      KazumiLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
-
-      final bool forceAdBlocker =
-          GStorage.getSetting(SettingsKeys.forceAdBlocker);
-
-      final params = PlaybackInitParams(
-        videoUrl: source.url,
-        offset: source.offset,
-        isLocalPlayback: false,
-        videoSourceFormat: source.format,
-        bangumiId: bangumiItem.id,
-        pluginName: currentPlugin.name,
-        episode: resolvedEpisode.listIndex,
-        danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
-        pageUrl: resolvedEpisode.pageUrl,
-        sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: {
-          'user-agent': currentPlugin.userAgent.isEmpty
-              ? getRandomUA()
-              : currentPlugin.userAgent,
-          if (currentPlugin.referer.isNotEmpty)
-            'referer': currentPlugin.referer,
-        },
-        adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
-        episodeTitle: resolvedEpisode.displayTitle,
-        referer: currentPlugin.referer,
-        currentRoad: resolvedEpisode.roadIndex,
-        coverUrl: bangumiItem.images['large'],
-        bangumiName: bangumiItem.nameCn.isNotEmpty
-            ? bangumiItem.nameCn
-            : bangumiItem.name,
+      await _startOnlinePlayback(
+        source: source,
+        resolvedEpisode: resolvedEpisode,
+        session: session,
+        playerController: playerController,
       );
-
-      final initialized = await playerController.init(params);
-      if (session.isActive && initialized) {
-        playingEpisode = VideoEpisodeSelection(
-          episode: resolvedEpisode.listIndex,
-          road: resolvedEpisode.roadIndex,
-        );
-        unawaited(_loadPlaybackDanmaku(playerController, params, session));
-      } else if (session.isActive) {
-        _playbackSessions.cancel();
-      }
-    } on VideoSourceTimeoutException {
-      if (session.isStale) {
-        return;
-      }
-      _failLoading('视频解析超时，请重试');
     } on VideoSourceCancelledException {
       KazumiLogger().i('VideoPageController: video URL resolution cancelled');
     } catch (e) {
       if (session.isStale) {
         return;
       }
-      _failLoading('视频解析失败：${e.toString()}');
+      final autoSwitch =
+          GStorage.getSetting(SettingsKeys.autoSwitchPlaybackRoad);
+      if (allowRoadFallback &&
+          autoSwitch &&
+          await _tryAlternateRoads(
+            episode: resolvedEpisode.listIndex,
+            currentRoad: resolvedEpisode.roadIndex,
+            offset: offset,
+            session: session,
+            playerController: playerController,
+          )) {
+        return;
+      }
+      if (session.isStale) {
+        return;
+      }
+      if (e is VideoSourceTimeoutException) {
+        _failLoading('视频解析超时。可点重试，或换一条播放线路。');
+      } else {
+        _failLoading('视频解析失败。站点可能改版，试试其他线路或换个播放源。');
+      }
     }
+  }
+
+  Future<void> _startOnlinePlayback({
+    required VideoSource source,
+    required EpisodeRef resolvedEpisode,
+    required AsyncSession session,
+    required PlayerController playerController,
+  }) async {
+    _finishLoading();
+    KazumiLogger()
+        .i('VideoPageController: resolved video URL: ${source.url}');
+
+    final bool forceAdBlocker =
+        GStorage.getSetting(SettingsKeys.forceAdBlocker);
+
+    final params = PlaybackInitParams(
+      videoUrl: source.url,
+      offset: source.offset,
+      isLocalPlayback: false,
+      videoSourceFormat: source.format,
+      bangumiId: bangumiItem.id,
+      pluginName: currentPlugin.name,
+      episode: resolvedEpisode.listIndex,
+      danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
+      pageUrl: resolvedEpisode.pageUrl,
+      sortNumber: resolvedEpisode.sortNumber,
+      httpHeaders: {
+        'user-agent': currentPlugin.userAgent.isEmpty
+            ? getRandomUA()
+            : currentPlugin.userAgent,
+        if (currentPlugin.referer.isNotEmpty) 'referer': currentPlugin.referer,
+      },
+      adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
+      episodeTitle: resolvedEpisode.displayTitle,
+      referer: currentPlugin.referer,
+      currentRoad: resolvedEpisode.roadIndex,
+      coverUrl: bangumiItem.images['large'],
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
+    );
+
+    final initialized = await playerController.init(params);
+    if (session.isActive && initialized) {
+      playingEpisode = VideoEpisodeSelection(
+        episode: resolvedEpisode.listIndex,
+        road: resolvedEpisode.roadIndex,
+      );
+      unawaited(_loadPlaybackDanmaku(playerController, params, session));
+    } else if (session.isActive) {
+      _playbackSessions.cancel();
+    }
+  }
+
+  Future<bool> _tryAlternateRoads({
+    required int episode,
+    required int currentRoad,
+    required int offset,
+    required AsyncSession session,
+    required PlayerController playerController,
+  }) async {
+    final candidates = PlaybackRoadFallback.nextRoads(
+      currentRoad: currentRoad,
+      roadCount: roadList.length,
+      hasEpisode: (road) => _resolveOnlineEpisode(episode, road: road) != null,
+    );
+    for (final road in candidates) {
+      if (session.isStale) return false;
+      final resolvedEpisode = _resolveOnlineEpisode(episode, road: road);
+      if (resolvedEpisode == null) continue;
+      KazumiLogger().i(
+          'VideoPageController: current road failed, trying ${roadList[road].name}');
+      try {
+        _applyResolvedSelection(resolvedEpisode);
+        _setOnlineHistoryIdentity(resolvedEpisode);
+        final urlItem = normalizeEpisodeUrl(
+          currentPlugin.baseUrl,
+          resolvedEpisode.pageUrl,
+        );
+        final source = await _videoSourceService!.resolve(
+          urlItem,
+          useLegacyParser: currentPlugin.useLegacyParser,
+          offset: offset,
+        );
+        if (session.isStale) return false;
+        await _startOnlinePlayback(
+          source: source,
+          resolvedEpisode: resolvedEpisode,
+          session: session,
+          playerController: playerController,
+        );
+        if (session.isActive) {
+          KazumiDialog.showToast(
+            message: '当前线路失败，已自动切换到 ${roadList[road].name}',
+          );
+          return true;
+        }
+      } on VideoSourceCancelledException {
+        return false;
+      } catch (e) {
+        KazumiLogger().w(
+          'VideoPageController: alternate road $road also failed',
+          error: e,
+        );
+      }
+    }
+    return false;
   }
 
   void _resetEpisodeComments() {

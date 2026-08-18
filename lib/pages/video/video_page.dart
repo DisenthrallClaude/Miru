@@ -579,7 +579,10 @@ class _VideoPageState extends State<VideoPage>
         onBackPressed(context);
       },
       child: OrientationBuilder(builder: (context, orientation) {
-        if (!isDesktop()) {
+        // 手机横屏才自动进全屏。平板最短边 >= 600，横屏应保留侧栏选集，
+        // 否则「横屏 / 平板适配不完整」会直接把选集菜单藏掉。
+        final isPhone = MediaQuery.sizeOf(context).shortestSide < 600;
+        if (!isDesktop() && isPhone) {
           if (orientation == Orientation.landscape &&
               !videoPageController.isFullscreen) {
             _hideTabBodyImmediately();
@@ -721,6 +724,55 @@ class _VideoPageState extends State<VideoPage>
                                         color: Colors.white, fontSize: 16),
                                     textAlign: TextAlign.center,
                                   ),
+                                ),
+                                const SizedBox(height: 20),
+                                Wrap(
+                                  spacing: 12,
+                                  runSpacing: 8,
+                                  alignment: WrapAlignment.center,
+                                  children: [
+                                    FilledButton.tonal(
+                                      onPressed: () {
+                                        changeEpisode(
+                                          videoPageController
+                                              .selectedEpisode.episode,
+                                          currentRoad: videoPageController
+                                              .selectedEpisode.road,
+                                        );
+                                      },
+                                      child: const Text('重试当前线路'),
+                                    ),
+                                    if (videoPageController
+                                            .findNextRoadWithEpisode(
+                                          videoPageController
+                                              .selectedEpisode.episode,
+                                        ) !=
+                                        null)
+                                      FilledButton(
+                                        onPressed: () {
+                                          final next = videoPageController
+                                              .findNextRoadWithEpisode(
+                                            videoPageController
+                                                .selectedEpisode.episode,
+                                          );
+                                          if (next == null) return;
+                                          setState(() => visibleRoad = next);
+                                          changeEpisode(
+                                            videoPageController
+                                                .selectedEpisode.episode,
+                                            currentRoad: next,
+                                          );
+                                        },
+                                        child: const Text('换一条线路'),
+                                      ),
+                                    TextButton(
+                                      onPressed: () => onBackPressed(context),
+                                      child: const Text(
+                                        '返回换源',
+                                        style: TextStyle(color: Colors.white70),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             )

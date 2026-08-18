@@ -110,7 +110,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                     }
                   },
                   title: Text('Bangumi 镜像'),
-                  description: Text('使用本地 Bangumi 缓存后端加载热门与分类榜单'),
+                  description: Text('走社区反代访问 Bangumi；反代失败会自动回落官方接口'),
                   initialValue: enableBangumiProxy,
                 ),
                 SettingsTile.switchTile(
