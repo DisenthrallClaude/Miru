@@ -220,9 +220,9 @@ void main() {
   setUpAll(_loadSerif);
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
-    final name = brightness == Brightness.light ? 'light' : 'dark';
+    final label = brightness == Brightness.light ? 'light' : 'dark';
 
-    testWidgets('design system preview – $name', (tester) async {
+    testWidgets('design system preview – $label', (tester) async {
       tester.view.physicalSize = const Size(1170, 2300);
       tester.view.devicePixelRatio = 3.0;
       addTearDown(tester.view.reset);

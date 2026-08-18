@@ -15,7 +15,7 @@ abstract final class DanmakuApiConfig {
   static String resolveBaseUrl(String custom) {
     var value = custom.trim();
     if (value.isEmpty) {
-      return ApiEndpoints.dandanAPIDomain;
+      return officialDomain;
     }
     if (!value.startsWith('http://') && !value.startsWith('https://')) {
       value = 'https://$value';
