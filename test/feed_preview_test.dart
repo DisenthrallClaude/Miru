@@ -115,9 +115,9 @@ void main() {
   ];
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
-    final name = brightness == Brightness.light ? 'light' : 'dark';
+    final label = brightness == Brightness.light ? 'light' : 'dark';
 
-    testWidgets('feed layout preview – $name', (tester) async {
+    testWidgets('feed layout preview – $label', (tester) async {
       tester.view.physicalSize = const Size(1170, 2100);
       tester.view.devicePixelRatio = 3.0;
       addTearDown(tester.view.reset);
