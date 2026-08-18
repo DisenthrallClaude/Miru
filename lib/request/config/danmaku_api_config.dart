@@ -1,5 +1,3 @@
-import 'package:kazumi/request/config/api_endpoints.dart';
-
 /// 弹幕接口基址解析。
 ///
 /// 自建包没有弹弹play 签名密钥，官方 `api.dandanplay.net` 会 401。
@@ -8,6 +6,7 @@ import 'package:kazumi/request/config/api_endpoints.dart';
 /// 填了之后请求不再附带空签名头。
 abstract final class DanmakuApiConfig {
   static const officialHost = 'api.dandanplay.net';
+  static const officialDomain = 'https://$officialHost';
 
   /// 把用户输入整理成可拼接 `/api/v2/...` 的基址。
   ///
