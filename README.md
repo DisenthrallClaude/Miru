@@ -22,16 +22,38 @@ Miru 基于开源项目 [Kazumi](https://github.com/Predidit/Kazumi) 修改而�
 
 原项目是一个通用的番剧采集与在线观看程序。Miru 在它的基础上做了两件事：**把内容面向国漫收敛**，以及**把界面整个重做一遍**。
 
-**只提供 Android 版本。** 其他平台的代码虽然还在仓库里，但不做适配、不做测试、不提供构建。
+**只提供 Android 版本。** 本仓库已移除 iOS、Web、Windows、Linux、macOS 等其他平台的源码与构建配置，仅保留 Android 相关的内容，不再提供其他平台的构建。
 
 ## 截图
 
 <div align="center">
+<b>首页 · 时间表 · 设置</b><br/>
 <img src="docs/screenshots/home.png" width="30%"></img>
 &nbsp;
 <img src="docs/screenshots/timeline.png" width="30%"></img>
 &nbsp;
 <img src="docs/screenshots/settings.png" width="30%"></img>
+</div>
+
+<div align="center">
+<b>实拍 · 推荐页 · 番剧详情 · 播放源规则管理</b><br/>
+<img src="docs/screenshots/miru/recommend.png" width="30%"></img>
+&nbsp;
+<img src="docs/screenshots/miru/detail.png" width="30%"></img>
+&nbsp;
+<img src="docs/screenshots/miru/rules.png" width="30%"></img>
+</div>
+
+<div align="center">
+<b>实拍 · 选集（播放线路）· 播放器菜单</b><br/>
+<img src="docs/screenshots/miru/episodes.png" width="30%"></img>
+&nbsp;
+<img src="docs/screenshots/miru/player_menu.png" width="30%"></img>
+</div>
+
+<div align="center">
+<b>实拍 · 播放器（横屏 / 超分辨率）</b><br/>
+<img src="docs/screenshots/miru/player_superres.png" width="45%"></img>
 </div>
 
 ## 改了什么
@@ -84,6 +106,28 @@ Miru 改用无需鉴权的社区公共反代：
 - **部分番剧播放失败**。播放依赖第三方站点的采集规则，站点改版规则就会失效，表现为「播放器内部错误」。可以换个数据源试试。
 - 只在少数机型上测过，兼容性未知。
 - 界面在横屏与平板上的适配不完整。
+
+## 常见问题与解决方法
+
+Miru 继承自 [Kazumi](https://github.com/Predidit/Kazumi)，很多麻烦其实来自「规则 / 播放源」这套第三方生态，而不是 App 本身。站点一改版、规则一失效，就会出现「某部番放不了」。遇到时按下面的顺序排查：
+
+### 播放失败 / 提示「播放器内部错误」
+
+1. **多刷新几遍。** 规则和搜索结果大多是动态拉取的，网络抖动或源临时抽风时，多刷几次往往就能恢复。
+2. **切换播放源 / 线路。** 同一部番通常有多个播放源（选集页的「播放线路」），这个源打不开就换下一个，命中率会高很多。
+3. **更新或重建规则。** 在「规则」页找到对应站点，删除后重新添加，让 App 重新拉取该站点的最新规则。
+4. **自己去找规则配置。** 社区维护的规则合集（Kazumi 生态的规则地址）有很多，在 App 里「添加规则」粘贴规则地址即可接入更多播放源。规则装得越多、可用性越高，一个失效就换另一个。
+
+### 搜索 / 推荐 / 时间表打不开
+
+列表数据走 Bangumi 官方 API 的社区反代（见上文「网络」一节）。反代是个人维护的公共资源，可能限流或停服：
+
+- 先多刷新几遍；
+- 若长期打不开，去 `lib/request/config/api_endpoints.dart` 换一个反代域名即可。
+
+### 弹幕不显示
+
+弹幕依赖[弹弹play](https://www.dandanplay.com/)的签名密钥，自建包拿不到密钥，因此弹幕功能不可用（详见上文「已知问题」）。
 
 ## 反馈
 
