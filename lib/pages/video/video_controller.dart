@@ -603,73 +603,108 @@ abstract class _VideoPageController with Store implements Disposable {
       }
     });
 
-    try {
-      final source = await _videoSourceService!.resolve(
-        url,
-        useLegacyParser: currentPlugin.useLegacyParser,
-        offset: offset,
-      );
-
-      if (session.isStale) {
-        return;
-      }
-      _finishLoading();
-      KazumiLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
-
-      final bool forceAdBlocker =
-          GStorage.getSetting(SettingsKeys.forceAdBlocker);
-
-      final params = PlaybackInitParams(
-        videoUrl: source.url,
-        offset: source.offset,
-        isLocalPlayback: false,
-        videoSourceFormat: source.format,
-        bangumiId: bangumiItem.id,
-        pluginName: currentPlugin.name,
-        episode: resolvedEpisode.listIndex,
-        danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
-        pageUrl: resolvedEpisode.pageUrl,
-        sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: {
-          'user-agent': currentPlugin.userAgent.isEmpty
-              ? getRandomUA()
-              : currentPlugin.userAgent,
-          if (currentPlugin.referer.isNotEmpty)
-            'referer': currentPlugin.referer,
-        },
-        adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
-        episodeTitle: resolvedEpisode.displayTitle,
-        referer: currentPlugin.referer,
-        currentRoad: resolvedEpisode.roadIndex,
-        coverUrl: bangumiItem.images['large'],
-        bangumiName: bangumiItem.nameCn.isNotEmpty
-            ? bangumiItem.nameCn
-            : bangumiItem.name,
-      );
-
-      final initialized = await playerController.init(params);
-      if (session.isActive && initialized) {
-        playingEpisode = VideoEpisodeSelection(
-          episode: resolvedEpisode.listIndex,
-          road: resolvedEpisode.roadIndex,
+    // 嗅探本身容易受瞬时网络抖动影响，超时先自动重试一次再判失败。
+    const maxSniffAttempts = 2;
+    VideoSource? source;
+    for (var attempt = 1; attempt <= maxSniffAttempts; attempt++) {
+      try {
+        source = await _videoSourceService!.resolve(
+          url,
+          useLegacyParser: currentPlugin.useLegacyParser,
+          offset: offset,
         );
-        unawaited(_loadPlaybackDanmaku(playerController, params, session));
-      } else if (session.isActive) {
-        _playbackSessions.cancel();
-      }
-    } on VideoSourceTimeoutException {
-      if (session.isStale) {
+        break;
+      } on VideoSourceCancelledException {
+        KazumiLogger().i('VideoPageController: video URL resolution cancelled');
+        return;
+      } on VideoSourceTimeoutException catch (e) {
+        if (session.isStale) {
+          return;
+        }
+        if (attempt < maxSniffAttempts) {
+          KazumiLogger().w(
+              'VideoPageController: sniff timed out (${e.timeout.inSeconds}s), retrying $attempt/$maxSniffAttempts. url=$url');
+          continue;
+        }
+        KazumiLogger().e(
+            'VideoPageController: sniff timed out after $maxSniffAttempts attempts. url=$url');
+        _failLoading(
+            '解析超时（已重试 $maxSniffAttempts 次）：上游网站没有在 ${e.timeout.inSeconds} 秒内返回视频地址。'
+            '多为网络较慢或该站点当前不可达，可稍后重试、换一条播放线路，或换一个播放源。');
+        return;
+      } on VideoSourceNotFoundException catch (e) {
+        if (session.isStale) {
+          return;
+        }
+        KazumiLogger()
+            .e('VideoPageController: video source not found. url=$url', error: e);
+        _failLoading(
+            '页面里找不到视频地址：该播放源的规则很可能已经失效（上游网站改版），或这一集本身没有资源。'
+            '建议换一条播放线路/播放源，并在「规则管理」里更新规则。');
+        return;
+      } catch (e) {
+        if (session.isStale) {
+          return;
+        }
+        KazumiLogger()
+            .e('VideoPageController: sniff failed. url=$url', error: e);
+        _failLoading('视频解析失败：$e');
         return;
       }
-      _failLoading('视频解析超时，请重试');
-    } on VideoSourceCancelledException {
-      KazumiLogger().i('VideoPageController: video URL resolution cancelled');
-    } catch (e) {
-      if (session.isStale) {
-        return;
-      }
-      _failLoading('视频解析失败：${e.toString()}');
+    }
+
+    if (source == null || session.isStale) {
+      return;
+    }
+    _finishLoading();
+    KazumiLogger().i('VideoPageController: resolved video URL: ${source.url}');
+
+    final bool forceAdBlocker =
+        GStorage.getSetting(SettingsKeys.forceAdBlocker);
+
+    final params = PlaybackInitParams(
+      videoUrl: source.url,
+      offset: source.offset,
+      isLocalPlayback: false,
+      videoSourceFormat: source.format,
+      bangumiId: bangumiItem.id,
+      pluginName: currentPlugin.name,
+      episode: resolvedEpisode.listIndex,
+      danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
+      pageUrl: resolvedEpisode.pageUrl,
+      sortNumber: resolvedEpisode.sortNumber,
+      httpHeaders: {
+        'user-agent': currentPlugin.userAgent.isEmpty
+            ? getRandomUA()
+            : currentPlugin.userAgent,
+        if (currentPlugin.referer.isNotEmpty) 'referer': currentPlugin.referer,
+      },
+      adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
+      episodeTitle: resolvedEpisode.displayTitle,
+      referer: currentPlugin.referer,
+      currentRoad: resolvedEpisode.roadIndex,
+      coverUrl: bangumiItem.images['large'],
+      bangumiName: bangumiItem.nameCn.isNotEmpty
+          ? bangumiItem.nameCn
+          : bangumiItem.name,
+    );
+
+    final initialized = await playerController.init(params);
+    if (session.isActive && initialized) {
+      playingEpisode = VideoEpisodeSelection(
+        episode: resolvedEpisode.listIndex,
+        road: resolvedEpisode.roadIndex,
+      );
+      unawaited(_loadPlaybackDanmaku(playerController, params, session));
+    } else if (session.isActive) {
+      // 地址嗅探成功但播放器起不来：问题出在拿到的地址本身（已失效 / 需要
+      // 特殊 referer / 格式不支持），而不是规则匹配。单独提示以便区分。
+      KazumiLogger().e(
+          'VideoPageController: player failed to init. videoUrl=${source.url}');
+      _playbackSessions.cancel();
+      _failLoading(
+          '已拿到视频地址但播放器无法播放：地址可能已失效、需要特殊访问头，或格式不受支持。'
+          '可换一条播放线路/播放源重试。');
     }
   }
 
