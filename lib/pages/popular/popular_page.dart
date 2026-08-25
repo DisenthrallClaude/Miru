@@ -1,22 +1,22 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
-import 'package:kazumi/bean/widget/custom_dropdown_menu.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/pages/popular/popular_controller.dart';
-import 'package:kazumi/bean/card/bangumi_feed_card.dart';
-import 'package:kazumi/bean/card/bangumi_hero_carousel.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/theme.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/bangumi_mirror_error_widget.dart';
+import 'package:miru/bean/widget/custom_dropdown_menu.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/popular/popular_controller.dart';
+import 'package:miru/bean/card/bangumi_feed_card.dart';
+import 'package:miru/bean/card/bangumi_hero_carousel.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:miru/utils/device.dart';
 
 class PopularPage extends StatefulWidget {
   const PopularPage({
@@ -117,7 +117,7 @@ class _PopularPageState extends State<PopularPage> {
     if (scrollController.position.pixels >=
             scrollController.position.maxScrollExtent - 200 &&
         !popularController.isLoadingMore) {
-      KazumiLogger()
+      MiruLogger()
           .i('PopularPageController: Fetching next recommendation batch');
       if (popularController.currentTag != '') {
         popularController.queryBangumiByTag();
@@ -252,10 +252,15 @@ class _PopularPageState extends State<PopularPage> {
 
   Widget buildSliverAppBar() {
     final theme = Theme.of(context);
+    // 展开高度 = 工具栏 + 状态栏 + 固定的标题富余区。
+    // 之前写死 120dp：状态栏较高的设备（挖孔屏/大字体）上
+    // SafeArea 吃掉大半高度，标题与右侧按钮被挤进工具栏里互相遮挡。
+    final double topInset = MediaQuery.paddingOf(context).top;
+    final double expandedHeight = kToolbarHeight + topInset + 52;
     return SliverAppBar(
       pinned: true,
       stretch: true,
-      expandedHeight: 120,
+      expandedHeight: expandedHeight,
       elevation: 0,
       titleSpacing: 0,
       centerTitle: false,
@@ -268,8 +273,7 @@ class _PopularPageState extends State<PopularPage> {
           child: dtb.DragToMoveArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final double maxExtent =
-                    120 - MediaQuery.of(context).padding.top;
+                final double maxExtent = expandedHeight - topInset;
                 final t = (1 -
                     ((constraints.maxHeight - kToolbarHeight) /
                             (maxExtent - kToolbarHeight))
@@ -339,7 +343,7 @@ class _PopularPageState extends State<PopularPage> {
       IconButton(
         tooltip: '刷新推荐',
         onPressed: () async {
-          KazumiDialog.showToast(message: '正在刷新推荐…', context: context);
+          MiruDialog.showToast(message: '正在刷新推荐…', context: context);
           await popularController.refresh();
         },
         icon: const Icon(Icons.refresh_rounded),

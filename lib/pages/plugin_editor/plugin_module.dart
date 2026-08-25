@@ -1,11 +1,11 @@
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_editor_page.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_shop_page.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_test_page.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_view_page.dart';
-import 'package:kazumi/pages/route_error_page.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
+import 'package:miru/pages/plugin_editor/plugin_editor_page.dart';
+import 'package:miru/pages/plugin_editor/plugin_shop_page.dart';
+import 'package:miru/pages/plugin_editor/plugin_test_page.dart';
+import 'package:miru/pages/plugin_editor/plugin_view_page.dart';
+import 'package:miru/pages/route_error_page.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/plugins_controller.dart';
 
 final pluginModule = createModule(
   path: '/plugin',

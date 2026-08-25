@@ -1,6 +1,6 @@
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/repositories/history_repository.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/repositories/history_repository.dart';
 import 'package:mobx/mobx.dart';
 
 part 'history_controller.g.dart';
@@ -31,7 +31,31 @@ abstract class _HistoryController with Store {
       progress: progress,
       duration: duration,
     );
-    init();
+    // 播放期间每秒都会走到这里：绝不能 init() 全量重建列表
+    // （那是整表扫描 + O(n) 重建）。按 key 单条取回后就地替换，
+    // ObservableList 只通知这一项的变化。
+    final updated = _historyRepository.getHistory(
+      identity.pluginName,
+      identity.bangumiItem,
+      entryKind: identity.entryKind,
+    );
+    if (updated == null) {
+      return;
+    }
+    final index = histories.indexWhere(
+      (h) =>
+          h.key == updated.key ||
+          (h.adapterName == identity.pluginName &&
+              h.bangumiItem.id == identity.bangumiItem.id &&
+              HistoryEntryKind.normalize(h.entryKind) ==
+                  HistoryEntryKind.normalize(identity.entryKind)),
+    );
+    if (index == -1) {
+      // 首次观看产生的新记录：插入到列表头部（历史页按时间倒序）。
+      histories.insert(0, updated);
+      return;
+    }
+    histories[index] = updated;
   }
 
   Progress? lastWatching(

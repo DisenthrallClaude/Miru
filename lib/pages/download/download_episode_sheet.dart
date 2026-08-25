@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/roads/road_module.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/roads/road_module.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/pages/video/video_controller.dart';
+import 'package:miru/utils/theme.dart';
 
 class DownloadEpisodeSheet extends StatefulWidget {
   final int road;
@@ -117,10 +119,7 @@ class _DownloadEpisodeSheetState extends State<DownloadEpisodeSheet> {
                 top: false,
                 child: Row(
                   children: [
-                    FilledButton.tonalIcon(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                      ),
+                    _GlassSheetButton(
                       onPressed: selectableEpisodes.isEmpty
                           ? null
                           : () {
@@ -145,10 +144,9 @@ class _DownloadEpisodeSheetState extends State<DownloadEpisodeSheet> {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
+                      child: _GlassSheetButton(
+                        expand: true,
+                        tinted: true,
                         onPressed: _selectedEpisodes.isEmpty
                             ? null
                             : () => _startBatchDownload(context),
@@ -194,7 +192,7 @@ class _DownloadEpisodeSheetState extends State<DownloadEpisodeSheet> {
       );
     }
 
-    KazumiDialog.showToast(
+    MiruDialog.showToast(
       message: '已添加 ${sortedEpisodes.length} 集到下载队列，可在下载管理中查看',
     );
   }
@@ -284,6 +282,74 @@ class _EpisodeTile extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 选集弹层底部的液态玻璃按钮：替代实心 FilledButton，
+/// 与弹层的玻璃框架保持同一材质语言。
+class _GlassSheetButton extends StatelessWidget {
+  const _GlassSheetButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    this.expand = false,
+    this.tinted = false,
+  });
+
+  final VoidCallback? onPressed;
+  final Widget icon;
+  final Widget label;
+  final bool expand;
+  final bool tinted;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = onPressed != null;
+    final radius = BorderRadius.circular(Radii.pill);
+
+    Widget content = Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconTheme.merge(
+              data: IconThemeData(
+                size: 20,
+                color: tinted ? scheme.primary : scheme.onSurface,
+              ),
+              child: icon,
+            ),
+            const SizedBox(width: Space.sm),
+            DefaultTextStyle.merge(
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: tinted ? scheme.primary : scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+              child: label,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (expand) content = SizedBox(height: 48, child: Center(child: content));
+
+    return FrostedSurface(
+      borderRadius: radius,
+      tint: tinted ? scheme.primary.withValues(alpha: 0.10) : null,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onPressed,
+          child: content,
         ),
       ),
     );

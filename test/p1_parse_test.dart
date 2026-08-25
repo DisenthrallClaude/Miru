@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
 
 void main() {
   test('p1 (next 反代) 响应能正确解析出封面', () {

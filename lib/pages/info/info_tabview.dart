@@ -1,21 +1,21 @@
-import 'package:kazumi/bean/widget/glass.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/widget/glass.dart';
+import 'package:miru/utils/theme.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/widget/error_widget.dart';
-import 'package:kazumi/bean/card/comments_card.dart';
-import 'package:kazumi/bean/card/character_card.dart';
-import 'package:kazumi/bean/card/staff_card.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
+import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/bean/card/comments_card.dart';
+import 'package:miru/bean/card/character_card.dart';
+import 'package:miru/bean/card/staff_card.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
 import 'package:skeletonizer/skeletonizer.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_relation.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/modules/characters/character_item.dart';
-import 'package:kazumi/modules/staff/staff_item.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_relation.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/modules/characters/character_item.dart';
+import 'package:miru/modules/staff/staff_item.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/device.dart';
 
 class InfoTabView extends StatefulWidget {
   const InfoTabView({
@@ -267,15 +267,23 @@ class _InfoTabViewState extends State<InfoTabView>
                         .toDouble();
                 final contentWidth =
                     constraints.crossAxisExtent - horizontalPadding * 2;
+                // 竖版海报网格：与推荐页同语言，封面统一 9:16。
                 final crossAxisCount = contentWidth >= 840
-                    ? 3
+                    ? 6
                     : contentWidth >= 560
-                        ? 2
-                        : 1;
+                        ? 4
+                        : 3;
                 final showSkeleton =
                     !widget.relationsHasLoaded || widget.relationsIsLoading;
                 final itemCount =
                     showSkeleton ? crossAxisCount : widget.relationList.length;
+
+                const cardSpace = StyleString.cardSpace;
+                final cardWidth =
+                    (contentWidth - cardSpace * (crossAxisCount - 1)) /
+                        crossAxisCount;
+                // 封面 9:16（宽/高比 0.5625）+ 标题与关联标签两行富余。
+                final mainAxisExtent = cardWidth / 0.5625 + 48;
 
                 return SliverPadding(
                   padding: EdgeInsets.fromLTRB(
@@ -287,9 +295,9 @@ class _InfoTabViewState extends State<InfoTabView>
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
-                      mainAxisSpacing: StyleString.cardSpace,
-                      crossAxisSpacing: StyleString.cardSpace,
-                      mainAxisExtent: _RelatedBangumiCardH.cardHeight,
+                      mainAxisSpacing: cardSpace,
+                      crossAxisSpacing: cardSpace,
+                      mainAxisExtent: mainAxisExtent,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
@@ -297,16 +305,30 @@ class _InfoTabViewState extends State<InfoTabView>
                           return LayoutBuilder(
                             builder: (context, constraints) {
                               return Skeletonizer.zone(
-                                child: Bone(
-                                  width: constraints.maxWidth,
-                                  height: _RelatedBangumiCardH.cardHeight,
-                                  uniRadius: 14,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Bone(
+                                      width: constraints.maxWidth,
+                                      height: constraints.maxWidth / 0.5625,
+                                      uniRadius: 14,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Bone.text(
+                                        fontSize: 13,
+                                        width: constraints.maxWidth * 0.86,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               );
                             },
                           );
                         }
-                        return _RelatedBangumiCardH(
+                        return _RelatedBangumiCardV(
                           relation: widget.relationList[index],
                         );
                       },
@@ -704,12 +726,11 @@ class _InfoTabViewState extends State<InfoTabView>
   }
 }
 
-class _RelatedBangumiCardH extends StatelessWidget {
-  const _RelatedBangumiCardH({required this.relation});
+/// 关联条目竖版海报卡（9:16 封面 + 标题 + 关联标签）。
+class _RelatedBangumiCardV extends StatelessWidget {
+  const _RelatedBangumiCardV({required this.relation});
 
-  static const double cardHeight = 108;
-  static const double imageHeight = 92;
-  static const double posterAspectRatio = 0.65;
+  static const double posterAspectRatio = 0.5625;
 
   final BangumiRelation relation;
 
@@ -725,83 +746,56 @@ class _RelatedBangumiCardH extends StatelessWidget {
         ? bangumiItem.name.trim()
         : bangumiItem.nameCn.trim();
 
-    return Card(
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      color: colorScheme.surfaceContainerLow,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: InkWell(
-        onTap: () {
-          context.pushNamed('/info/', arguments: bangumiItem);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final gap = constraints.maxWidth.clamp(0.0, 10.0).toDouble();
-              final maxImageWidth =
-                  (constraints.maxWidth - gap).clamp(0.0, 152.0);
-              final imageWidth = (constraints.maxWidth * 0.42)
-                  .clamp(0.0, maxImageWidth)
-                  .toDouble();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final imageHeight = constraints.maxWidth / posterAspectRatio;
 
-              return Row(
-                children: [
-                  Hero(
-                    transitionOnUserGestures: true,
-                    flightShuttleBuilder:
-                        NetworkImgLayer.heroFlightShuttleBuilder,
-                    tag: bangumiItem.id,
-                    child: NetworkImgLayer(
-                      src: bangumiItem.images['large'] ?? '',
-                      width: imageWidth,
-                      height: imageHeight,
-                      origAspectRatio: posterAspectRatio,
-                    ),
-                  ),
-                  SizedBox(width: gap),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.topLeft,
-                            child: Text(
-                              title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              textScaler: textScaler,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                color: colorScheme.onSurface,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          relationLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textScaler: textScaler,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
+        return InkWell(
+          onTap: () {
+            context.pushNamed('/info/', arguments: bangumiItem);
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Hero(
+                transitionOnUserGestures: true,
+                flightShuttleBuilder:
+                    NetworkImgLayer.heroFlightShuttleBuilder,
+                tag: bangumiItem.id,
+                child: NetworkImgLayer(
+                  src: bangumiItem.images['large'] ?? '',
+                  width: constraints.maxWidth,
+                  height: imageHeight,
+                  origAspectRatio: posterAspectRatio,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textScaler: textScaler,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                relationLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textScaler: textScaler,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

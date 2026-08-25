@@ -1,6 +1,6 @@
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/webdav_editor/webdav_editor_page.dart';
-import 'package:kazumi/pages/webdav_editor/webdav_setting.dart';
+import 'package:miru/pages/webdav_editor/webdav_editor_page.dart';
+import 'package:miru/pages/webdav_editor/webdav_setting.dart';
 
 final webDavModule = createModule(
   path: '/webdav',

@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/collect_button.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'package:kazumi/services/player/history_playback_service.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart'
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/collect_button.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
+import 'package:miru/services/player/history_playback_service.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/date_time.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/date_time.dart';
 
 String _historySourceText(String entryKind) {
   return HistoryEntryKind.normalize(entryKind) == HistoryEntryKind.offline
@@ -49,13 +49,13 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
 
   Future<void> _onTap() async {
     if (widget.showDelete) {
-      KazumiDialog.showToast(message: '编辑模式');
+      MiruDialog.showToast(message: '编辑模式');
       return;
     }
     _queryRoadsCancelToken?.cancel();
     final cancelToken = RuleCancelToken();
     _queryRoadsCancelToken = cancelToken;
-    KazumiDialog.showLoading(
+    MiruDialog.showLoading(
       msg: '获取中',
       barrierDismissible: isDesktop(),
       onDismiss: cancelToken.cancel,
@@ -64,13 +64,13 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
       widget.historyItem,
       cancelToken: cancelToken,
     );
-    KazumiDialog.dismiss();
+    MiruDialog.dismiss();
     if (!mounted) return;
     switch (result) {
       case HistoryPlaybackReady(:final args):
         context.pushNamed('/video/', arguments: args);
       case HistoryPlaybackUnavailable(:final reason):
-        KazumiDialog.showToast(message: reason);
+        MiruDialog.showToast(message: reason);
     }
   }
 

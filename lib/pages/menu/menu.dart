@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
-import 'package:kazumi/bean/widget/liquid_glass_indicator.dart';
-import 'package:kazumi/utils/theme.dart';
-import 'package:kazumi/navigation.dart';
-import 'package:kazumi/pages/menu/route_visibility.dart';
-import 'package:kazumi/pages/router.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/embedded_native_control_area.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/liquid_glass_indicator.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/navigation.dart';
+import 'package:miru/pages/menu/route_visibility.dart';
+import 'package:miru/pages/router.dart';
 
 class ScaffoldMenu extends StatefulWidget {
   const ScaffoldMenu({super.key});
@@ -81,7 +81,7 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     if (lastPromptAt == null ||
         now.difference(lastPromptAt) > const Duration(seconds: 2)) {
       _lastExitPromptAt = now;
-      KazumiDialog.showToast(message: '再按一次退出应用', context: context);
+      MiruDialog.showToast(message: '再按一次退出应用', context: context);
       return;
     }
 
@@ -215,7 +215,8 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
   }
 
   Widget _sideMenu(BuildContext context, int selectedIndex) {
-    const borderRadius = BorderRadius.only(
+    // 内容窗格保持原有的左侧圆角，与侧栏玻璃面板形成「两块浮起的面板」。
+    const contentBorderRadius = BorderRadius.only(
       topLeft: Radius.circular(Radii.lg),
       bottomLeft: Radius.circular(Radii.lg),
     );
@@ -225,50 +226,64 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
       body: Row(
         children: [
           EmbeddedNativeControlArea(
-            child: NavigationRail(
-              backgroundColor: Colors.transparent,
-              groupAlignment: 1,
-              leading: Padding(
-                padding: const EdgeInsets.only(bottom: Space.sm),
-                child: IconButton.filledTonal(
-                  onPressed: () => context.pushNamed('/search/'),
-                  icon: const Icon(Icons.search_rounded),
-                  style: IconButton.styleFrom(
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: Radii.brMd,
+            // 宽屏侧栏：悬浮式液态玻璃面板。
+            // 四周留出缝隙，玻璃的边缘高光与镜面渐变才可见；
+            // 模糊采样的是身后的 surfaceContainer 底色，
+            // 与右侧内容窗格形成材质层次。导航行为与选中态不变。
+            child: Padding(
+              padding: const EdgeInsets.all(Space.sm),
+              child: FrostedSurface(
+                borderRadius: Radii.brLg,
+                border: Border.all(
+                  color: scheme.outlineVariant,
+                  width: 0.5,
+                ),
+                child: NavigationRail(
+                  backgroundColor: Colors.transparent,
+                  groupAlignment: 1,
+                  leading: Padding(
+                    padding: const EdgeInsets.only(bottom: Space.sm),
+                    child: IconButton.filledTonal(
+                      onPressed: () => context.pushNamed('/search/'),
+                      icon: const Icon(Icons.search_rounded),
+                      style: IconButton.styleFrom(
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: Radii.brMd,
+                        ),
+                        padding: const EdgeInsets.all(Space.md),
+                      ),
                     ),
-                    padding: const EdgeInsets.all(Space.md),
                   ),
+                  labelType: NavigationRailLabelType.selected,
+                  destinations: const <NavigationRailDestination>[
+                    NavigationRailDestination(
+                      selectedIcon: Icon(Icons.auto_awesome_rounded),
+                      icon: Icon(Icons.auto_awesome_outlined),
+                      label: Text('推荐'),
+                    ),
+                    NavigationRailDestination(
+                      selectedIcon: Icon(Icons.calendar_today_rounded),
+                      icon: Icon(Icons.calendar_today_outlined),
+                      label: Text('时间表'),
+                    ),
+                    NavigationRailDestination(
+                      selectedIcon: Icon(Icons.bookmark_rounded),
+                      icon: Icon(Icons.bookmark_border_rounded),
+                      label: Text('追番'),
+                    ),
+                    NavigationRailDestination(
+                      selectedIcon: Icon(Icons.person_rounded),
+                      icon: Icon(Icons.person_outline_rounded),
+                      label: Text('我的'),
+                    ),
+                  ],
+                  selectedIndex: selectedIndex,
+                  onDestinationSelected: _selectDestination,
                 ),
               ),
-              labelType: NavigationRailLabelType.selected,
-              destinations: const <NavigationRailDestination>[
-                NavigationRailDestination(
-                  selectedIcon: Icon(Icons.auto_awesome_rounded),
-                  icon: Icon(Icons.auto_awesome_outlined),
-                  label: Text('推荐'),
-                ),
-                NavigationRailDestination(
-                  selectedIcon: Icon(Icons.calendar_today_rounded),
-                  icon: Icon(Icons.calendar_today_outlined),
-                  label: Text('时间表'),
-                ),
-                NavigationRailDestination(
-                  selectedIcon: Icon(Icons.bookmark_rounded),
-                  icon: Icon(Icons.bookmark_border_rounded),
-                  label: Text('追番'),
-                ),
-                NavigationRailDestination(
-                  selectedIcon: Icon(Icons.person_rounded),
-                  icon: Icon(Icons.person_outline_rounded),
-                  label: Text('我的'),
-                ),
-              ],
-              selectedIndex: selectedIndex,
-              onDestinationSelected: _selectDestination,
             ),
           ),
-          Expanded(child: _outlet(context, borderRadius: borderRadius)),
+          Expanded(child: _outlet(context, borderRadius: contentBorderRadius)),
         ],
       ),
     );

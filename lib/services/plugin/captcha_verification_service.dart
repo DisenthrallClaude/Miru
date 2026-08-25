@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:kazumi/services/plugin/plugin_cookie_manager.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/utils/async_single_flight.dart';
-import 'package:kazumi/webview/captcha/captcha_webview_controller.dart';
+import 'package:miru/services/plugin/plugin_cookie_manager.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/async_single_flight.dart';
+import 'package:miru/webview/captcha/captcha_webview_controller.dart';
 
 /// 验证码验证服务
 ///
@@ -15,7 +15,7 @@ import 'package:kazumi/webview/captcha/captcha_webview_controller.dart';
 /// - **类型2：自动点击验证按钮**（[loadForButtonClick]）
 ///   检测到按钮后自动点击，按钮消失或页面跳转即视为通过。
 /// - **类型3：自定义 JavaScript 验证**（[loadForCustomScript]）
-///   注入规则提供的脚本，脚本调用 KazumiCaptcha.done 或返回 true 即通过。
+///   注入规则提供的脚本，脚本调用 MiruCaptcha.done 或返回 true 即通过。
 ///
 /// 验证通过后统一收尾：收割验证后页面的 HTML，保存 Cookie 与 User-Agent 到
 /// [PluginCookieManager]，再将 HTML 交给 onVerified。UI 能解析该 HTML 时直接
@@ -98,10 +98,10 @@ class CaptchaVerificationService {
     if (_disposed) return;
 
     _logSub?.cancel();
-    _logSub = _controller!.onLog.listen((msg) => KazumiLogger().d(msg));
+    _logSub = _controller!.onLog.listen((msg) => MiruLogger().d(msg));
 
     _isInitialized = true;
-    KazumiLogger().i('[CaptchaVerificationService] WebView initialized');
+    MiruLogger().i('[CaptchaVerificationService] WebView initialized');
   }
 
   /// 加载指定页面并开始监听验证码图片
@@ -117,7 +117,7 @@ class CaptchaVerificationService {
 
     _imageFoundSub?.cancel();
     _imageFoundSub = _controller!.onCaptchaImageFound.listen((src) {
-      KazumiLogger()
+      MiruLogger()
           .i('[CaptchaVerificationService] Captcha image found: $src');
       if (!_captchaImageStreamController.isClosed) {
         _captchaImageStreamController.add(src);
@@ -125,7 +125,7 @@ class CaptchaVerificationService {
     });
 
     await _controller!.loadPage(url, captchaXpath, inputXpath: inputXpath);
-    KazumiLogger().i('[CaptchaVerificationService] Page loading: $url');
+    MiruLogger().i('[CaptchaVerificationService] Page loading: $url');
   }
 
   /// 在页面中填写 [captchaCode] 并点击 [buttonXpath] 提交
@@ -140,12 +140,12 @@ class CaptchaVerificationService {
     void Function()? onFinalizing,
   }) async {
     if (_controller == null) {
-      KazumiLogger()
+      MiruLogger()
           .w('[CaptchaVerificationService] submitCaptcha called before init');
       return;
     }
 
-    KazumiLogger()
+    MiruLogger()
         .i('[CaptchaVerificationService] Submitting captcha code via interact');
 
     _listenForVerification(pluginName, onVerified, onFinalizing: onFinalizing);
@@ -166,7 +166,7 @@ class CaptchaVerificationService {
 
     _listenForVerification(pluginName, onVerified, logPrefix: '(type2) ');
     await _controller!.loadPageForButtonClick(url, buttonXpath);
-    KazumiLogger().i(
+    MiruLogger().i(
         '[CaptchaVerificationService] (type2) Page loading for button click: $url');
   }
 
@@ -183,7 +183,7 @@ class CaptchaVerificationService {
 
     _listenForVerification(pluginName, onVerified, logPrefix: '(type3) ');
     await _controller!.loadPageForCustomScript(url, script);
-    KazumiLogger().i(
+    MiruLogger().i(
         '[CaptchaVerificationService] (type3) Page loading for custom script: $url');
   }
 
@@ -226,23 +226,23 @@ class CaptchaVerificationService {
       // 先收割：等待结果页稳定的同时，也让 JS 写入的 Cookie 落地后再读取。
       if (harvestHtml) {
         pageHtml = await _waitForPageHtml(controller);
-        KazumiLogger().i(
+        MiruLogger().i(
             '[CaptchaVerificationService] ${logPrefix}Harvested page html length: ${pageHtml.length}');
       }
       final cookieString = await controller.getCookieString(_pageUrl);
       final userAgent = await controller.getUserAgent();
-      KazumiLogger().i(
+      MiruLogger().i(
           '[CaptchaVerificationService] ${logPrefix}Captured cookies: $cookieString');
       if (cookieString.isNotEmpty) {
         await PluginCookieManager.instance.saveFromWebView(
             pluginName, _pageUrl, cookieString,
             userAgent: userAgent);
-        KazumiLogger().i(
+        MiruLogger().i(
             '[CaptchaVerificationService] ${logPrefix}Cookies saved for plugin: $pluginName');
       }
       await controller.unloadPage();
     } catch (error, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         '[CaptchaVerificationService] ${logPrefix}Finalize failed',
         error: error,
         stackTrace: stackTrace,
@@ -278,6 +278,6 @@ class CaptchaVerificationService {
     _controller?.dispose();
     _controller = null;
     _isInitialized = false;
-    KazumiLogger().i('[CaptchaVerificationService] Disposed');
+    MiruLogger().i('[CaptchaVerificationService] Disposed');
   }
 }

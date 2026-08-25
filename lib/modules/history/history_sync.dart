@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/modules/history/history_module.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/modules/history/history_module.dart';
 
 enum HistorySyncOp {
   upsertProgress('upsertProgress'),

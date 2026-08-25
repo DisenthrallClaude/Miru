@@ -2,7 +2,7 @@ import 'dart:ui';
 
 import 'package:cupertino_liquid_glass/cupertino_liquid_glass.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 毛玻璃 / 液态玻璃材质容器。
 ///
@@ -64,7 +64,11 @@ class FrostedSurface extends StatelessWidget {
     }
 
     final double opacity = Frost.tintOpacity(brightness);
+    // 局部变量承接可空字段：Dart 的类型提升对实例字段无效。
+    final Color? tintColor = tint;
 
+    // cupertino_liquid_glass 内部已插入 RepaintBoundary 隔离合成层，
+    // 这里不再重复包裹，避免多一次离屏栅格缓存。
     Widget glass;
     if (liquid) {
       glass = CupertinoLiquidGlass(
@@ -76,13 +80,27 @@ class FrostedSurface extends StatelessWidget {
         edgeShadowColor: Frost.edgeShadow(brightness),
         specularGradient: Frost.specular(brightness),
         borderWidth: 1.0,
-        child: child,
+        child: tintColor == null
+            ? child
+            // tint 在液态分支以覆盖层形式生效，让调用方可以微调玻璃色调
+            : DecoratedBox(
+                decoration: BoxDecoration(
+                  color: tintColor.withValues(alpha: 0.35),
+                  borderRadius: borderRadius,
+                ),
+                child: child,
+              ),
       );
+      // 外层 RepaintBoundary：把玻璃隔离成独立合成层。
+      // Android Impeller 上 BackdropFilter 首次入帧时若与宿主内容同层，
+      // 首帧可能只画 tint 不画模糊 —— 表现为「点一下玻璃才显现」。
+      // 边界强制玻璃单独成层，backdrop 采样从首帧起就稳定。
+      glass = RepaintBoundary(child: glass);
     } else {
       // 朴素模糊兜底。BackdropFilter 必须被裁剪到自身边界内，
       // 否则会模糊整个图层（表现为全屏发虚）。
       final Color base =
-          tint ?? scheme.surface.withValues(alpha: opacity);
+          tintColor ?? scheme.surface.withValues(alpha: opacity);
       glass = ClipRRect(
         borderRadius: borderRadius ?? BorderRadius.zero,
         child: BackdropFilter(

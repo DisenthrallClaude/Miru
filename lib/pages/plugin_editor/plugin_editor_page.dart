@@ -2,14 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/api_rule_config.dart';
-import 'package:kazumi/plugins/anti_crawler_config.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/pages/plugin_editor/editor_form_widgets.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/services/plugin/api_rule_engine.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/api_rule_config.dart';
+import 'package:miru/plugins/anti_crawler_config.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/pages/plugin_editor/editor_form_widgets.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/services/plugin/api_rule_engine.dart';
 
 abstract final class _RuleEditorText {
   static const pageTitle = '规则编辑器';
@@ -52,7 +52,7 @@ abstract final class _RuleEditorText {
   static const captchaInputHint = '//input[@name="captcha"]';
   static const captchaButtonHint = '//button[@type="submit"]';
   static const captchaScriptHint =
-      'KazumiCaptcha.log("ready"); KazumiCaptcha.done();';
+      'MiruCaptcha.log("ready"); MiruCaptcha.done();';
 
   static const sectionBasic = '基本信息';
   static const sectionBasicDesc = '规则的名称、版本与站点地址';
@@ -132,7 +132,7 @@ abstract final class _RuleEditorText {
   static const verifyButtonHelper = '填写验证按钮元素的 XPath，检测到后将自动点击。';
   static const captchaScript = '验证脚本（JavaScript）';
   static const captchaScriptHelper =
-      '可调用 KazumiCaptcha.log、clicked、done 和 fail。';
+      '可调用 MiruCaptcha.log、clicked、done 和 fail。';
 }
 
 class PluginEditorPage extends StatefulWidget {

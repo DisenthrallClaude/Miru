@@ -1,16 +1,16 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/palette_card.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/settings/theme_provider.dart';
-import 'package:kazumi/bean/settings/color_type.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/card/palette_card.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/settings/theme_provider.dart';
+import 'package:miru/bean/settings/color_type.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/theme.dart';
 
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({super.key});
@@ -43,23 +43,23 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
 
   void setTheme(Color? color) {
     // 主题构造统一走设计系统，保证与 app_widget 启动时构造的主题一致。
-    // color 为 null 时 buildKazumiTheme 内部回落到 kDefaultSeedColor。
-    var defaultDarkTheme = buildKazumiTheme(
+    // color 为 null 时 buildMiruTheme 内部回落到 kDefaultSeedColor。
+    var defaultDarkTheme = buildMiruTheme(
       brightness: Brightness.dark,
       fontFamily: themeProvider.currentFontFamily,
       seedColor: color,
     );
     var oledTheme = oledDarkTheme(defaultDarkTheme);
     themeProvider.setTheme(
-      buildKazumiTheme(
+      buildMiruTheme(
         brightness: Brightness.light,
         fontFamily: themeProvider.currentFontFamily,
         seedColor: color,
@@ -71,14 +71,14 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   void resetTheme() {
-    var defaultDarkTheme = buildKazumiTheme(
+    var defaultDarkTheme = buildMiruTheme(
       brightness: Brightness.dark,
       fontFamily: themeProvider.currentFontFamily,
       seedColor: kDefaultSeedColor,
     );
     var oledTheme = oledDarkTheme(defaultDarkTheme);
     themeProvider.setTheme(
-      buildKazumiTheme(
+      buildMiruTheme(
         brightness: Brightness.light,
         fontFamily: themeProvider.currentFontFamily,
         seedColor: kDefaultSeedColor,
@@ -255,7 +255,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                   leading: Icons.palette_rounded,
                   enabled: !useDynamicColor,
                   onPressed: (_) async {
-                    KazumiDialog.show(builder: (context) {
+                    MiruDialog.show(builder: (context) {
                       return AlertDialog(
                         title: Text('配色方案'),
                         content: StatefulBuilder(builder:
@@ -275,7 +275,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                                       index == 0
                                           ? resetTheme()
                                           : setTheme(e['color']);
-                                      KazumiDialog.dismiss();
+                                      MiruDialog.dismiss();
                                     },
                                     child: Column(
                                       children: [
@@ -324,7 +324,9 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                     themeProvider.setFontFamily(useSystemFont);
                     dynamic color;
                     if (defaultThemeColor == 'default') {
-                      color = Colors.green;
+                      // 与 updateOledEnhance 保持一致：默认主题色用
+                      // kDefaultSeedColor，而不是遗留的绿色。
+                      color = kDefaultSeedColor;
                     } else {
                       color = Color(int.parse(defaultThemeColor, radix: 16));
                     }

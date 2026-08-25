@@ -12,10 +12,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
-import 'package:kazumi/bean/widget/liquid_glass_indicator.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/liquid_glass_indicator.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 把真实的衬线字体注入测试渲染环境，否则 golden 里全是占位方块。
 Future<void> _loadSerif() async {
@@ -230,7 +230,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           debugShowCheckedModeBanner: false,
-          theme: buildKazumiTheme(
+          theme: buildMiruTheme(
             brightness: brightness,
             fontFamily: customSerifFontFamilyForTest,
           ),

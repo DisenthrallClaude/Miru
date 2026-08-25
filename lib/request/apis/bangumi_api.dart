@@ -1,20 +1,20 @@
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/request/clients/bangumi_client.dart';
-import 'package:kazumi/request/core/network_exception.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_relation.dart';
-import 'package:kazumi/modules/comments/comment_response.dart';
-import 'package:kazumi/modules/characters/characters_response.dart';
-import 'package:kazumi/modules/bangumi/episode_item.dart';
-import 'package:kazumi/modules/character/character_full_item.dart';
-import 'package:kazumi/modules/staff/staff_response.dart';
-import 'package:kazumi/modules/bangumi/bangumi_collection.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/modules/collect/collect_type_mapper.dart';
-import 'package:kazumi/modules/bangumi/bangumi_collection_type.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/utils/search_parser.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/request/clients/bangumi_client.dart';
+import 'package:miru/request/core/network_exception.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_relation.dart';
+import 'package:miru/modules/comments/comment_response.dart';
+import 'package:miru/modules/characters/characters_response.dart';
+import 'package:miru/modules/bangumi/episode_item.dart';
+import 'package:miru/modules/character/character_full_item.dart';
+import 'package:miru/modules/staff/staff_response.dart';
+import 'package:miru/modules/bangumi/bangumi_collection.dart';
+import 'package:miru/modules/collect/collect_type.dart';
+import 'package:miru/modules/collect/collect_type_mapper.dart';
+import 'package:miru/modules/bangumi/bangumi_collection_type.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/utils/search_parser.dart';
 
 class BangumiSearchPage {
   const BangumiSearchPage({
@@ -47,13 +47,15 @@ class BangumiApi {
         bangumiCalendar.add(bangumiList);
       }
     } catch (e) {
-      KazumiLogger().e('Resolve calendar failed', error: e);
+      MiruLogger().e('Resolve calendar failed', error: e);
+      // 网络失败必须与「确实没有数据」区分开，否则首页会把故障渲染成空页面。
+      rethrow;
     }
     return bangumiCalendar;
   }
 
   // Official fallback for season switching. Mirror mode uses the cached
-  // /kazumi/v1/calendar/season endpoint instead of Bangumi search.
+  // /miru/v1/calendar/season endpoint instead of Bangumi search.
   static Future<List<List<BangumiItem>>> getCalendarBySearch(
       List<String> dateRange, int limit, int offset) async {
     List<BangumiItem> bangumiList = [];
@@ -86,7 +88,8 @@ class BangumiApi {
         }
       }
     } catch (e) {
-      KazumiLogger().e('Resolve bangumi list failed', error: e);
+      MiruLogger().e('Resolve bangumi list failed', error: e);
+      rethrow;
     }
     try {
       for (int weekday = 1; weekday <= 7; weekday++) {
@@ -99,50 +102,16 @@ class BangumiApi {
         bangumiCalendar.add(bangumiDayList);
       }
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('Network: fetch bangumi item to calendar failed', error: e);
     }
     return bangumiCalendar;
   }
 
-  static String buildBangumiMirrorSeasonCalendarPath(List<String> dateRange) {
-    return Uri(
-      path: ApiEndpoints.bangumiMirrorSeasonCalendar,
-      queryParameters: {
-        'start': dateRange[0],
-        'end': dateRange[1],
-      },
-    ).toString();
-  }
-
-  static Future<List<List<BangumiItem>>> getBangumiMirrorSeasonCalendar(
-      List<String> dateRange) async {
-    List<List<BangumiItem>> bangumiCalendar = [];
-    try {
-      final jsonData = await _client.get(
-        ApiEndpoints.bangumiMirrorDomain +
-            buildBangumiMirrorSeasonCalendarPath(dateRange),
-      );
-      for (int i = 1; i <= 7; i++) {
-        List<BangumiItem> bangumiList = [];
-        final jsonList = jsonData['$i'] ?? [];
-        for (dynamic jsonItem in jsonList) {
-          try {
-            final subject =
-                jsonItem is Map<String, dynamic> ? jsonItem['subject'] : null;
-            if (subject is Map<String, dynamic>) {
-              bangumiList.add(BangumiItem.fromJson(subject));
-            }
-          } catch (_) {}
-        }
-        bangumiCalendar.add(bangumiList);
-      }
-    } catch (e) {
-      KazumiLogger().e('Network: resolve bangumi mirror season calendar failed',
-          error: e);
-    }
-    return bangumiCalendar;
-  }
+  // 注：原 getBangumiMirrorSeasonCalendar / getBangumiMirrorPopularSubjects
+  // 已删除 —— 它们指向的上游镜像域名（api.miru.fyi）需要签名才能使用，
+  // 且全仓无调用方；时间表与推荐页分别走 getCalendarBySearch /
+  // getBangumiList，不再依赖该链路。
 
   /// 按产地（默认国漫）拉取番剧列表。
   ///
@@ -188,7 +157,10 @@ class BangumiApi {
         }
       }
     } catch (e) {
-      KazumiLogger().e('Network: resolve bangumi list failed', error: e);
+      MiruLogger().e('Network: resolve bangumi list failed', error: e);
+      // 必须上抛：推荐页/分类页的 catch 分支靠它置 isTimeOut 并提示重试。
+      // 吞掉异常会把网络故障伪装成「空列表」，用户只会看到一片空白。
+      rethrow;
     }
     return bangumiList;
   }
@@ -213,50 +185,8 @@ class BangumiApi {
         }
       }
     } catch (e) {
-      KazumiLogger().e('Network: resolve bangumi trends list failed', error: e);
-    }
-    return bangumiList;
-  }
-
-  static String buildBangumiMirrorPopularPath({
-    String tag = '',
-    int limit = 24,
-    int offset = 0,
-  }) {
-    return Uri(
-      path: ApiEndpoints.bangumiMirrorPopularSubjects,
-      queryParameters: {
-        if (tag.isNotEmpty) 'tag': tag,
-        'limit': limit.toString(),
-        'offset': offset.toString(),
-      },
-    ).toString();
-  }
-
-  static Future<List<BangumiItem>> getBangumiMirrorPopularSubjects({
-    String tag = '',
-    int limit = 24,
-    int offset = 0,
-  }) async {
-    List<BangumiItem> bangumiList = [];
-    try {
-      final jsonData = await _client.get(
-        ApiEndpoints.bangumiMirrorDomain +
-            buildBangumiMirrorPopularPath(
-              tag: tag,
-              limit: limit,
-              offset: offset,
-            ),
-      );
-      final jsonList = jsonData is List ? jsonData : jsonData['data'];
-      for (dynamic jsonItem in jsonList) {
-        if (jsonItem is Map<String, dynamic>) {
-          bangumiList.add(BangumiItem.fromJson(jsonItem));
-        }
-      }
-    } catch (e) {
-      KazumiLogger()
-          .e('Network: resolve bangumi mirror popular list failed', error: e);
+      MiruLogger().e('Network: resolve bangumi trends list failed', error: e);
+      rethrow;
     }
     return bangumiList;
   }
@@ -345,7 +275,7 @@ class BangumiApi {
               bangumiList.add(bangumiItem);
             }
           } catch (e) {
-            KazumiLogger()
+            MiruLogger()
                 .e('Network: resolve search results failed', error: e);
           }
         }
@@ -355,7 +285,7 @@ class BangumiApi {
         rawCount: jsonList.length,
       );
     } catch (e) {
-      KazumiLogger().e('Network: unknown search problem', error: e);
+      MiruLogger().e('Network: unknown search problem', error: e);
       return null;
     }
   }
@@ -398,7 +328,7 @@ class BangumiApi {
       );
       return BangumiItem.fromJson(jsonData);
     } catch (e) {
-      KazumiLogger().e('Network: resolve bangumi item failed', error: e);
+      MiruLogger().e('Network: resolve bangumi item failed', error: e);
       return null;
     }
   }
@@ -424,7 +354,7 @@ class BangumiApi {
           BangumiRelation.fromJson(Map<String, dynamic>.from(jsonItem)),
         );
       } catch (e, stackTrace) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'BangumiApi: skipped malformed relation item',
           error: e,
           stackTrace: stackTrace,
@@ -448,7 +378,9 @@ class BangumiApi {
       );
       episodeInfo = EpisodeInfo.fromJson(jsonData['data'][0]);
     } catch (e) {
-      KazumiLogger().e('Network: resolve bangumi episode failed', error: e);
+      MiruLogger().e('Network: resolve bangumi episode failed', error: e);
+      // 调用方（评论页）依赖异常区分「无评论」与「请求失败」。
+      rethrow;
     }
     return episodeInfo;
   }
@@ -480,8 +412,10 @@ class BangumiApi {
         offset += data.length;
       } while (total == null || offset < total);
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('Network: resolve bangumi episode list failed', error: e);
+      // 部分成功也整体上抛：半截分集列表会让用户误以为番剧只有这些集。
+      rethrow;
     }
     return episodeList;
   }
@@ -547,7 +481,7 @@ class BangumiApi {
       );
       characterFullItem = CharacterFullItem.fromJson(jsonData);
     } catch (e) {
-      KazumiLogger().e('Network: resolve character info failed', error: e);
+      MiruLogger().e('Network: resolve character info failed', error: e);
     }
     return characterFullItem;
   }
@@ -571,12 +505,12 @@ class BangumiApi {
       }
     } on NetworkException catch (e) {
       if (e.statusCode == 401) {
-        KazumiLogger().e('Bangumi token unauthorized, please check your token');
+        MiruLogger().e('Bangumi token unauthorized, please check your token');
         throw StateError('Bangumi token 未授权，请检查您的 token');
       }
       rethrow;
     } catch (e) {
-      KazumiLogger().e('Network: get current user failed', error: e);
+      MiruLogger().e('Network: get current user failed', error: e);
     }
     return null;
   }
@@ -602,7 +536,7 @@ class BangumiApi {
     int progressCurrent = 0;
     int progressTotal = 0;
     if (resolvedUsername == null) {
-      KazumiLogger().w('get username failed');
+      MiruLogger().w('get username failed');
       return [];
     }
 
@@ -628,7 +562,7 @@ class BangumiApi {
               requiresAuth: true,
             );
           } catch (e) {
-            KazumiLogger().e(
+            MiruLogger().e(
               'BangumiApi: fetch collection failed. type=${collectionType.value}, offset=$offset',
               error: e,
             );
@@ -654,7 +588,7 @@ class BangumiApi {
                   progressTotal,
                 );
               } catch (e) {
-                KazumiLogger().e(
+                MiruLogger().e(
                   'BangumiApi: parse collection item failed: ${e.toString()}',
                   error: e,
                 );
@@ -672,12 +606,12 @@ class BangumiApi {
         }
       }
     } catch (e) {
-      KazumiLogger().e('Network: get bangumi collection failed', error: e);
+      MiruLogger().e('Network: get bangumi collection failed', error: e);
       rethrow;
     }
-    KazumiLogger()
+    MiruLogger()
         .d('get Bangumi collection count: ${bangumiCollection.length}');
-    KazumiLogger().d('get item failed count: $failedItemCount');
+    MiruLogger().d('get item failed count: $failedItemCount');
     return bangumiCollection;
   }
 
@@ -694,7 +628,7 @@ class BangumiApi {
         data: data,
         requiresAuth: true,
       );
-      KazumiLogger().d('Update to Bangumi: Id: $id');
+      MiruLogger().d('Update to Bangumi: Id: $id');
       return true;
     } on NetworkException catch (e) {
       String str;
@@ -711,10 +645,10 @@ class BangumiApi {
         default:
           str = 'Error $e';
       }
-      KazumiLogger().e('BangumiApi: $str', error: e);
+      MiruLogger().e('BangumiApi: $str', error: e);
       return false;
     } catch (e) {
-      KazumiLogger().e('Network: update bangumi collection failed', error: e);
+      MiruLogger().e('Network: update bangumi collection failed', error: e);
       rethrow;
     } finally {
       await Future.delayed(requestInterval);

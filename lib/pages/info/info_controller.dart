@@ -1,16 +1,16 @@
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/bangumi/bangumi_interest.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_relation.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/pages/info/rating_review_dialog.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/bangumi/bangumi_interest.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_relation.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/pages/info/rating_review_dialog.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/modules/characters/character_item.dart';
-import 'package:kazumi/modules/staff/staff_item.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/modules/characters/character_item.dart';
+import 'package:miru/modules/staff/staff_item.dart';
 
 part 'info_controller.g.dart';
 
@@ -81,7 +81,7 @@ abstract class _InfoController with Store {
       await collectController.updateLocalCollect(bangumiItem);
       return true;
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('InfoController: failed to fill interest user profile', error: e);
       return false;
     } finally {
@@ -171,7 +171,7 @@ abstract class _InfoController with Store {
           : _commentsOffset + value.commentList.length;
       _removeCurrentUserFromPublicComments();
     });
-    KazumiLogger().i(
+    MiruLogger().i(
         'InfoController: loaded comments list length ${commentsList.length}, offset $_commentsOffset');
   }
 
@@ -186,11 +186,19 @@ abstract class _InfoController with Store {
     );
   }
 
+  /// 角色/制作人员请求的代际计数：详情页可被快速进出，
+  /// 旧条目的迟到响应不允许写回新条目刚清空的列表（与关联的同款守卫）。
+  int _characterRequestGeneration = 0;
+  int _staffRequestGeneration = 0;
+
   Future<void> queryBangumiCharactersByID(int id) async {
+    final requestGeneration = ++_characterRequestGeneration;
     characterList.clear();
-    await BangumiApi.getCharatersByBangumiID(id).then((value) {
-      characterList.addAll(value.charactersList);
-    });
+    final value = await BangumiApi.getCharatersByBangumiID(id);
+    if (requestGeneration != _characterRequestGeneration) {
+      return; // 过期响应：期间条目已切换，静默丢弃。
+    }
+    characterList.addAll(value.charactersList);
     Map<String, int> relationValue = {
       '主角': 1,
       '配角': 2,
@@ -204,18 +212,21 @@ abstract class _InfoController with Store {
         return valueA.compareTo(valueB);
       });
     } catch (e) {
-      KazumiDialog.showToast(message: '$e');
+      MiruDialog.showToast(message: '$e');
     }
-    KazumiLogger().i(
+    MiruLogger().i(
         'InfoController: loaded character list length ${characterList.length}');
   }
 
   Future<void> queryBangumiStaffsByID(int id) async {
+    final requestGeneration = ++_staffRequestGeneration;
     staffList.clear();
-    await BangumiApi.getBangumiStaffByID(id).then((value) {
-      staffList.addAll(value.data);
-    });
-    KazumiLogger()
+    final value = await BangumiApi.getBangumiStaffByID(id);
+    if (requestGeneration != _staffRequestGeneration) {
+      return; // 过期响应：期间条目已切换，静默丢弃。
+    }
+    staffList.addAll(value.data);
+    MiruLogger()
         .i('InfoController: loaded staff list length ${staffList.length}');
   }
 
@@ -226,6 +237,15 @@ abstract class _InfoController with Store {
     relationsIsLoading = false;
     relationsQueryTimeout = false;
     relationsHasLoaded = false;
+  }
+
+  /// 条目切换/页面销毁时失效在途的角色与制作人员请求。
+  /// info_page 直接 clear 列表的同时必须调用本方法，
+  /// 否则旧条目的迟到响应会写进新条目刚清空的列表。
+  @action
+  void invalidateAncillaryRequests() {
+    _characterRequestGeneration++;
+    _staffRequestGeneration++;
   }
 
   bool get canLoadRelations =>
@@ -249,7 +269,7 @@ abstract class _InfoController with Store {
       }
       relationList = ObservableList<BangumiRelation>.of(relations);
       relationsHasLoaded = true;
-      KazumiLogger().i(
+      MiruLogger().i(
         'InfoController: loaded related anime list length ${relationList.length}',
       );
     } catch (_) {

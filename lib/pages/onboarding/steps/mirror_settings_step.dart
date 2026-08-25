@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/pages/onboarding/onboarding_step_layout.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/pages/onboarding/onboarding_step_layout.dart';
+import 'package:miru/services/storage/storage.dart';
 
 class MirrorSettingsStep extends StatefulWidget {
   const MirrorSettingsStep({super.key});

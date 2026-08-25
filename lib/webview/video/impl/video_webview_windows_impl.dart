@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:webview_windows/webview_windows.dart';
-import 'package:kazumi/webview/video/video_webview_controller.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/video_source/video_source_format.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/video_source/video_source_format.dart';
 
 class VideoWebviewWindowsImpl
     extends VideoWebviewController<WebviewController> {
@@ -37,9 +37,9 @@ class VideoWebviewWindowsImpl
       await WebviewController.initializeEnvironment(
         additionalArguments: '--proxy-server=$formattedProxy',
       );
-      KazumiLogger().i('WebView: 代理设置成功 $formattedProxy');
+      MiruLogger().i('WebView: 代理设置成功 $formattedProxy');
     } catch (e) {
-      KazumiLogger().e('WebView: 设置代理失败 $e');
+      MiruLogger().e('WebView: 设置代理失败 $e');
     }
   }
 
@@ -119,7 +119,7 @@ class VideoWebviewWindowsImpl
         window.location.href = 'about:blank';
       ''');
     } catch (e) {
-      KazumiLogger().d('WebView: redirect2Blank skipped (likely disposed): $e');
+      MiruLogger().d('WebView: redirect2Blank skipped (likely disposed): $e');
     }
   }
 }

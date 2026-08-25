@@ -1,13 +1,13 @@
-import 'package:kazumi/modules/roads/road_module.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/plugins/anti_crawler_config.dart';
-import 'package:kazumi/plugins/api_rule_config.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/services/plugin/api_rule_engine.dart';
-import 'package:kazumi/utils/episode_url.dart';
-import 'package:kazumi/utils/http_headers.dart';
+import 'package:miru/modules/roads/road_module.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/plugins/anti_crawler_config.dart';
+import 'package:miru/plugins/api_rule_config.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/services/plugin/api_rule_engine.dart';
+import 'package:miru/utils/episode_url.dart';
+import 'package:miru/utils/http_headers.dart';
 
-export 'package:kazumi/services/plugin/rule_engine_models.dart'
+export 'package:miru/services/plugin/rule_engine_models.dart'
     show
         CaptchaRequiredException,
         NoResultException,
@@ -181,7 +181,12 @@ class Plugin {
 
   bool get usesApiSearch => searchMode == RuleMode.api;
 
-  bool get requiresNewerClient => int.parse(api) > ApiEndpoints.apiLevel;
+  bool get requiresNewerClient {
+    // 规则的 api 字段可能被写成非数字（损坏或手改），
+    // 解析失败时按最旧 api 处理，避免 FormatException 中断更新检查。
+    final apiLevel = int.tryParse(api) ?? 1;
+    return apiLevel > ApiEndpoints.apiLevel;
+  }
 
   RuleExecutionConfig get _executionConfig => RuleExecutionConfig(
         pluginName: name,
@@ -260,7 +265,8 @@ class Plugin {
   /// Headers used when resolving or downloading the final media resource.
   Map<String, String> buildHttpHeaders() {
     return {
-      'user-agent': userAgent.isEmpty ? getRandomUA() : userAgent,
+      // 会话级 UA：与 WebView 解析、mpv 播放保持同一指纹。
+      'user-agent': userAgent.isEmpty ? getSessionUA() : userAgent,
       if (referer.isNotEmpty) 'referer': referer,
     };
   }

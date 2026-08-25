@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
 
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
@@ -121,7 +121,7 @@ class _LogsPageState extends State<LogsPage> {
   Future<File> _getLogsFile() async {
     final directory = await getApplicationSupportDirectory();
     final path = directory.path;
-    return File('$path/logs/kazumi_logs.log');
+    return File('$path/logs/miru_logs.log');
   }
 
   Future<void> _clearLogs() async {
@@ -138,7 +138,7 @@ class _LogsPageState extends State<LogsPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      KazumiDialog.showToast(message: '清空失败: $e');
+      MiruDialog.showToast(message: '清空失败: $e');
     }
   }
 
@@ -146,10 +146,10 @@ class _LogsPageState extends State<LogsPage> {
     try {
       await Clipboard.setData(ClipboardData(text: _fullContent));
       if (!mounted) return;
-      KazumiDialog.showToast(message: '已复制到剪贴板');
+      MiruDialog.showToast(message: '已复制到剪贴板');
     } catch (e) {
       if (!mounted) return;
-      KazumiDialog.showToast(message: '复制失败: $e');
+      MiruDialog.showToast(message: '复制失败: $e');
     }
   }
 

@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import 'package:kazumi/webview/video/video_webview_controller.dart';
-import 'package:kazumi/services/video_source/video_source_service.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
+import 'package:miru/services/video_source/video_source_service.dart';
+import 'package:miru/services/logging/logger.dart';
 
 /// WebView 视频源解析服务
 ///
@@ -61,10 +62,17 @@ class WebViewVideoSourceService implements IVideoSourceService {
     request.throwIfNotCurrent(_activeRequest);
 
     if (_webview == null) {
-      _webview = VideoWebviewControllerFactory.getController();
-      await _webview!.init();
-
-      _logSubscription = _webview!.onLog.listen((log) {
+      final webview = VideoWebviewControllerFactory.getController();
+      try {
+        await webview.init();
+      } catch (e) {
+        // 初始化失败的 WebView 绝不能残留：半初始化实例会让下一次
+        // resolve 直接操作不可用的控制器（NPE / 行为异常）。
+        await webview.dispose();
+        rethrow;
+      }
+      _webview = webview;
+      _logSubscription = webview.onLog.listen((log) {
         if (!_logController.isClosed) {
           _logController.add(log);
         }
@@ -83,17 +91,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
       request.throwIfNotCurrent(_activeRequest);
 
-      final parserFuture = _webview!.onVideoURLParser.first.timeout(
-        timeout,
-        onTimeout: () {
-          request.throwIfNotCurrent(_activeRequest);
-          throw VideoSourceTimeoutException(timeout);
-        },
-      );
-      final cancelFuture = request.cancelled.then<VideoParserEvent>((_) {
-        throw const VideoSourceCancelledException();
-      });
-      final event = await Future.any([parserFuture, cancelFuture]);
+      final event = await _waitForParserEvent(request, timeout);
 
       request.throwIfNotCurrent(_activeRequest);
 
@@ -111,12 +109,53 @@ class WebViewVideoSourceService implements IVideoSourceService {
       rethrow;
     } finally {
       if (didStartLoad) {
-        await _webview?.unloadPage();
+        try {
+          await _webview?.unloadPage();
+        } catch (e) {
+          // 清理失败不能覆盖原始解析异常，只记日志。
+          MiruLogger().w('WebViewVideoSourceService: unloadPage failed',
+              error: e);
+        }
       }
       if (identical(_activeRequest, request)) {
         _activeRequest = null;
       }
     }
+  }
+
+  /// 等待解析器事件。使用显式订阅而非 `.first.timeout`：
+  /// 超时/取消路径下广播流订阅会被立即释放，避免悬挂订阅泄漏。
+  Future<VideoParserEvent> _waitForParserEvent(
+    _ResolveRequest request,
+    Duration timeout,
+  ) {
+    final completer = Completer<VideoParserEvent>();
+    StreamSubscription<VideoParserEvent>? subscription;
+    Timer? timer;
+
+    void settle(VideoParserEvent event) {
+      if (!completer.isCompleted) {
+        completer.complete(event);
+      }
+    }
+
+    subscription = _webview!.onVideoURLParser.listen(settle);
+    request.cancelled.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(const VideoSourceCancelledException());
+      }
+    });
+    timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.completeError(VideoSourceTimeoutException(timeout));
+      }
+    });
+
+    return completer.future.whenComplete(() async {
+      // timer 是闭包捕获的可空局部变量，无法类型提升，需条件调用。
+      timer?.cancel();
+      await subscription?.cancel();
+    });
   }
 
   @override

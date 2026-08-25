@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'package:kazumi/webview/video/video_webview_controller.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
-import 'package:kazumi/utils/media.dart';
+import 'package:miru/utils/media.dart';
 
 class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
   bool bridgeInited = false;
@@ -49,7 +49,7 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
     }
 
     final (host, port) = parsed;
-    KazumiLogger().i('WebView: 代理设置成功 $host:$port');
+    MiruLogger().i('WebView: 代理设置成功 $host:$port');
     return ProxyConfiguration(host: host, port: port);
   }
 

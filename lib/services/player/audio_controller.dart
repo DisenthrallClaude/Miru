@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:audio_session/audio_session.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_service_mpris/audio_service_mpris.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/utils/async_session.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/async_session.dart';
 
 typedef AudioCallback = Future<void> Function();
 typedef AudioSeekCallback = Future<void> Function(Duration position);
@@ -12,7 +12,7 @@ typedef AudioSeekCallback = Future<void> Function(Duration position);
 class AudioController {
   AudioController();
 
-  _KazumiAudioHandler? _handler;
+  _MiruAudioHandler? _handler;
   Future<void>? _initFuture;
   String? _lastMediaItemCacheKey;
   AudioSession? _audioSession;
@@ -31,11 +31,11 @@ class AudioController {
   }
 
   Future<void> _initialize() async {
-    late _KazumiAudioHandler rawHandler;
+    late _MiruAudioHandler rawHandler;
     if (Platform.isLinux) {
       AudioServiceMpris.init(
-        dBusName: 'io.github.Predidit.Kazumi.channel.audio',
-        identity: 'Kazumi Playback',
+        dBusName: 'io.github.disenthrallclaude.miru.channel.audio',
+        identity: 'Miru Playback',
         canControl: true,
         canPlay: true,
         canPause: true,
@@ -45,12 +45,12 @@ class AudioController {
     }
     await AudioService.init(
       builder: () {
-        rawHandler = _KazumiAudioHandler();
+        rawHandler = _MiruAudioHandler();
         return rawHandler;
       },
       config: const AudioServiceConfig(
-        androidNotificationChannelId: 'io.github.Predidit.Kazumi.channel.audio',
-        androidNotificationChannelName: 'Kazumi Playback',
+        androidNotificationChannelId: 'io.github.disenthrallclaude.miru.channel.audio',
+        androidNotificationChannelName: 'Miru Playback',
         androidNotificationOngoing: true,
       ),
     );
@@ -78,7 +78,7 @@ class AudioController {
         });
       }
     } catch (e) {
-      KazumiLogger().w('AudioController: audio_session init failed', error: e);
+      MiruLogger().w('AudioController: audio_session init failed', error: e);
     }
   }
 
@@ -112,7 +112,7 @@ class AudioController {
         await _onPause!();
       }
     } catch (e) {
-      KazumiLogger().w('AudioController: interruption pause failed', error: e);
+      MiruLogger().w('AudioController: interruption pause failed', error: e);
     }
   }
 
@@ -122,7 +122,7 @@ class AudioController {
         await _onPlay!();
       }
     } catch (e) {
-      KazumiLogger().w('AudioController: interruption resume failed', error: e);
+      MiruLogger().w('AudioController: interruption resume failed', error: e);
     }
   }
 
@@ -132,7 +132,7 @@ class AudioController {
     try {
       await _audioSession?.setActive(active);
     } catch (e) {
-      KazumiLogger().w('AudioController: setActive($active) failed', error: e);
+      MiruLogger().w('AudioController: setActive($active) failed', error: e);
     }
   }
 
@@ -305,7 +305,7 @@ class AudioController {
   }
 }
 
-class _KazumiAudioHandler extends BaseAudioHandler with SeekHandler {
+class _MiruAudioHandler extends BaseAudioHandler with SeekHandler {
   AudioCallback? _onPlay;
   AudioCallback? _onPause;
   AudioCallback? _onSkipToNext;

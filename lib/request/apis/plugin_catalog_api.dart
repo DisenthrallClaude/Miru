@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/request/clients/rules_repo_client.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/modules/plugin/plugin_http_module.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/request/clients/rules_repo_client.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/modules/plugin/plugin_http_module.dart';
 
 class PluginCatalogApi {
   static final RulesRepoClient _client = RulesRepoClient.instance;
@@ -12,7 +12,7 @@ class PluginCatalogApi {
     final raw = await _client.getText('${ApiEndpoints.pluginShop}index.json');
     final result = parsePluginList(raw);
     if (result.skippedItems > 0) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'Plugin: skipped ${result.skippedItems} invalid rule catalog item(s)',
       );
     }

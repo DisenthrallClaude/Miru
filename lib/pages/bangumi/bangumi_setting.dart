@@ -1,10 +1,10 @@
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/bangumi/sync_priority.dart';
-import 'package:kazumi/services/sync/bangumi_sync_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/bangumi/sync_priority.dart';
+import 'package:miru/services/sync/bangumi_sync_service.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class BangumiEditorPage extends StatefulWidget {
@@ -50,7 +50,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
   Future<void> syncWithProgress() async {
     final syncEnable = GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (!syncEnable) {
-      KazumiDialog.showToast(message: '请先开启 Bangumi 同步');
+      MiruDialog.showToast(message: '请先开启 Bangumi 同步');
       return;
     }
 
@@ -61,7 +61,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
         syncCollectiblesing = true;
       });
 
-      KazumiDialog.show(
+      MiruDialog.show(
         clickMaskDismiss: false,
         builder: (context) =>
             _BangumiSyncProgressDialog(key: progressDialogKey),
@@ -78,10 +78,10 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
         },
       );
     } catch (e) {
-      KazumiDialog.showToast(message: 'Bangumi同步失败 $e');
+      MiruDialog.showToast(message: 'Bangumi同步失败 $e');
     } finally {
-      if (KazumiDialog.observer.hasKazumiDialog) {
-        KazumiDialog.dismiss();
+      if (MiruDialog.observer.hasMiruDialog) {
+        MiruDialog.dismiss();
       }
       if (mounted) {
         setState(() {
@@ -213,7 +213,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                         await launchUrl(url,
                             mode: LaunchMode.externalApplication);
                       } else {
-                        KazumiDialog.showToast(message: '无法打开链接');
+                        MiruDialog.showToast(message: '无法打开链接');
                       }
                     },
                     child: Text(
@@ -239,7 +239,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                       GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
 
                   if (token.isEmpty && bangumiSyncEnable) {
-                    KazumiDialog.showToast(message: 'Access Token 不能为空');
+                    MiruDialog.showToast(message: 'Access Token 不能为空');
                     return;
                   }
                   setState(() {
@@ -251,7 +251,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
 
                   if (token.isEmpty) {
                     bangumi.reset();
-                    KazumiDialog.showToast(message: 'Bangumi Token 为空，请检查');
+                    MiruDialog.showToast(message: 'Bangumi Token 为空，请检查');
                     if (!mounted) return;
                     setState(() {
                       isVerifying = false;
@@ -259,11 +259,11 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                     return;
                   }
 
-                  KazumiDialog.showToast(message: '正在测试 Bangumi Token...');
+                  MiruDialog.showToast(message: '正在测试 Bangumi Token...');
                   try {
                     await bangumi.init();
                   } catch (e) {
-                    KazumiDialog.showToast(message: '验证失败：${e.toString()}');
+                    MiruDialog.showToast(message: '验证失败：${e.toString()}');
                     await GStorage.putSetting(
                         SettingsKeys.bangumiSyncEnable, false);
                     if (!mounted) return;
@@ -273,7 +273,7 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                     return;
                   }
 
-                  KazumiDialog.showToast(
+                  MiruDialog.showToast(
                       message: '测试成功，用户名：${bangumi.username}');
                   if (!mounted) return;
                   setState(() {

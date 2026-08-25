@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/plugins/api_rule_config.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/utils/encoding.dart';
+import 'package:miru/plugins/api_rule_config.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/utils/encoding.dart';
 
 void main() {
   test('legacy plugin defaults to XPath modes', () {
@@ -145,7 +145,7 @@ void main() {
     expect(nestedChapter['roadsPath'], r'$.data.roads[*]');
   });
 
-  test('kazumi link import and export preserves API rule configuration', () {
+  test('miru link import and export preserves API rule configuration', () {
     final plugin = Plugin.fromJson({
       ..._legacyRule,
       'api': '8',
@@ -169,39 +169,39 @@ void main() {
       },
     });
 
-    final link = jsonToKazumiBase64(jsonEncode(plugin.toJson()));
+    final link = jsonToMiruBase64(jsonEncode(plugin.toJson()));
     final restored = Plugin.fromJson(
-      jsonDecode(kazumiBase64ToJson(link)) as Map<String, dynamic>,
+      jsonDecode(miruBase64ToJson(link)) as Map<String, dynamic>,
     );
 
     expect(restored.toJson(), plugin.toJson());
     expect(restored.chapterApiConfig.request.method, 'GET');
   });
 
-  test('kazumi link decoder accepts wrapped and percent-encoded links', () {
-    final link = jsonToKazumiBase64(jsonEncode(_legacyRule));
-    final payload = link.substring('kazumi://'.length);
+  test('miru link decoder accepts wrapped and percent-encoded links', () {
+    final link = jsonToMiruBase64(jsonEncode(_legacyRule));
+    final payload = link.substring('miru://'.length);
     final wrappedPayload =
         '${payload.substring(0, 16)}\n${payload.substring(16)}';
     final percentEncodedPayload = Uri.encodeComponent(payload);
 
     expect(
-      jsonDecode(kazumiBase64ToJson('  kazumi://$wrappedPayload  ')),
+      jsonDecode(miruBase64ToJson('  miru://$wrappedPayload  ')),
       _legacyRule,
     );
     expect(
-      jsonDecode(kazumiBase64ToJson('kazumi:$percentEncodedPayload')),
+      jsonDecode(miruBase64ToJson('miru:$percentEncodedPayload')),
       _legacyRule,
     );
   });
 
-  test('kazumi link decoder reports malformed links', () {
+  test('miru link decoder reports malformed links', () {
     expect(
-      () => kazumiBase64ToJson('https://example.com/rule'),
+      () => miruBase64ToJson('https://example.com/rule'),
       throwsA(isA<FormatException>()),
     );
     expect(
-      () => kazumiBase64ToJson('kazumi://not-base64!'),
+      () => miruBase64ToJson('miru://not-base64!'),
       throwsA(isA<FormatException>()),
     );
   });

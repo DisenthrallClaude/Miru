@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/utils/constants.dart';
 
-/// Kazumi 视觉层设计系统。
+/// Miru 视觉层设计系统。
 ///
 /// 这里只描述"长什么样"，不含任何业务逻辑。所有页面通过 `Theme.of(context)`
 /// 消费这里的令牌，因此调整本文件即可整体改变观感，而无需触碰任何后端代码。
@@ -69,6 +69,22 @@ abstract final class Motion {
 
   /// 元素退场。
   static const Curve exit = Curves.easeInCubic;
+
+  /// 弹簧物理参数（配合 flutter/physics 的 SpringSimulation）。
+  ///
+  /// * [bouncy]：欠阻尼，明显过冲回弹——玻璃滑块、按压回弹。
+  /// * [snappy]：轻微过冲，快速收敛——面板进出、列表重排。
+  /// * [gentle]：几乎无过冲——背景色温、透明度这类不宜晃动的属性。
+  static SpringDescription get bouncy =>
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 0.62);
+  static SpringDescription get snappy =>
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.82);
+  static SpringDescription get gentle =>
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 320, ratio: 1.0);
+
+  /// 隐式动画可用的类弹簧曲线（无法用 Simulation 时）：
+  /// easeOutBack 带一次柔和过冲，观感接近 snappy 弹簧。
+  static const Curve springy = Curves.easeOutBack;
 }
 
 /// 液态玻璃材质参数。
@@ -121,48 +137,63 @@ abstract final class Frost {
 // 中性化表面色板
 // ---------------------------------------------------------------------------
 
-/// M3 的 `fromSeed` 会把种子色的色相染到所有表面上，观感偏"彩色"。
-/// 这里把表面层替换为近中性灰阶（参考 iOS 的 systemBackground 体系），
-/// 只在 primary / secondary / tertiary 等强调角色上保留种子色，
-/// 从而得到"清爽、留白、强调克制"的极简效果。
+/// M3 的 `fromSeed` 会把种子色的色相重染到所有表面上，观感偏"彩色"。
+/// 这里把表面层替换为**极低饱和的主题色调表面**：
+/// 只保留约 4% 的种子色饱和度，明度沿用 iOS systemBackground 体系的灰阶，
+/// 强调角色仍由 primary / secondary / tertiary 承担。
+///
+/// 为什么不再用纯灰阶：液态玻璃的通透感来自「模糊采样到下方真实内容」，
+/// 纯灰背景下模糊结果依然是灰，玻璃退化为半透明面板。
+/// 注入一丝色温后，不同主题色下的背景有了可感知的色彩呼吸，
+/// 玻璃的模糊、高光、镜面渐变才真正"活"起来。
 ///
 /// 注意：动态取色（Monet）与用户自定义主题色依然生效——它们决定强调色，
-/// 只是不再污染大面积背景。
+/// 同时以极轻的力度染在背景层上。
 ColorScheme _neutralizeSurfaces(ColorScheme scheme) {
+  Color tinted(double lightness) {
+    final hsl = HSLColor.fromColor(scheme.primary);
+    // 饱和度压到 0.04~0.06：肉眼近似中性灰，但保留了主题色的温度。
+    return hsl
+        .withSaturation(
+            scheme.brightness == Brightness.light ? 0.04 : 0.06)
+        .withLightness(lightness)
+        .toColor();
+  }
+
   if (scheme.brightness == Brightness.light) {
     return scheme.copyWith(
       surface: const Color(0xFFFFFFFF),
-      surfaceDim: const Color(0xFFE9E9EE),
+      surfaceDim: tinted(0.90),
       surfaceBright: const Color(0xFFFFFFFF),
       surfaceContainerLowest: const Color(0xFFFFFFFF),
-      surfaceContainerLow: const Color(0xFFFAFAFC),
-      surfaceContainer: const Color(0xFFF2F2F7),
-      surfaceContainerHigh: const Color(0xFFECECF1),
-      surfaceContainerHighest: const Color(0xFFE5E5EA),
+      surfaceContainerLow: tinted(0.975),
+      surfaceContainer: tinted(0.955),
+      surfaceContainerHigh: tinted(0.93),
+      surfaceContainerHighest: tinted(0.90),
       onSurface: const Color(0xFF1C1C1E),
       onSurfaceVariant: const Color(0xFF6E6E73),
       outline: const Color(0xFFC6C6C8),
       outlineVariant: const Color(0xFFE3E3E8),
-      inverseSurface: const Color(0xFF2C2C2E),
+      inverseSurface: tinted(0.18),
       onInverseSurface: const Color(0xFFF2F2F7),
       shadow: const Color(0xFF000000),
       scrim: const Color(0xFF000000),
     );
   }
   return scheme.copyWith(
-    surface: const Color(0xFF121214),
-    surfaceDim: const Color(0xFF0E0E10),
-    surfaceBright: const Color(0xFF2C2C2E),
-    surfaceContainerLowest: const Color(0xFF0A0A0B),
-    surfaceContainerLow: const Color(0xFF161618),
-    surfaceContainer: const Color(0xFF1C1C1E),
-    surfaceContainerHigh: const Color(0xFF232326),
-    surfaceContainerHighest: const Color(0xFF2C2C2E),
+    surface: tinted(0.075),
+    surfaceDim: tinted(0.055),
+    surfaceBright: tinted(0.17),
+    surfaceContainerLowest: tinted(0.05),
+    surfaceContainerLow: tinted(0.10),
+    surfaceContainer: tinted(0.125),
+    surfaceContainerHigh: tinted(0.155),
+    surfaceContainerHighest: tinted(0.19),
     onSurface: const Color(0xFFF2F2F7),
     onSurfaceVariant: const Color(0xFF98989F),
     outline: const Color(0xFF3A3A3C),
     outlineVariant: const Color(0xFF2A2A2C),
-    inverseSurface: const Color(0xFFE5E5EA),
+    inverseSurface: tinted(0.91),
     onInverseSurface: const Color(0xFF1C1C1E),
     shadow: const Color(0xFF000000),
     scrim: const Color(0xFF000000),
@@ -178,7 +209,7 @@ ColorScheme _neutralizeSurfaces(ColorScheme scheme) {
 ///
 /// [fontFamily] 为 null 时表示用户开启了「使用系统字体」，
 /// 此时不指定 family，仅保留字阶与字重，交由系统字体渲染。
-TextTheme buildKazumiTextTheme(Brightness brightness, String? fontFamily) {
+TextTheme buildMiruTextTheme(Brightness brightness, String? fontFamily) {
   // 刻意不指定 color：ThemeData 会把本 TextTheme 合并到 Typography 之上，
   // 由配色方案决定前景色。若在此写死颜色，FilledButton / AppBar 之类
   // 依赖 foregroundColor 的控件会出现对比度错误。
@@ -231,11 +262,11 @@ TextTheme buildKazumiTextTheme(Brightness brightness, String? fontFamily) {
 // 主题构造
 // ---------------------------------------------------------------------------
 
-/// 构造 Kazumi 的完整主题。
+/// 构造 Miru 的完整主题。
 ///
 /// [colorScheme] 优先（动态取色场景），否则用 [seedColor] 生成。
 /// 二者都为空时回落到 [kDefaultSeedColor]。
-ThemeData buildKazumiTheme({
+ThemeData buildMiruTheme({
   required Brightness brightness,
   required String? fontFamily,
   Color? seedColor,
@@ -253,7 +284,7 @@ ThemeData buildKazumiTheme({
         : base.copyWith(brightness: brightness),
   );
 
-  final TextTheme textTheme = buildKazumiTextTheme(brightness, fontFamily);
+  final TextTheme textTheme = buildMiruTextTheme(brightness, fontFamily);
   final bool isLight = brightness == Brightness.light;
 
   return ThemeData(

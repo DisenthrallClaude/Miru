@@ -1,24 +1,24 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:kazumi/app_module.dart';
-import 'package:kazumi/app_widget.dart';
+import 'package:miru/app_module.dart';
+import 'package:miru/app_widget.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/settings/theme_provider.dart';
+import 'package:miru/bean/settings/theme_provider.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
-import 'package:kazumi/services/network/metered_network_service.dart';
-import 'package:kazumi/services/network/proxy_manager.dart';
-import 'package:kazumi/services/network/system_proxy_service.dart';
+import 'package:miru/services/network/metered_network_service.dart';
+import 'package:miru/services/network/proxy_manager.dart';
+import 'package:miru/services/network/system_proxy_service.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/pages/error/storage_error_page.dart';
+import 'package:miru/pages/error/storage_error_page.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/services/platform/webview_feature_service.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/navigation.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/services/platform/webview_feature_service.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/navigation.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,7 +80,7 @@ void main() async {
           ? TitleBarStyle.hidden
           : TitleBarStyle.normal,
       windowButtonVisibility: showWindowButton,
-      title: 'Kazumi',
+      title: 'Miru',
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       // window_manager controls desktop visibility to avoid startup flicker.
@@ -97,7 +97,7 @@ void main() async {
     ModularApp(
       module: appModule,
       navigatorKey: rootNavigatorKey,
-      navigatorObservers: [KazumiDialog.observer, rootRouteObserver],
+      navigatorObservers: [MiruDialog.observer, rootRouteObserver],
       defaultTransition: TransitionType.material,
       provide: (scoped) {
         scoped.addChangeNotifier<ThemeProvider>(ThemeProvider.new);

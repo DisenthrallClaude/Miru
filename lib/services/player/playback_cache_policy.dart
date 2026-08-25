@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/network/metered_network_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/async_serial_queue.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/metered_network_service.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/async_serial_queue.dart';
 import 'package:media_kit/media_kit.dart';
 
 /// Owns the demuxer cache size of the player returned by [currentPlayer].
@@ -71,7 +71,7 @@ class PlaybackCachePolicy {
         await pp.setProperty('demuxer-max-back-bytes', size);
       });
     } catch (e) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'PlaybackCachePolicy: failed to apply demuxer cache size',
         error: e,
       );

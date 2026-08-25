@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bbcode/bbcode_widget.dart';
-import 'package:kazumi/bean/widget/bangumi_avatar.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/utils/date_time.dart';
+import 'package:miru/bbcode/bbcode_widget.dart';
+import 'package:miru/bean/widget/bangumi_avatar.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/utils/date_time.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
 // 16 and 12 are M3 `large` and a 4dp-grid step; the replies block nested inside

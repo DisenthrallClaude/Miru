@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/modules/danmaku/danmaku_module.dart';
+import 'package:miru/modules/danmaku/danmaku_module.dart';
 
 Color generateDanmakuColor(int colorValue) {
   final red = (colorValue >> 16) & 0xFF;

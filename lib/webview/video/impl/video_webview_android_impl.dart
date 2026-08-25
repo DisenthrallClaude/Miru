@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/webview/video/video_webview_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
 import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
     as android_webview;
-import 'package:kazumi/utils/media.dart';
-import 'package:kazumi/utils/http_headers.dart';
+import 'package:miru/utils/media.dart';
+import 'package:miru/utils/http_headers.dart';
 
 class VideoWebviewAndroidImpl
     extends VideoWebviewController<PlatformInAppWebViewController> {
@@ -21,7 +21,8 @@ class VideoWebviewAndroidImpl
     headlessWebView ??= PlatformHeadlessInAppWebView(
       PlatformHeadlessInAppWebViewCreationParams(
         initialSettings: InAppWebViewSettings(
-          userAgent: getRandomUA(),
+          // 与 mpv 播放共用会话 UA：解析与播放必须同源，否则防盗链 CDN 拒播
+          userAgent: getSessionUA(),
           mediaPlaybackRequiresUserGesture: true,
           cacheEnabled: false,
           blockNetworkImage: true,
@@ -32,7 +33,7 @@ class VideoWebviewAndroidImpl
           geolocationEnabled: false,
         ),
         onWebViewCreated: (controller) {
-          print('[WebView] Created');
+          MiruLogger().i('[WebView] Created');
           webviewController = controller;
           initEventController.add(true);
         },
@@ -191,8 +192,12 @@ class VideoWebviewAndroidImpl
                 try {
                     let content = this.responseText;
                     if (content.trim().startsWith("#EXTM3U")) {
-                        window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found: ' + args[1]);
-                        window.flutter_inappwebview.callHandler('VideoBridgeDebug', args[1]);
+                        // 站点可能给相对地址；统一在 JS 侧按页面 baseURI 补全，
+                        // 否则 mpv 收到相对路径必然 Failed to open。
+                        let requestUrl = args[1];
+                        try { requestUrl = new URL(requestUrl, document.baseURI).href; } catch {}
+                        window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found: ' + requestUrl);
+                        window.flutter_inappwebview.callHandler('VideoBridgeDebug', requestUrl);
                     };
                 } catch {}
             });
@@ -221,13 +226,19 @@ class VideoWebviewAndroidImpl
             }
           }
         });
+        function toAbsoluteUrl(raw) {
+          // 相对路径按页面 baseURI 补全；失败时返回原值由 Dart 侧过滤。
+          try { return new URL(raw, document.baseURI).href; } catch {}
+          return raw;
+        }
         function processVideoElement(video) {
           window.flutter_inappwebview.callHandler('LogBridge', 'Scanning video element for source URL');
           let src = video.getAttribute('src');
           if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
             _observer.disconnect();
-            window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found: ' + src);
-            window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
+            const absolute = toAbsoluteUrl(src);
+            window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found: ' + absolute);
+            window.flutter_inappwebview.callHandler('VideoBridgeDebug', absolute);
             return true;
           }
           const sources = video.getElementsByTagName('source');
@@ -235,8 +246,9 @@ class VideoWebviewAndroidImpl
             src = source.getAttribute('src');
             if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
               _observer.disconnect();
-              window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found (source tag): ' + src);
-              window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
+              const absolute = toAbsoluteUrl(src);
+              window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found (source tag): ' + absolute);
+              window.flutter_inappwebview.callHandler('VideoBridgeDebug', absolute);
               return true;
             }
           }
@@ -305,7 +317,7 @@ class VideoWebviewAndroidImpl
           await android_webview.AndroidWebViewFeature.instance()
               .isFeatureSupported(WebViewFeature.PROXY_OVERRIDE);
       if (!proxyAvailable) {
-        KazumiLogger().w('WebView: 当前 Android 版本不支持代理');
+        MiruLogger().w('WebView: 当前 Android 版本不支持代理');
         return;
       }
 
@@ -318,9 +330,9 @@ class VideoWebviewAndroidImpl
           ],
         ),
       );
-      KazumiLogger().i('WebView: 代理设置成功 $formattedProxy');
+      MiruLogger().i('WebView: 代理设置成功 $formattedProxy');
     } catch (e) {
-      KazumiLogger().e('WebView: 设置代理失败 $e');
+      MiruLogger().e('WebView: 设置代理失败 $e');
     }
   }
 }

@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 /// Tracks whether the active link is cellular data rather than WLAN / LAN.
 class MeteredNetworkService {
@@ -26,7 +26,7 @@ class MeteredNetworkService {
     _subscription = Connectivity().onConnectivityChanged.listen(
       _apply,
       onError: (Object error) {
-        KazumiLogger().w('Network: 网络类型监听中断 $error');
+        MiruLogger().w('Network: 网络类型监听中断 $error');
       },
     );
   }
@@ -36,7 +36,7 @@ class MeteredNetworkService {
     if (metered == null || metered == _metered.value) {
       return;
     }
-    KazumiLogger()
+    MiruLogger()
         .i(metered ? 'Network: 切换到移动数据网络' : 'Network: 切换到 WLAN / 局域网');
     _metered.value = metered;
   }

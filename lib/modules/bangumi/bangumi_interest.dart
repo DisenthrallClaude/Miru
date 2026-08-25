@@ -1,4 +1,4 @@
-import 'package:kazumi/modules/comments/comment_item.dart';
+import 'package:miru/modules/comments/comment_item.dart';
 
 class BangumiInterest {
   final int id;

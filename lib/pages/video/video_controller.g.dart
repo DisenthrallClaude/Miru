@@ -312,6 +312,17 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
+  void _applyFallbackContext(SourceFallback candidate, List<Road> roads) {
+    final _$actionInfo = _$_VideoPageControllerActionController.startAction(
+        name: '_VideoPageController._applyFallbackContext');
+    try {
+      return super._applyFallbackContext(candidate, roads);
+    } finally {
+      _$_VideoPageControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   void _applyEpisodeComments(
       int episode, EpisodeInfo info, List<EpisodeCommentItem> comments) {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(

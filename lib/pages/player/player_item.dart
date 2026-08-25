@@ -1,44 +1,44 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:kazumi/pages/player/player_item_panel.dart';
-import 'package:kazumi/pages/player/player_keyboard_shortcuts.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/pages/player/player_panel_hold.dart';
-import 'package:kazumi/pages/player/player_pointer_interaction.dart';
-import 'package:kazumi/pages/player/player_screenshot_feedback_overlay.dart';
-import 'package:kazumi/pages/player/smallest_player_item_panel.dart';
-import 'package:kazumi/pages/player/syncplay_sheet.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/player/pip_utils.dart';
-import 'package:kazumi/services/sync/webdav.dart';
+import 'package:miru/pages/player/player_item_panel.dart';
+import 'package:miru/pages/player/player_keyboard_shortcuts.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/pages/player/player_panel_hold.dart';
+import 'package:miru/pages/player/player_pointer_interaction.dart';
+import 'package:miru/pages/player/player_screenshot_feedback_overlay.dart';
+import 'package:miru/pages/player/smallest_player_item_panel.dart';
+import 'package:miru/pages/player/syncplay_sheet.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/services/sync/webdav.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:miru/pages/player/player_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
+import 'package:miru/pages/video/video_controller.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/player/video_details_sheet.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/player/video_details_sheet.dart';
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
-import 'package:kazumi/pages/history/history_controller.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/request/apis/danmaku_api.dart';
-import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
-import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
-import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
-import 'package:kazumi/pages/player/player_item_surface.dart';
+import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/request/apis/danmaku_api.dart';
+import 'package:miru/modules/danmaku/danmaku_search_response.dart';
+import 'package:miru/modules/danmaku/danmaku_episode_response.dart';
+import 'package:miru/modules/danmaku/danmaku_module.dart';
+import 'package:miru/pages/player/controller/player_danmaku_controller.dart';
+import 'package:miru/pages/player/player_item_surface.dart';
 import 'package:mobx/mobx.dart' as mobx;
-import 'package:kazumi/pages/my/my_controller.dart';
+import 'package:miru/pages/my/my_controller.dart';
 import 'package:saver_gallery/saver_gallery.dart';
-import 'package:kazumi/services/player/audio_controller.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/services/platform/display_mode_service.dart';
-import 'package:kazumi/services/platform/player_menu_service.dart';
+import 'package:miru/services/player/audio_controller.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/services/platform/display_mode_service.dart';
+import 'package:miru/services/platform/player_menu_service.dart';
 
 class PlayerItem extends StatefulWidget {
   const PlayerItem({
@@ -169,7 +169,7 @@ class _PlayerItemState extends State<PlayerItem>
     try {
       await PipUtils.setAndroidAutoEnterPIPEnabled(autoEnterPIPEnabled);
     } catch (e) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'PlayerItem: failed to sync android auto enter pip setting',
         error: e,
       );
@@ -183,7 +183,7 @@ class _PlayerItemState extends State<PlayerItem>
     try {
       await PipUtils.setAndroidPIPInPlayerPage(inPlayerPage);
     } catch (e) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'PlayerItem: failed to sync android pip player page state',
         error: e,
       );
@@ -281,11 +281,11 @@ class _PlayerItemState extends State<PlayerItem>
     }
 
     if (targetEpisode > episodes.length) {
-      KazumiDialog.showToast(message: '已经是最新一集');
+      MiruDialog.showToast(message: '已经是最新一集');
       return;
     }
     if (targetEpisode <= 0) {
-      KazumiDialog.showToast(message: '已经是第一集');
+      MiruDialog.showToast(message: '已经是第一集');
       return;
     }
 
@@ -297,7 +297,7 @@ class _PlayerItemState extends State<PlayerItem>
     // the toast here is progress feedback only.
     final targetRef = videoPageController.resolveEpisode(targetSelection);
     if (targetRef != null) {
-      KazumiDialog.showToast(message: '正在加载${targetRef.displayTitle}');
+      MiruDialog.showToast(message: '正在加载${targetRef.displayTitle}');
     }
     widget.changeEpisode(targetEpisode, currentRoad: currentRoad);
   }
@@ -310,7 +310,7 @@ class _PlayerItemState extends State<PlayerItem>
         ),
       );
     } catch (e) {
-      KazumiLogger().e('PlayerController: seek failed', error: e);
+      MiruLogger().e('PlayerController: seek failed', error: e);
     }
   }
 
@@ -340,7 +340,7 @@ class _PlayerItemState extends State<PlayerItem>
           ),
         );
       } catch (e) {
-        KazumiLogger().e('PlayerController: seek failed', error: e);
+        MiruLogger().e('PlayerController: seek failed', error: e);
       }
     }
   }
@@ -478,7 +478,7 @@ class _PlayerItemState extends State<PlayerItem>
         var webDav = WebDav();
         await webDav.syncHistory();
       } catch (e) {
-        KazumiLogger().w('WebDav: auto history sync failed', error: e);
+        MiruLogger().w('WebDav: auto history sync failed', error: e);
       }
     }
   }
@@ -494,7 +494,7 @@ class _PlayerItemState extends State<PlayerItem>
       );
       _syncAudioServiceState();
     } catch (e) {
-      KazumiLogger().w('AudioController: failed to bind callbacks', error: e);
+      MiruLogger().w('AudioController: failed to bind callbacks', error: e);
     }
   }
 
@@ -550,7 +550,7 @@ class _PlayerItemState extends State<PlayerItem>
         ),
       );
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('AudioController: failed to sync playback state', error: e);
     }
   }
@@ -589,7 +589,7 @@ class _PlayerItemState extends State<PlayerItem>
     try {
       completed = await playerController.seeking.commitInteractiveSeek();
     } catch (e) {
-      KazumiLogger().e('PlayerController: interactive seek failed', error: e);
+      MiruLogger().e('PlayerController: interactive seek failed', error: e);
     }
     if (!mounted ||
         (!completed && playerController.seeking.hasActiveInteractiveSeek)) {
@@ -625,7 +625,7 @@ class _PlayerItemState extends State<PlayerItem>
     _playScreenshotFeedback();
 
     if (isDesktop()) {
-      KazumiDialog.showToast(message: '桌面端暂未支持保存截图');
+      MiruDialog.showToast(message: '桌面端暂未支持保存截图');
       return;
     }
 
@@ -633,7 +633,7 @@ class _PlayerItemState extends State<PlayerItem>
       Uint8List? screenshot = await playerController.screenshotPng();
 
       if (screenshot == null) {
-        KazumiDialog.showToast(message: '截图失败：未获取到图像');
+        MiruDialog.showToast(message: '截图失败：未获取到图像');
         return;
       }
 
@@ -643,10 +643,10 @@ class _PlayerItemState extends State<PlayerItem>
         skipIfExists: false,
       );
       if (!result.isSuccess) {
-        KazumiDialog.showToast(message: '截图保存失败：${result.errorMessage}');
+        MiruDialog.showToast(message: '截图保存失败：${result.errorMessage}');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: '截图失败：$e');
+      MiruDialog.showToast(message: '截图失败：$e');
     }
   }
 
@@ -666,7 +666,7 @@ class _PlayerItemState extends State<PlayerItem>
           GStorage.getSetting(SettingsKeys.androidVideoRenderer);
 
       if (androidVideoRenderer == 'mediacodec_embed') {
-        await KazumiDialog.show(builder: (context) {
+        await MiruDialog.show(builder: (context) {
           return AlertDialog(
             title: const Text('兼容性提示'),
             content: const Text('MediaCodec 渲染器不支持超分辨率功能。\n\n'
@@ -674,7 +674,7 @@ class _PlayerItemState extends State<PlayerItem>
             actions: [
               TextButton(
                 onPressed: () {
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                 },
                 child: const Text('确定'),
               ),
@@ -693,7 +693,7 @@ class _PlayerItemState extends State<PlayerItem>
     if (requiresPerformanceWarning && !warningDisabled) {
       bool confirmed = false;
 
-      await KazumiDialog.show(builder: (context) {
+      await MiruDialog.show(builder: (context) {
         bool dontAskAgain = false;
 
         return StatefulBuilder(builder: (context, setState) {
@@ -727,7 +727,7 @@ class _PlayerItemState extends State<PlayerItem>
                       true,
                     );
                   }
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                 },
                 child: const Text('取消'),
               ),
@@ -740,7 +740,7 @@ class _PlayerItemState extends State<PlayerItem>
                       true,
                     );
                   }
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                 },
                 child: const Text('确认'),
               ),
@@ -848,18 +848,18 @@ class _PlayerItemState extends State<PlayerItem>
           index++;
           setPlaybackSpeed(defaultPlaySpeedList[index]);
         } else {
-          KazumiDialog.showToast(message: '已达倍速上限');
+          MiruDialog.showToast(message: '已达倍速上限');
         }
       } else if (type == "down") {
         if (index > 0) {
           index--;
           setPlaybackSpeed(defaultPlaySpeedList[index]);
         } else {
-          KazumiDialog.showToast(message: '已达倍速下限');
+          MiruDialog.showToast(message: '已达倍速下限');
         }
       }
     } catch (e) {
-      KazumiLogger().e('PlayerController: speed change failed', error: e);
+      MiruLogger().e('PlayerController: speed change failed', error: e);
     }
   }
 
@@ -883,7 +883,7 @@ class _PlayerItemState extends State<PlayerItem>
       _showVolumeAdjustmentHud();
       _scheduleAdjustmentHudHide(delay: const Duration(seconds: 1));
     } catch (e) {
-      KazumiLogger().e('PlayerController: volume change failed', error: e);
+      MiruLogger().e('PlayerController: volume change failed', error: e);
     }
   }
 
@@ -1033,7 +1033,7 @@ class _PlayerItemState extends State<PlayerItem>
           // instead of silently retrying here every second.
           final nextRef = videoPageController.resolveEpisode(nextSelection);
           if (nextRef != null) {
-            KazumiDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+            MiruDialog.showToast(message: '正在加载${nextRef.displayTitle}');
           }
           try {
             playerTimer!.cancel();
@@ -1047,24 +1047,24 @@ class _PlayerItemState extends State<PlayerItem>
   }
 
   void showDanmakuSearchDialog(String keyword) async {
-    KazumiDialog.dismiss();
-    KazumiDialog.showLoading(msg: '弹幕检索中');
+    MiruDialog.dismiss();
+    MiruDialog.showLoading(msg: '弹幕检索中', glass: false);
     DanmakuSearchResponse danmakuSearchResponse;
     DanmakuEpisodeResponse danmakuEpisodeResponse;
     try {
       danmakuSearchResponse =
           await DanmakuApi.getDanmakuSearchResponse(keyword);
     } catch (e) {
-      KazumiDialog.dismiss();
-      KazumiLogger().w('PlayerItem: danmaku search failed', error: e);
+      MiruDialog.dismiss();
+      MiruLogger().w('PlayerItem: danmaku search failed', error: e);
       return;
     }
-    KazumiDialog.dismiss();
+    MiruDialog.dismiss();
     if (danmakuSearchResponse.animes.isEmpty) {
-      KazumiDialog.showToast(message: '未找到匹配结果');
+      MiruDialog.showToast(message: '未找到匹配结果');
       return;
     }
-    await KazumiDialog.show(builder: (context) {
+    await MiruDialog.show(builder: (context) {
       return Dialog(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
@@ -1074,24 +1074,24 @@ class _PlayerItemState extends State<PlayerItem>
               return ListTile(
                 title: Text(danmakuInfo.animeTitle),
                 onTap: () async {
-                  KazumiDialog.dismiss();
-                  KazumiDialog.showLoading(msg: '弹幕检索中');
+                  MiruDialog.dismiss();
+                  MiruDialog.showLoading(msg: '弹幕检索中', glass: false);
                   try {
                     danmakuEpisodeResponse =
                         await DanmakuApi.getDanDanEpisodesByDanDanBangumiID(
                             danmakuInfo.animeId);
                   } catch (e) {
-                    KazumiDialog.dismiss();
-                    KazumiLogger()
+                    MiruDialog.dismiss();
+                    MiruLogger()
                         .w('PlayerItem: danmaku episode failed', error: e);
                     return;
                   }
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                   if (danmakuEpisodeResponse.episodes.isEmpty) {
-                    KazumiDialog.showToast(message: '未找到匹配结果');
+                    MiruDialog.showToast(message: '未找到匹配结果');
                     return;
                   }
-                  KazumiDialog.show(builder: (context) {
+                  MiruDialog.show(builder: (context) {
                     return Dialog(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 560),
@@ -1102,7 +1102,7 @@ class _PlayerItemState extends State<PlayerItem>
                             return ListTile(
                               title: Text(episode.episodeTitle),
                               onTap: () async {
-                                KazumiDialog.dismiss();
+                                MiruDialog.dismiss();
                                 try {
                                   videoPageController
                                       .cancelAutomaticDanmakuLoad();
@@ -1116,14 +1116,14 @@ class _PlayerItemState extends State<PlayerItem>
                                   if (hasDanmakus) {
                                     playerController.danmaku
                                         .setDanmakuEnabled(true);
-                                    KazumiDialog.showToast(message: '弹幕切换成功');
+                                    MiruDialog.showToast(message: '弹幕切换成功');
                                   } else {
                                     playerController.danmaku
                                         .setDanmakuEnabled(false);
-                                    KazumiDialog.showToast(message: '未找到弹幕内容');
+                                    MiruDialog.showToast(message: '未找到弹幕内容');
                                   }
                                 } catch (e) {
-                                  KazumiDialog.showToast(message: '弹幕切换失败');
+                                  MiruDialog.showToast(message: '弹幕切换失败');
                                 }
                               },
                             );
@@ -1143,7 +1143,7 @@ class _PlayerItemState extends State<PlayerItem>
 
   void showDanmakuSwitch() {
     String searchKeyword = videoPageController.title;
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('弹幕检索'),
@@ -1160,7 +1160,7 @@ class _PlayerItemState extends State<PlayerItem>
           actions: [
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: Text(
                 '取消',

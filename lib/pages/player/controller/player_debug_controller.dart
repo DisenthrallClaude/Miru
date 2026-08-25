@@ -2,7 +2,7 @@
 
 import 'dart:async';
 
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:mobx/mobx.dart';
 
@@ -56,7 +56,7 @@ abstract class _PlayerDebugController with Store {
     playerLogSubscription = player.stream.log.listen((event) {
       playerLog.add(event.toString());
       if (playerDebugMode) {
-        KazumiLogger().i("MPV: ${event.toString()}", forceLog: true);
+        MiruLogger().i("MPV: ${event.toString()}", forceLog: true);
       }
     });
     await playerWidthSubscription?.cancel();

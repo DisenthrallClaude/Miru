@@ -1,14 +1,14 @@
 // ignore_for_file: library_private_types_in_public_api
 
 import 'package:canvas_danmaku/canvas_danmaku.dart' as canvas;
-import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/pages/player/controller/player_models.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/request/apis/danmaku_api.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/modules/danmaku/danmaku_module.dart';
+import 'package:miru/pages/player/controller/player_models.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/request/apis/danmaku_api.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/utils/danmaku.dart';
+import 'package:miru/utils/danmaku.dart';
 
 part 'player_danmaku_controller.g.dart';
 
@@ -193,7 +193,7 @@ abstract class _PlayerDanmakuController with Store {
 
   Future<DanmakuLoadResult> _fetchCachedDanmaku(
       int bangumiId, String pluginName, int episode) async {
-    KazumiLogger().i(
+    MiruLogger().i(
         'PlayerController: attempting to load cached danmaku for episode $episode');
     var nextBangumiID = bangumiID;
     try {
@@ -204,14 +204,14 @@ abstract class _PlayerDanmakuController with Store {
       );
 
       if (cachedDanmakus != null && cachedDanmakus.isNotEmpty) {
-        KazumiLogger().i(
+        MiruLogger().i(
             'PlayerController: loaded ${cachedDanmakus.length} cached danmakus');
         return DanmakuLoadResult.success(
           danmakus: cachedDanmakus,
           bangumiID: nextBangumiID,
         );
       } else {
-        KazumiLogger()
+        MiruLogger()
             .i('PlayerController: no cached danmaku, attempting online fetch');
         try {
           nextBangumiID =
@@ -219,7 +219,7 @@ abstract class _PlayerDanmakuController with Store {
           if (nextBangumiID != 0) {
             var res = await DanmakuApi.getDanDanmaku(nextBangumiID, episode);
             if (res.isNotEmpty) {
-              KazumiLogger()
+              MiruLogger()
                   .i('PlayerController: fetched ${res.length} danmakus online');
               _saveDanmakuToCache(downloadController, bangumiId, pluginName,
                   episode, res, nextBangumiID);
@@ -230,14 +230,14 @@ abstract class _PlayerDanmakuController with Store {
             );
           }
         } catch (e) {
-          KazumiLogger().w(
+          MiruLogger().w(
               'PlayerController: failed to fetch danmaku online (may be offline)',
               error: e);
           return DanmakuLoadResult.failed(bangumiID: nextBangumiID);
         }
       }
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('PlayerController: failed to load cached danmaku', error: e);
       return DanmakuLoadResult.failed(bangumiID: nextBangumiID);
     }
@@ -262,17 +262,17 @@ abstract class _PlayerDanmakuController with Store {
         danmakus,
         danDanID,
       );
-      KazumiLogger()
+      MiruLogger()
           .i('PlayerController: saved ${danmakus.length} danmakus to cache');
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('PlayerController: failed to save danmaku to cache', error: e);
     }
   }
 
   Future<DanmakuLoadResult> _fetchDanDanmakuByBgmBangumiID(
       int bgmBangumiID, int episode) async {
-    KazumiLogger().i(
+    MiruLogger().i(
         'PlayerController: attempting to get danmaku [BgmBangumiID] $bgmBangumiID');
     var nextBangumiID = bangumiID;
     try {
@@ -290,7 +290,7 @@ abstract class _PlayerDanmakuController with Store {
         bangumiID: nextBangumiID,
       );
     } catch (e) {
-      KazumiLogger().w(
+      MiruLogger().w(
           'PlayerController: failed to get danmaku [BgmBangumiID] $bgmBangumiID',
           error: e);
     }
@@ -299,7 +299,7 @@ abstract class _PlayerDanmakuController with Store {
 
   @action
   Future<bool> getDanDanmakuByEpisodeID(int episodeID) async {
-    KazumiLogger().i('PlayerController: attempting to get danmaku $episodeID');
+    MiruLogger().i('PlayerController: attempting to get danmaku $episodeID');
     danmakuLoading = true;
     try {
       danDanmakus.clear();
@@ -307,7 +307,7 @@ abstract class _PlayerDanmakuController with Store {
       addDanmakus(res);
       return res.isNotEmpty;
     } catch (e) {
-      KazumiLogger().w('PlayerController: failed to get danmaku', error: e);
+      MiruLogger().w('PlayerController: failed to get danmaku', error: e);
       rethrow;
     } finally {
       danmakuLoading = false;

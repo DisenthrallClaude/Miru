@@ -2,13 +2,13 @@
 
 import 'dart:async';
 
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/player/controller/player_models.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/player/syncplay_client.dart';
-import 'package:kazumi/services/player/syncplay_endpoint.dart';
-import 'package:kazumi/utils/async_session.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/player/controller/player_models.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/player/syncplay_client.dart';
+import 'package:miru/services/player/syncplay_endpoint.dart';
+import 'package:miru/utils/async_session.dart';
 import 'package:mobx/mobx.dart';
 
 part 'player_syncplay_controller.g.dart';
@@ -93,13 +93,13 @@ abstract class _PlayerSyncPlayController with Store {
     }
     final String syncPlayEndPoint =
         GStorage.getSetting(SettingsKeys.syncPlayEndPoint);
-    KazumiLogger().i('SyncPlay: connecting to $syncPlayEndPoint');
+    MiruLogger().i('SyncPlay: connecting to $syncPlayEndPoint');
     final parsed = parseSyncPlayEndPoint(syncPlayEndPoint);
     if (parsed == null) {
-      KazumiDialog.showToast(
+      MiruDialog.showToast(
         message: 'SyncPlay: 服务器地址不合法 $syncPlayEndPoint',
       );
-      KazumiLogger().e('SyncPlay: invalid server address $syncPlayEndPoint');
+      MiruLogger().e('SyncPlay: invalid server address $syncPlayEndPoint');
       return;
     }
     final enableTLS = isOfficialSyncPlayEndPoint(parsed);
@@ -111,7 +111,7 @@ abstract class _PlayerSyncPlayController with Store {
         await client.disconnect();
         return;
       }
-      KazumiLogger().i('SyncPlay: connected to ${parsed.host}:${parsed.port}');
+      MiruLogger().i('SyncPlay: connected to ${parsed.host}:${parsed.port}');
       client.onGeneralMessage.listen(
         null,
         onError: (error) {
@@ -120,10 +120,10 @@ abstract class _PlayerSyncPlayController with Store {
           }
           final message =
               error is SyncplayException ? error.message : error.toString();
-          KazumiLogger().e('SyncPlay: error $message', error: error);
+          MiruLogger().e('SyncPlay: error $message', error: error);
           if (error is SyncplayConnectionException) {
             exitRoom();
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
               message: 'SyncPlay: 同步中断 $message',
               duration: const Duration(seconds: 5),
               showActionButton: true,
@@ -140,23 +140,23 @@ abstract class _PlayerSyncPlayController with Store {
           }
           if (message['type'] == 'init') {
             if (message['username'] == '') {
-              KazumiDialog.showToast(
+              MiruDialog.showToast(
                   message: 'SyncPlay: 您是当前房间中的唯一用户',
                   duration: const Duration(seconds: 5));
               setPlayingBangumi();
             } else {
-              KazumiDialog.showToast(
+              MiruDialog.showToast(
                   message:
                       'SyncPlay: 您不是当前房间中的唯一用户, 当前以用户 ${message['username']} 进度为准');
             }
           }
           if (message['type'] == 'left') {
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
                 message: 'SyncPlay: ${message['username']} 离开了房间',
                 duration: const Duration(seconds: 5));
           }
           if (message['type'] == 'joined') {
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
                 message: 'SyncPlay: ${message['username']} 加入了房间',
                 duration: const Duration(seconds: 5));
           }
@@ -167,7 +167,7 @@ abstract class _PlayerSyncPlayController with Store {
           if (!_isCurrentConnection(session, client)) {
             return;
           }
-          KazumiLogger().i(
+          MiruLogger().i(
               'SyncPlay: file changed by ${message['setBy']}: ${message['name']}');
           RegExp regExp = RegExp(r'(\d+)\[(\d+)\]');
           Match? match = regExp.firstMatch(message['name']);
@@ -175,7 +175,7 @@ abstract class _PlayerSyncPlayController with Store {
             int bangumiID = int.tryParse(match.group(1) ?? '0') ?? 0;
             int episode = int.tryParse(match.group(2) ?? '0') ?? 0;
             if (bangumiID != 0 && episode != 0 && episode != currentEpisode()) {
-              KazumiDialog.showToast(
+              MiruDialog.showToast(
                   message:
                       'SyncPlay: ${message['setBy'] ?? 'unknown'} 切换到第 $episode 话',
                   duration: const Duration(seconds: 3));
@@ -205,7 +205,7 @@ abstract class _PlayerSyncPlayController with Store {
           }
           final message =
               error is SyncplayException ? error.message : error.toString();
-          KazumiLogger().e('SyncPlay: error $message', error: error);
+          MiruLogger().e('SyncPlay: error $message', error: error);
         },
       );
       client.onPositionChangedMessage.listen(
@@ -214,19 +214,19 @@ abstract class _PlayerSyncPlayController with Store {
             return;
           }
           syncplayClientRtt = (message['clientRtt'].toDouble() * 1000).toInt();
-          KazumiLogger().i(
+          MiruLogger().i(
               'SyncPlay: position changed by ${message['setBy']}: [${DateTime.now().millisecondsSinceEpoch / 1000.0}] calculatedPosition ${message['calculatedPositon']} position: ${message['position']} doSeek: ${message['doSeek']} paused: ${message['paused']} clientRtt: ${message['clientRtt']} serverRtt: ${message['serverRtt']} fd: ${message['fd']}');
           if (message['paused'] != !playing()) {
             if (message['paused']) {
               if (message['position'] != 0) {
-                KazumiDialog.showToast(
+                MiruDialog.showToast(
                     message: 'SyncPlay: ${message['setBy'] ?? 'unknown'} 暂停了播放',
                     duration: const Duration(seconds: 3));
                 pause(enableSync: false);
               }
             } else {
               if (message['position'] != 0) {
-                KazumiDialog.showToast(
+                MiruDialog.showToast(
                     message: 'SyncPlay: ${message['setBy'] ?? 'unknown'} 开始了播放',
                     duration: const Duration(seconds: 3));
                 play(enableSync: false);
@@ -256,7 +256,7 @@ abstract class _PlayerSyncPlayController with Store {
       }
       syncplayRoom = room;
     } catch (e) {
-      KazumiLogger().e('SyncPlay: error', error: e);
+      MiruLogger().e('SyncPlay: error', error: e);
       if (!_isCurrentConnection(session, client)) {
         await client.disconnect();
         return;
@@ -266,7 +266,7 @@ abstract class _PlayerSyncPlayController with Store {
       syncplayClientRtt = 0;
       await client.disconnect();
       final message = e is SyncplayException ? e.message : e.toString();
-      KazumiDialog.showToast(
+      MiruDialog.showToast(
         message: 'SyncPlay: 连接失败 $message',
         duration: const Duration(seconds: 5),
       );

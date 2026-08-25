@@ -1,12 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class PlatformEnvironmentService {
   PlatformEnvironmentService._();
 
-  static const _intentChannel = MethodChannel('com.predidit.kazumi/intent');
+  static const _intentChannel = MethodChannel('io.github.disenthrallclaude.miru/intent');
 
   static Future<bool> isInMultiWindowMode() async {
     if (!Platform.isAndroid) {
@@ -15,7 +15,7 @@ class PlatformEnvironmentService {
     try {
       return await _intentChannel.invokeMethod('checkIfInMultiWindowMode');
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to check multi window mode: '${e.message}'.");
+      MiruLogger().e("Failed to check multi window mode: '${e.message}'.");
       return false;
     }
   }
@@ -27,7 +27,7 @@ class PlatformEnvironmentService {
     try {
       return await _intentChannel.invokeMethod('isRunningOnX11');
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to check X11 environment: '${e.message}'.");
+      MiruLogger().e("Failed to check X11 environment: '${e.message}'.");
       return false;
     }
   }
@@ -39,7 +39,7 @@ class PlatformEnvironmentService {
     try {
       return await _intentChannel.invokeMethod('getAndroidSdkVersion');
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to get Android SDK version: '${e.message}'.");
+      MiruLogger().e("Failed to get Android SDK version: '${e.message}'.");
       return 0;
     }
   }

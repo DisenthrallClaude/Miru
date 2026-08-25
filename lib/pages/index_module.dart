@@ -1,26 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/widget/image_preview.dart';
-import 'package:kazumi/pages/collect/collect_module.dart';
-import 'package:kazumi/pages/index_page.dart';
-import 'package:kazumi/pages/info/info_module.dart';
-import 'package:kazumi/pages/init_page.dart';
-import 'package:kazumi/pages/my/my_module.dart';
-import 'package:kazumi/pages/onboarding/onboarding_page.dart';
-import 'package:kazumi/pages/popular/popular_controller.dart';
-import 'package:kazumi/pages/popular/popular_module.dart';
-import 'package:kazumi/pages/route_error_page.dart';
-import 'package:kazumi/pages/search/search_module.dart';
-import 'package:kazumi/pages/settings/settings_module.dart';
-import 'package:kazumi/pages/timeline/timeline_controller.dart';
-import 'package:kazumi/pages/timeline/timeline_module.dart';
-import 'package:kazumi/pages/video/video_module.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/services/shaders/shader_asset_service.dart';
+import 'package:miru/bean/widget/image_preview.dart';
+import 'package:miru/pages/collect/collect_module.dart';
+import 'package:miru/pages/index_page.dart';
+import 'package:miru/pages/info/info_module.dart';
+import 'package:miru/pages/init_page.dart';
+import 'package:miru/pages/my/my_module.dart';
+import 'package:miru/pages/onboarding/onboarding_page.dart';
+import 'package:miru/pages/popular/popular_controller.dart';
+import 'package:miru/pages/popular/popular_module.dart';
+import 'package:miru/pages/route_error_page.dart';
+import 'package:miru/pages/search/search_module.dart';
+import 'package:miru/pages/settings/settings_module.dart';
+import 'package:miru/pages/timeline/timeline_controller.dart';
+import 'package:miru/pages/timeline/timeline_module.dart';
+import 'package:miru/pages/video/video_module.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/services/shaders/shader_asset_service.dart';
 
 final _tabTransition = CustomTransition(
   duration: const Duration(milliseconds: 70),

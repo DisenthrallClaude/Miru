@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 
 Future<String?> showMobileDanmakuInputSheet(BuildContext context) {
+  // 播放器路径禁止 BackdropFilter（Impeller 下每帧采样整幅视频纹理，
+  // 低端机直接掉帧），改用高不透明度表面色模拟「厚玻璃」质感。
+  final scheme = Theme.of(context).colorScheme;
   return showModalBottomSheet<String>(
     context: context,
-    shape: const BeveledRectangleBorder(),
+    elevation: 0,
+    backgroundColor: scheme.surface.withValues(alpha: 0.94),
+    shape: BeveledRectangleBorder(
+      side: BorderSide(color: scheme.outlineVariant, width: 0.5),
+    ),
     isScrollControlled: true,
     builder: (context) => const _MobileDanmakuInputSheet(),
   );

@@ -23,7 +23,7 @@ if (flutterVersionName == null) {
 }
 
 android {
-    namespace "com.example.kazumi"
+    namespace "io.github.disenthrallclaude.miru"
     compileSdk flutter.compileSdkVersion
     // Use the highest NDK required by the native plugins. Newer NDKs remain
     // backward compatible with plugins that declare an older version.
@@ -43,8 +43,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId "com.predidit.kazumi"
+        // Miru 独立命名空间，与上游 Kazumi 彻底脱钩，避免安装冲突。
+        applicationId "io.github.disenthrallclaude.miru"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
         minSdkVersion flutter.minSdkVersion

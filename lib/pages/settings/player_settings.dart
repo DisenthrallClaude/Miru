@@ -2,15 +2,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
-import 'package:kazumi/services/network/metered_network_service.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/player/pip_utils.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
+import 'package:miru/services/network/metered_network_service.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/utils/device.dart';
 
 class PlayerSettingsPage extends StatefulWidget {
   const PlayerSettingsPage({super.key});
@@ -104,17 +104,17 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   }
 
   Future<void> resetPlayerSettings() async {
-    final bool shouldReset = await KazumiDialog.show<bool>(
+    final bool shouldReset = await MiruDialog.show<bool>(
           builder: (context) => AlertDialog(
             title: const Text('恢复默认播放设置'),
             content: const Text('播放设置、硬件解码器、视频渲染器和超分辨率设置将恢复为默认值。'),
             actions: [
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: false),
+                onPressed: () => MiruDialog.dismiss(popWith: false),
                 child: Text('取消'),
               ),
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: true),
+                onPressed: () => MiruDialog.dismiss(popWith: true),
                 child: Text('恢复默认'),
               ),
             ],
@@ -129,12 +129,12 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     }
     if (!mounted) return;
     setState(_loadSettingsFromStorage);
-    KazumiDialog.showToast(message: '已恢复默认播放设置');
+    MiruDialog.showToast(message: '已恢复默认播放设置');
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
@@ -186,7 +186,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
 
   Future<int?> _showSkipTimeChangeDialog(
       {required String title, required String initialValue}) async {
-    return KazumiDialog.show<int>(builder: (context) {
+    return MiruDialog.show<int>(builder: (context) {
       String input = "";
       return AlertDialog(
         title: Text(title),
@@ -208,7 +208,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
         }),
         actions: <Widget>[
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -219,16 +219,16 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
               final int? newValue = int.tryParse(input);
 
               if (newValue == null) {
-                KazumiDialog.showToast(message: '请输入数字');
+                MiruDialog.showToast(message: '请输入数字');
                 return;
               }
 
               if (newValue <= 0) {
-                KazumiDialog.showToast(message: '请输入大于0的数字');
+                MiruDialog.showToast(message: '请输入大于0的数字');
                 return;
               }
               // 以新设置的值弹出
-              KazumiDialog.dismiss(popWith: newValue);
+              MiruDialog.dismiss(popWith: newValue);
             },
             child: const Text('确定'),
           ),

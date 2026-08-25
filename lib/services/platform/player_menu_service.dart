@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 class PlayerMenuService {
   PlayerMenuService._();
 
-  static const _appMenuChannel = MethodChannel('com.predidit.kazumi/appmenu');
+  static const _appMenuChannel = MethodChannel('io.github.disenthrallclaude.miru/appmenu');
 
   static Future<void> dispose() async {
     if (!Platform.isMacOS) return;

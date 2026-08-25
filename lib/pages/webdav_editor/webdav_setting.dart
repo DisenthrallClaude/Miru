@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/services/sync/bangumi_sync_service.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/sync/webdav.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/sync/bangumi_sync_service.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/sync/webdav.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 
 class WebDavSettingsPage extends StatefulWidget {
   const WebDavSettingsPage({super.key});
@@ -35,8 +35,8 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
@@ -44,8 +44,8 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
   Future<void> syncHistoryWithWebDav() async {
     var webDavEnable = GStorage.getSetting(SettingsKeys.webDavEnable);
     if (webDavEnable) {
-      KazumiLogger().i('WebDav: manual history sync started');
-      KazumiDialog.showToast(message: '正在同步观看记录');
+      MiruLogger().i('WebDav: manual history sync started');
+      MiruDialog.showToast(message: '正在同步观看记录');
       var webDav = WebDav();
       try {
         if (!webDav.isHistorySyncing) {
@@ -53,18 +53,18 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
         }
         try {
           await webDav.syncHistory();
-          KazumiLogger().i('WebDav: manual history sync completed');
-          KazumiDialog.showToast(message: '观看记录同步完成');
+          MiruLogger().i('WebDav: manual history sync completed');
+          MiruDialog.showToast(message: '观看记录同步完成');
         } catch (e) {
-          KazumiLogger().w('WebDav: manual history sync failed', error: e);
-          KazumiDialog.showToast(message: '观看记录同步失败 ${e.toString()}');
+          MiruLogger().w('WebDav: manual history sync failed', error: e);
+          MiruDialog.showToast(message: '观看记录同步失败 ${e.toString()}');
         }
       } catch (e) {
-        KazumiLogger().w('WebDav: manual history sync ping failed', error: e);
-        KazumiDialog.showToast(message: 'WebDav连接失败');
+        MiruLogger().w('WebDav: manual history sync ping failed', error: e);
+        MiruDialog.showToast(message: 'WebDav连接失败');
       }
     } else {
-      KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
+      MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
     }
   }
 
@@ -123,7 +123,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                           GStorage.getSetting(SettingsKeys.bangumiAccessToken)
                               .trim();
                       if (token.isEmpty) {
-                        KazumiDialog.showToast(
+                        MiruDialog.showToast(
                             message: '请先配置 Bangumi 的 Access Token');
                         return;
                       } else {
@@ -131,7 +131,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                           try {
                             await bangumi.init();
                           } catch (e) {
-                            KazumiDialog.showToast(
+                            MiruDialog.showToast(
                                 message: "Bangumi 初始化失败，请稍后再试");
                             return;
                           }
@@ -174,7 +174,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                         await WebDav().init();
                       } catch (e) {
                         webDavEnable = false;
-                        KazumiDialog.showToast(message: 'WEBDAV初始化失败 $e');
+                        MiruDialog.showToast(message: 'WEBDAV初始化失败 $e');
                       }
                     }
                     if (!webDavEnable) {
@@ -198,7 +198,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                   leading: Icons.history_rounded,
                   onToggle: (value) async {
                     if (!webDavEnable) {
-                      KazumiDialog.showToast(message: '请先开启WEBDAV同步');
+                      MiruDialog.showToast(message: '请先开启WEBDAV同步');
                       return;
                     }
                     webDavEnableHistory = value ?? !webDavEnableHistory;
@@ -214,7 +214,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                   leading: Icons.favorite_rounded,
                   onToggle: (value) async {
                     if (!webDavEnable) {
-                      KazumiDialog.showToast(message: '请先开启WEBDAV同步');
+                      MiruDialog.showToast(message: '请先开启WEBDAV同步');
                       return;
                     }
                     webDavEnableCollect = value ?? !webDavEnableCollect;

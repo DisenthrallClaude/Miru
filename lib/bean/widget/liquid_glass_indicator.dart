@@ -1,7 +1,7 @@
 import 'package:cupertino_liquid_glass/cupertino_liquid_glass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 底部导航的「液态玻璃滑块」。
 ///
@@ -126,19 +126,24 @@ class _LiquidGlassIndicatorState extends State<LiquidGlassIndicator>
               width: width,
               height: height,
               child: IgnorePointer(
-                child: CupertinoLiquidGlass(
-                  blurSigma: Frost.blur * 0.5,
-                  tintOpacity: 0.16,
-                  borderRadius:
-                      BorderRadius.circular(height / 2),
-                  edgeLightColor: Frost.edgeLight(Theme.of(context).brightness),
-                  // 不要暗部/投影：有了玻璃就不需要阴影来交代层次，
-                  // 去掉后滑块更「轻」，流动感也更纯粹。
-                  edgeShadowColor: Colors.transparent,
-                  specularGradient:
-                      Frost.specular(Theme.of(context).brightness),
-                  borderWidth: 1.0,
-                  child: const SizedBox.expand(),
+                // RepaintBoundary 隔离成独立合成层：避免 Impeller 上
+                // BackdropFilter 首帧只画 tint 不画模糊的「点一下才显现」。
+                child: RepaintBoundary(
+                  child: CupertinoLiquidGlass(
+                    blurSigma: Frost.blur * 0.5,
+                    tintOpacity: 0.16,
+                    borderRadius:
+                        BorderRadius.circular(height / 2),
+                    edgeLightColor:
+                        Frost.edgeLight(Theme.of(context).brightness),
+                    // 不要暗部/投影：有了玻璃就不需要阴影来交代层次，
+                    // 去掉后滑块更「轻」，流动感也更纯粹。
+                    edgeShadowColor: Colors.transparent,
+                    specularGradient:
+                        Frost.specular(Theme.of(context).brightness),
+                    borderWidth: 1.0,
+                    child: const SizedBox.expand(),
+                  ),
                 ),
               ),
             ),

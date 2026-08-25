@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/utils/device.dart';
 
 class DanmakuSettingsPage extends StatefulWidget {
   const DanmakuSettingsPage({super.key});
@@ -74,17 +74,17 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   }
 
   Future<void> resetDanmakuSettings() async {
-    final bool shouldReset = await KazumiDialog.show<bool>(
+    final bool shouldReset = await MiruDialog.show<bool>(
           builder: (context) => AlertDialog(
             title: const Text('恢复默认弹幕设置'),
             content: const Text('弹幕来源、显示和样式设置将恢复为默认值，关键词屏蔽列表不会被清空。'),
             actions: [
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: false),
+                onPressed: () => MiruDialog.dismiss(popWith: false),
                 child: Text('取消'),
               ),
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: true),
+                onPressed: () => MiruDialog.dismiss(popWith: true),
                 child: Text('恢复默认'),
               ),
             ],
@@ -96,12 +96,12 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
     await GStorage.resetDanmakuSettings();
     if (!mounted) return;
     setState(_loadSettingsFromStorage);
-    KazumiDialog.showToast(message: '已恢复默认弹幕设置');
+    MiruDialog.showToast(message: '已恢复默认弹幕设置');
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }

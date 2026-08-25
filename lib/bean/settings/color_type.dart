@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/utils/theme.dart';
 
 final List<Map<String, dynamic>> colorThemeTypes = [
   // index 0 是「默认」，必须与 kDefaultSeedColor 保持一致，

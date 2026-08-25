@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
 
 class RouteErrorPage extends StatelessWidget {
   const RouteErrorPage({

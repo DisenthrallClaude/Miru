@@ -5,14 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/search/image_search_module.dart';
-import 'package:kazumi/pages/search/search_controller.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/search/image_search_module.dart';
+import 'package:miru/pages/search/search_controller.dart';
+import 'package:miru/utils/constants.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:kazumi/utils/format.dart';
+import 'package:miru/utils/format.dart';
 
 class ImageSearchPage extends StatefulWidget {
   const ImageSearchPage({
@@ -95,14 +95,14 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
       final imageUrl = _urlController.text.trim();
       final uri = Uri.tryParse(imageUrl);
       if (imageUrl.isEmpty || uri == null || !uri.hasScheme) {
-        KazumiDialog.showToast(message: '请输入有效的图片链接');
+        MiruDialog.showToast(message: '请输入有效的图片链接');
         return;
       }
       await _searchPageController.searchImageByUrl(imageUrl);
     } else {
       final imageFile = _selectedImageFile;
       if (imageFile == null) {
-        KazumiDialog.showToast(message: '请先选择图片文件');
+        MiruDialog.showToast(message: '请先选择图片文件');
         return;
       }
       await _searchPageController.searchImageByFile(imageFile);
@@ -114,7 +114,7 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
 
     if (_searchPageController.imageSearchError.isNotEmpty &&
         _searchPageController.imageSearchResults.isEmpty) {
-      KazumiDialog.showToast(message: _searchPageController.imageSearchError);
+      MiruDialog.showToast(message: _searchPageController.imageSearchError);
     }
   }
 

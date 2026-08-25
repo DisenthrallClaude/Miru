@@ -1,15 +1,15 @@
 import 'dart:io';
 
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/modules/search/image_search_module.dart';
-import 'package:kazumi/modules/search/search_history_module.dart';
-import 'package:kazumi/repositories/collect_repository.dart';
-import 'package:kazumi/repositories/search_history_repository.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/request/apis/trace_api.dart';
-import 'package:kazumi/utils/search_parser.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/collect/collect_type.dart';
+import 'package:miru/modules/search/image_search_module.dart';
+import 'package:miru/modules/search/search_history_module.dart';
+import 'package:miru/repositories/collect_repository.dart';
+import 'package:miru/repositories/search_history_repository.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/request/apis/trace_api.dart';
+import 'package:miru/utils/search_parser.dart';
 
 part 'search_controller.g.dart';
 

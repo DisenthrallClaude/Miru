@@ -3,15 +3,14 @@ import 'dart:convert';
 import 'package:mobx/mobx.dart';
 import 'package:flutter/services.dart' show rootBundle, AssetManifest;
 import 'package:path_provider/path_provider.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/services/plugin/plugin_validity_tracker.dart';
-import 'package:kazumi/services/plugin/plugin_install_time_tracker.dart';
-import 'package:kazumi/request/apis/plugin_catalog_api.dart';
-import 'package:kazumi/modules/plugin/plugin_http_module.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/utils/async_serial_queue.dart';
-import 'package:kazumi/utils/async_single_flight.dart';
-import 'package:kazumi/utils/version.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/services/plugin/plugin_validity_tracker.dart';
+import 'package:miru/request/apis/plugin_catalog_api.dart';
+import 'package:miru/modules/plugin/plugin_http_module.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/async_serial_queue.dart';
+import 'package:miru/utils/async_single_flight.dart';
+import 'package:miru/utils/version.dart';
 
 part 'plugins_controller.g.dart';
 
@@ -59,7 +58,7 @@ void _defaultPluginErrorReporter(
   Object error,
   StackTrace stackTrace,
 ) {
-  KazumiLogger().e(message, error: error, stackTrace: stackTrace);
+  MiruLogger().e(message, error: error, stackTrace: stackTrace);
 }
 
 abstract class _PluginsController with Store {
@@ -98,9 +97,6 @@ abstract class _PluginsController with Store {
   // 规则有效性追踪器
   final validityTracker = PluginValidityTracker();
 
-  // 规则安装时间追踪器
-  final installTimeTracker = PluginInstallTimeTracker();
-
   String pluginsFileName = "plugins.json";
 
   Directory? oldPluginDirectory;
@@ -124,13 +120,34 @@ abstract class _PluginsController with Store {
   // Loads all plugins from the directory, populates the plugin list, and saves to plugins.json if needed
   Future<void> _loadAllPlugins() async {
     pluginList.clear();
-    KazumiLogger().i('Plugins Directory: ${newPluginDirectory!.path}');
+    MiruLogger().i('Plugins Directory: ${newPluginDirectory!.path}');
     if (await newPluginDirectory!.exists()) {
       final pluginsFile = File('${newPluginDirectory!.path}/$pluginsFileName');
       if (await pluginsFile.exists()) {
         final jsonString = await pluginsFile.readAsString();
-        pluginList.addAll(_getPluginListFromJson(jsonString));
-        KazumiLogger().i('Plugin: Current Plugin number: ${pluginList.length}');
+        List<Plugin> loaded;
+        try {
+          loaded = _getPluginListFromJson(jsonString);
+        } catch (error, stackTrace) {
+          // 损坏的 plugins.json 绝不能让应用崩溃并"丢光"全部规则：
+          // 先把原始文件备份为 .corrupt 供用户找回，再从空列表启动。
+          _errorReporter(
+            'Plugin: failed to decode $pluginsFileName',
+            error,
+            stackTrace,
+          );
+          try {
+            await pluginsFile.copy('${pluginsFile.path}.corrupt');
+          } catch (backupError) {
+            MiruLogger().w(
+              'Plugin: failed to back up corrupted $pluginsFileName',
+              error: backupError,
+            );
+          }
+          loaded = [];
+        }
+        pluginList.addAll(loaded);
+        MiruLogger().i('Plugin: Current Plugin number: ${pluginList.length}');
       } else {
         // No plugins.json
         var jsonFiles = await _getPluginFiles();
@@ -145,7 +162,7 @@ abstract class _PluginsController with Store {
         await _savePlugins();
       }
     } else {
-      KazumiLogger().w('Plugin: plugin directory does not exist');
+      MiruLogger().w('Plugin: plugin directory does not exist');
     }
   }
 
@@ -163,21 +180,53 @@ abstract class _PluginsController with Store {
     }
   }
 
-  // Copies plugin JSON files from the assets to the plugin directory
-  Future<void> copyPluginsToExternalDirectory() async {
-    final assetManifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-    final assets = assetManifest.listAssets();
-    final jsonFiles = assets.where((String asset) =>
-        asset.startsWith('assets/plugins/') && asset.endsWith('.json'));
+  // Copies plugin JSON files from the assets to the plugin directory.
+  // Bundled rules never clobber a locally installed copy:
+  // import only when missing locally, or when the bundled version is newer.
+  Future<void> copyPluginsToExternalDirectory() {
+    return _mutations.run(() async {
+      final assetManifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = assetManifest.listAssets();
+      final jsonFiles = assets.where((String asset) =>
+          asset.startsWith('assets/plugins/') && asset.endsWith('.json'));
 
-    for (var filePath in jsonFiles) {
-      final jsonString = await rootBundle.loadString(filePath);
-      final plugin = Plugin.fromJson(jsonDecode(jsonString));
-      pluginList.add(plugin);
-    }
-    await _savePlugins();
-    KazumiLogger().i(
-        'Plugin: ${jsonFiles.length} plugin files copied to ${newPluginDirectory!.path}');
+      final bundled = <Plugin>[];
+      for (var filePath in jsonFiles) {
+        final jsonString = await rootBundle.loadString(filePath);
+        try {
+          bundled.add(Plugin.fromJson(jsonDecode(jsonString)));
+        } catch (error, stackTrace) {
+          _errorReporter(
+            'Plugin: skipped malformed bundled rule $filePath',
+            error,
+            stackTrace,
+          );
+        }
+      }
+      MiruLogger().i(
+          'Plugin: ${bundled.length} bundled plugin files scanned for ${newPluginDirectory!.path}');
+
+      await _mutateAndPersistNow(
+        () {
+          for (final plugin in bundled) {
+            Plugin? local;
+            for (final candidate in pluginList) {
+              if (_catalogKey(candidate.name) == _catalogKey(plugin.name)) {
+                local = candidate;
+                break;
+              }
+            }
+            // 已安装且本地版本不落后于内置版本时不覆盖，
+            // 保护用户对规则的本地修改与手动升级。
+            if (local != null && !_remoteIsNewer(local.version, plugin.version)) {
+              continue;
+            }
+            _replacePlugin(plugin);
+          }
+        },
+        errorMessage: 'Plugin: failed to persist bundled rules',
+      );
+    });
   }
 
   List<dynamic> _pluginListToJson() {
@@ -190,10 +239,22 @@ abstract class _PluginsController with Store {
 
   // Converts a JSON string into a list of Plugin objects.
   List<Plugin> _getPluginListFromJson(String jsonString) {
-    List<dynamic> json = jsonDecode(jsonString);
-    List<Plugin> plugins = [];
-    for (var j in json) {
-      plugins.add(Plugin.fromJson(j));
+    final dynamic decoded = jsonDecode(jsonString);
+    if (decoded is! List) {
+      throw const FormatException('plugins.json root is not a JSON array');
+    }
+    final List<Plugin> plugins = [];
+    for (final j in decoded) {
+      try {
+        plugins.add(Plugin.fromJson(j));
+      } catch (error, stackTrace) {
+        // 单条规则损坏只跳过该条，不影响其余规则加载。
+        _errorReporter(
+          'Plugin: skipped malformed rule entry',
+          error,
+          stackTrace,
+        );
+      }
     }
     return plugins;
   }
@@ -298,11 +359,23 @@ abstract class _PluginsController with Store {
     final writer = _pluginJsonWriter;
     if (writer != null) {
       await writer(jsonData);
-    } else {
-      final pluginsFile = File('${newPluginDirectory!.path}/$pluginsFileName');
-      await pluginsFile.writeAsString(jsonData);
-      KazumiLogger().i('Plugin: updated plugin file $pluginsFileName');
+      return;
     }
+    final pluginsFile = File('${newPluginDirectory!.path}/$pluginsFileName');
+    // 先写临时文件（flush 落盘）再 rename 原子替换：
+    // 写入中途被杀进程/断电也不会留下半截的 plugins.json。
+    final tempFile = File('${pluginsFile.path}.tmp');
+    await tempFile.writeAsString(jsonData, flush: true);
+    try {
+      await tempFile.rename(pluginsFile.path);
+    } catch (_) {
+      // 个别文件系统不支持覆盖式 rename，退化为先删后改名。
+      if (await pluginsFile.exists()) {
+        await pluginsFile.delete();
+      }
+      await tempFile.rename(pluginsFile.path);
+    }
+    MiruLogger().i('Plugin: updated plugin file $pluginsFileName');
   }
 
   Future<List<PluginHTTPItem>> refreshPluginCatalog() {
@@ -544,16 +617,13 @@ abstract class _PluginsController with Store {
   }
 
   Future<void> removePlugins(Set<String> pluginNames) {
-    final names = Set<String>.of(pluginNames);
+    // 与 removePlugin/_catalogKey 保持同一匹配口径：大小写不敏感，
+    // 避免「同名不同大小写」的规则删不掉。
+    final keys = pluginNames.map(_catalogKey).toSet();
     return _mutateAndPersist(
-      () {
-        for (int i = pluginList.length - 1; i >= 0; --i) {
-          var name = pluginList[i].name;
-          if (names.contains(name)) {
-            pluginList.removeAt(i);
-          }
-        }
-      },
+      () => pluginList.removeWhere(
+        (candidate) => keys.contains(_catalogKey(candidate.name)),
+      ),
       errorMessage: 'Plugin: failed to persist batch rule removal',
     );
   }

@@ -1,5 +1,5 @@
-import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
-import 'package:kazumi/pages/player/controller/player_playback_controller.dart';
+import 'package:miru/pages/player/controller/player_danmaku_controller.dart';
+import 'package:miru/pages/player/controller/player_playback_controller.dart';
 
 class _InteractiveSeekSession {
   _InteractiveSeekSession(this.pauseCompleted, this.target);

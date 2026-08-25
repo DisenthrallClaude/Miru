@@ -1,9 +1,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 推荐页信息流组件（仿腾讯视频布局）。
 ///

@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'dart:async';
 
-import 'package:kazumi/webview/captcha/impl/captcha_webview_inappwebview_impl.dart';
-import 'package:kazumi/webview/captcha/impl/captcha_webview_windows_impl.dart';
-import 'package:kazumi/webview/captcha/impl/captcha_webview_linux_impl.dart';
+import 'package:miru/webview/captcha/impl/captcha_webview_inappwebview_impl.dart';
+import 'package:miru/webview/captcha/impl/captcha_webview_windows_impl.dart';
+import 'package:miru/webview/captcha/impl/captcha_webview_linux_impl.dart';
 
 abstract class CaptchaWebviewController<T> {
   /// WebView controller.
@@ -58,7 +58,7 @@ abstract class CaptchaWebviewController<T> {
 
   /// 加载指定 URL，并在页面内执行自定义验证脚本（类型3：自定义 JS 验证）
   ///
-  /// 脚本可调用 window.KazumiCaptcha.log/clicked/done/fail。
+  /// 脚本可调用 window.MiruCaptcha.log/clicked/done/fail。
   Future<void> loadPageForCustomScript(String url, String script);
 
   /// 在 WebView 内通过 JS 模拟输入验证码并模拟点击提交按钮

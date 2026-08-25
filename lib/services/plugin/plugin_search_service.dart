@@ -1,10 +1,13 @@
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/pages/info/info_controller.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart';
-import 'package:kazumi/utils/async_session.dart';
+import 'dart:async';
+
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/pages/info/info_controller.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/plugin/plugin_health.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart';
+import 'package:miru/utils/async_session.dart';
 
 class PluginSearchService {
   PluginSearchService({
@@ -65,9 +68,28 @@ class PluginSearchService {
       infoController.pluginSearchStatus[plugin.name] =
           PluginSearchStatus.pending;
     }
-    await Future.wait(
-      plugins.map((plugin) => _queryPlugin(plugin, keyword)),
-    );
+    await _queryPluginsWithLimit(plugins, keyword);
+  }
+
+  /// 全量搜索按固定并发分批执行；几十条规则同时发起请求
+  /// 容易触发站点风控并拖垮弱网设备。
+  Future<void> _queryPluginsWithLimit(
+    List<Plugin> plugins,
+    String keyword,
+  ) async {
+    const concurrencyLimit = 4;
+    var nextIndex = 0;
+    Future<void> worker() async {
+      while (!_isCancelled && nextIndex < plugins.length) {
+        final plugin = plugins[nextIndex++];
+        await _queryPlugin(plugin, keyword);
+      }
+    }
+
+    final workerCount =
+        plugins.length < concurrencyLimit ? plugins.length : concurrencyLimit;
+    if (workerCount == 0) return;
+    await Future.wait(List.generate(workerCount, (_) => worker()));
   }
 
   Future<void> _queryPlugin(Plugin plugin, String keyword) async {
@@ -86,6 +108,7 @@ class PluginSearchService {
           PluginSearchStatus.success;
       if (result.data.isNotEmpty) {
         pluginsController.validityTracker.markSearchValid(plugin.name);
+        unawaited(PluginHealthTracker.instance.recordSuccess(plugin.name));
       }
       infoController.pluginSearchResponseList.add(result);
     } catch (error) {
@@ -96,7 +119,7 @@ class PluginSearchService {
 
   void _handleSearchError(Plugin plugin, Object error) {
     if (error is CaptchaRequiredException) {
-      KazumiLogger().i(
+      MiruLogger().i(
         'PluginSearchService: captcha required for ${error.pluginName}',
       );
       infoController.pluginSearchStatus[error.pluginName] =
@@ -104,7 +127,7 @@ class PluginSearchService {
       return;
     }
     if (error is NoResultException) {
-      KazumiLogger().i(
+      MiruLogger().i(
         'PluginSearchService: no results for ${error.pluginName}',
       );
       infoController.pluginSearchStatus[error.pluginName] =
@@ -112,8 +135,10 @@ class PluginSearchService {
       return;
     }
     final name = error is SearchErrorException ? error.pluginName : plugin.name;
-    KazumiLogger().w('PluginSearchService: search error for $name');
+    MiruLogger().w('PluginSearchService: search error for $name');
     infoController.pluginSearchStatus[name] = PluginSearchStatus.error;
+    // 真实的请求/解析故障计入健康档案；「无结果」「需验证」不算。
+    unawaited(PluginHealthTracker.instance.recordFailure(name));
   }
 
   void cancel() {

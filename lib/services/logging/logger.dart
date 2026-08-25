@@ -13,7 +13,7 @@ String _singleLineLogText(Object? value) {
   return value.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
-class KazumiLogFilter extends LogFilter {
+class MiruLogFilter extends LogFilter {
   @override
   bool shouldLog(LogEvent event) {
     final forceLog = Zone.current[_forceLogKey] as bool? ?? false;
@@ -24,7 +24,7 @@ class KazumiLogFilter extends LogFilter {
   }
 }
 
-class KazumiLogPrinter extends LogPrinter {
+class MiruLogPrinter extends LogPrinter {
   static const int _fatalStackFrameLimit = 8;
 
   @override
@@ -87,13 +87,13 @@ class KazumiLogPrinter extends LogPrinter {
         .where((line) =>
             line.trim().isNotEmpty &&
             !line.contains('package:logger/') &&
-            !line.contains('package:kazumi/services/logging/logger.dart'))
+            !line.contains('package:miru/services/logging/logger.dart'))
         .take(_fatalStackFrameLimit)
         .map((line) => '  ${line.trim()}');
   }
 }
 
-class KazumiLogOutput extends LogOutput {
+class MiruLogOutput extends LogOutput {
   static final Lock _logLock = Lock();
   static String? _logFilePath;
 
@@ -106,13 +106,15 @@ class KazumiLogOutput extends LogOutput {
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
-    _logFilePath = p.join(logDir, "kazumi_logs.log");
+    _logFilePath = p.join(logDir, "miru_logs.log");
     return _logFilePath!;
   }
 
   @override
   void output(OutputEvent event) {
     for (var line in event.lines) {
+      // 日志框架的最终出口，不能改调自身，否则无限递归。
+      // ignore: avoid_print
       print(line);
     }
 
@@ -140,6 +142,8 @@ class KazumiLogOutput extends LogOutput {
           mode: FileMode.writeOnlyAppend,
         );
       } catch (e) {
+        // 写日志失败时只能走控制台兜底，不能递归调用日志框架。
+        // ignore: avoid_print
         print('Failed to write log to file: ${_singleLineLogText(e)}');
       }
     });
@@ -151,17 +155,17 @@ class KazumiLogOutput extends LogOutput {
   }
 }
 
-class KazumiLogger {
-  KazumiLogger._internal() {
+class MiruLogger {
+  MiruLogger._internal() {
     _logger = Logger(
-      filter: KazumiLogFilter(),
-      printer: KazumiLogPrinter(),
-      output: KazumiLogOutput(),
+      filter: MiruLogFilter(),
+      printer: MiruLogPrinter(),
+      output: MiruLogOutput(),
     );
   }
 
-  static final KazumiLogger _instance = KazumiLogger._internal();
-  factory KazumiLogger() {
+  static final MiruLogger _instance = MiruLogger._internal();
+  factory MiruLogger() {
     return _instance;
   }
 
@@ -221,7 +225,7 @@ class KazumiLogger {
 Future<File> getLogsPath() async {
   final dir = (await getApplicationSupportDirectory()).path;
   final logDir = p.join(dir, "logs");
-  final filename = p.join(logDir, "kazumi_logs.log");
+  final filename = p.join(logDir, "miru_logs.log");
 
   final directory = Directory(logDir);
   if (!await directory.exists()) {
@@ -230,7 +234,7 @@ Future<File> getLogsPath() async {
 
   final file = File(filename);
   if (!await file.exists()) {
-    await KazumiLogOutput._logLock.synchronized(() async {
+    await MiruLogOutput._logLock.synchronized(() async {
       if (!await file.exists()) {
         await file.create();
       }
@@ -242,11 +246,13 @@ Future<File> getLogsPath() async {
 Future<bool> clearLogs() async {
   try {
     final file = await getLogsPath();
-    await KazumiLogOutput._logLock.synchronized(() async {
+    await MiruLogOutput._logLock.synchronized(() async {
       await file.writeAsString('');
     });
     return true;
   } catch (e) {
+    // 清理日志失败只能控制台告警。
+    // ignore: avoid_print
     print('Error clearing file: ${_singleLineLogText(e)}');
     return false;
   }

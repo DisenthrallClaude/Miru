@@ -1,6 +1,6 @@
 import 'package:hive_ce/hive.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/utils/date_time.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/utils/date_time.dart';
 import 'bangumi_interest.dart';
 
 part 'bangumi_item.g.dart';

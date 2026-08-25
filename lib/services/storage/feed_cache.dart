@@ -1,6 +1,6 @@
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
 
 /// 推荐页与时间表的本地持久化缓存。
 ///
@@ -44,7 +44,7 @@ abstract final class FeedCache {
       await box.flush();
       await GStorage.putSetting(SettingsKeys.popularCacheOffset, offset);
     } catch (e) {
-      KazumiLogger().w('FeedCache: save popular failed', error: e);
+      MiruLogger().w('FeedCache: save popular failed', error: e);
     }
   }
 
@@ -85,7 +85,7 @@ abstract final class FeedCache {
       await box.flush();
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, season);
     } catch (e) {
-      KazumiLogger().w('FeedCache: save calendar failed', error: e);
+      MiruLogger().w('FeedCache: save calendar failed', error: e);
     }
   }
 
@@ -99,7 +99,7 @@ abstract final class FeedCache {
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, '');
       await GStorage.putSetting(SettingsKeys.popularCacheOffset, 0);
     } catch (e) {
-      KazumiLogger().w('FeedCache: clear failed', error: e);
+      MiruLogger().w('FeedCache: clear failed', error: e);
     }
   }
 }

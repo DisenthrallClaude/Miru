@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/card/bangumi_history_card.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart';
-import 'package:kazumi/pages/history/history_controller.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/card/bangumi_history_card.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
+import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/utils/constants.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({
@@ -31,14 +31,14 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
 
   void showHistoryClearDialog() {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('记录管理'),
@@ -46,7 +46,7 @@ class _HistoryPageState extends State<HistoryPage> {
           actions: [
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: Text(
                 '取消',
@@ -55,7 +55,7 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
                 try {
                   historyController.clearAll();
                 } catch (_) {}

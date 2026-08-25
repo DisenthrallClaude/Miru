@@ -1,18 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/repositories/download_repository.dart';
-import 'package:kazumi/services/download/background_download_service.dart';
-import 'package:kazumi/services/download/download_manager.dart';
-import 'package:kazumi/utils/format.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/video_source/services.dart';
-import 'package:kazumi/request/apis/danmaku_api.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/danmaku/danmaku_module.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/repositories/download_repository.dart';
+import 'package:miru/services/download/background_download_service.dart';
+import 'package:miru/services/download/download_manager.dart';
+import 'package:miru/utils/format.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/video_source/services.dart';
+import 'package:miru/request/apis/danmaku_api.dart';
 import 'package:mobx/mobx.dart';
 
 part 'download_controller.g.dart';
@@ -94,7 +94,7 @@ abstract class _DownloadController with Store {
           recordChanged = true;
           migratedCount++;
         } catch (e) {
-          KazumiLogger().w(
+          MiruLogger().w(
               'DownloadController: danmaku migration failed for episode ${entry.key}',
               error: e);
         }
@@ -104,7 +104,7 @@ abstract class _DownloadController with Store {
       }
     }
     if (migratedCount > 0) {
-      KazumiLogger().i(
+      MiruLogger().i(
           'DownloadController: migrated danmaku data for $migratedCount episodes');
     }
   }
@@ -168,7 +168,7 @@ abstract class _DownloadController with Store {
       try {
         await _updateBackgroundNotification();
       } catch (e) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'DownloadController: background notification update failed',
           error: e,
         );
@@ -203,7 +203,7 @@ abstract class _DownloadController with Store {
 
     final started = await _backgroundService.startService();
     if (started) {
-      KazumiLogger().i('DownloadController: background service started');
+      MiruLogger().i('DownloadController: background service started');
     }
   }
 
@@ -394,7 +394,7 @@ abstract class _DownloadController with Store {
       }
       return null;
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('DownloadController: failed to read danmaku file', error: e);
       return null;
     }
@@ -449,10 +449,10 @@ abstract class _DownloadController with Store {
         episode.danmakuData = '';
         await _repository.updateEpisode(recordKey, episodeNumber, episode);
       }
-      KazumiLogger().i(
+      MiruLogger().i(
           'DownloadController: updated cached danmakus for episode $episodeNumber');
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('DownloadController: failed to update cached danmaku', error: e);
     }
   }
@@ -482,7 +482,7 @@ abstract class _DownloadController with Store {
     if (episodePageUrl.isNotEmpty) {
       for (final entry in record.episodes.entries) {
         if (entry.value.episodePageUrl == episodePageUrl) {
-          KazumiLogger().i(
+          MiruLogger().i(
               'DownloadController: episode URL already exists at position ${entry.key}, skipping');
           return;
         }
@@ -568,7 +568,7 @@ abstract class _DownloadController with Store {
 
       final fullUrl = plugin.buildFullUrl(request.episodePageUrl);
 
-      KazumiLogger().i(
+      MiruLogger().i(
           'DownloadController: resolving video URL for episode ${request.episodeNumber} from $fullUrl');
 
       String? m3u8Url;
@@ -586,17 +586,17 @@ abstract class _DownloadController with Store {
         if (lease.isCancelled) {
           wasCancelled = true;
         } else {
-          KazumiLogger().w('DownloadController: WebView resolution timed out');
+          MiruLogger().w('DownloadController: WebView resolution timed out');
         }
       } on VideoSourceCancelledException {
         wasCancelled = true;
-        KazumiLogger().i('DownloadController: WebView resolution cancelled');
+        MiruLogger().i('DownloadController: WebView resolution cancelled');
       } catch (e) {
         if (lease.isCancelled) {
           wasCancelled = true;
         } else {
           lease.retire();
-          KazumiLogger()
+          MiruLogger()
               .e('DownloadController: WebView resolution failed', error: e);
         }
       }
@@ -610,7 +610,7 @@ abstract class _DownloadController with Store {
         return;
       }
 
-      KazumiLogger().i(
+      MiruLogger().i(
           'DownloadController: resolved M3U8 URL for episode ${request.episodeNumber}: $m3u8Url');
 
       final freshRecord = _repository.getRecord(request.recordKey);
@@ -703,14 +703,14 @@ abstract class _DownloadController with Store {
       String recordKey, int bangumiId, int episodeNumber) {
     Future(() async {
       try {
-        KazumiLogger().i(
+        MiruLogger().i(
             'DownloadController: fetching danmaku for episode $episodeNumber (async)');
 
         // 获取 DanDan 番剧 ID
         final danDanBangumiID =
             await DanmakuApi.getDanDanBangumiIDByBgmBangumiID(bangumiId);
         if (danDanBangumiID == 0) {
-          KazumiLogger().w(
+          MiruLogger().w(
               'DownloadController: failed to get DanDan bangumiID for $bangumiId');
           return;
         }
@@ -719,7 +719,7 @@ abstract class _DownloadController with Store {
         final danmakus =
             await DanmakuApi.getDanDanmaku(danDanBangumiID, episodeNumber);
         if (danmakus.isEmpty) {
-          KazumiLogger().i(
+          MiruLogger().i(
               'DownloadController: no danmaku found for episode $episodeNumber');
           return;
         }
@@ -741,7 +741,7 @@ abstract class _DownloadController with Store {
           await Future.delayed(const Duration(seconds: 3));
         }
         if (downloadDirectory.isEmpty) {
-          KazumiLogger().w(
+          MiruLogger().w(
               'DownloadController: downloadDirectory not ready for episode $episodeNumber, skipping danmaku cache');
           return;
         }
@@ -749,11 +749,11 @@ abstract class _DownloadController with Store {
         // 写入独立文件
         await _writeDanmakuToFile(downloadDirectory, danmakus, danDanBangumiID);
 
-        KazumiLogger().i(
+        MiruLogger().i(
             'DownloadController: cached ${danmakus.length} danmakus for episode $episodeNumber');
       } catch (e) {
         // 弹幕获取失败不影响下载
-        KazumiLogger()
+        MiruLogger()
             .w('DownloadController: failed to fetch danmaku', error: e);
       }
     });
@@ -768,7 +768,7 @@ abstract class _DownloadController with Store {
     episode.errorMessage = message;
     _repository.updateEpisode(recordKey, episodeNumber, episode);
     _refreshRecord(recordKey);
-    KazumiLogger()
+    MiruLogger()
         .w('DownloadController: episode $episodeNumber failed: $message');
   }
 
@@ -791,7 +791,7 @@ abstract class _DownloadController with Store {
   }
 
   Future<void> pauseAllDownloads() async {
-    KazumiLogger().i('DownloadController: pausing all downloads');
+    MiruLogger().i('DownloadController: pausing all downloads');
 
     _cancelAllResolves();
 
@@ -1014,7 +1014,7 @@ abstract class _DownloadController with Store {
     }
 
     if (incompleteEpisodes.isNotEmpty) {
-      KazumiLogger().i(
+      MiruLogger().i(
         'DownloadController: resumed ${incompleteEpisodes.length} downloads for $recordKey',
       );
     }

@@ -4,24 +4,24 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/player/controller/player_debug_controller.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/services/shaders/shader_asset_service.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/network/system_proxy_service.dart';
-import 'package:kazumi/services/player/playback_cache_policy.dart';
-import 'package:kazumi/services/player/player_screenshot_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/video_source/video_source_format.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/player/controller/player_debug_controller.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/services/shaders/shader_asset_service.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/network/system_proxy_service.dart';
+import 'package:miru/services/player/playback_cache_policy.dart';
+import 'package:miru/services/player/player_screenshot_service.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/media.dart';
-import 'package:kazumi/services/platform/platform_environment_service.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/media.dart';
+import 'package:miru/services/platform/platform_environment_service.dart';
 
 part 'player_playback_controller.g.dart';
 
@@ -42,7 +42,7 @@ final class _OwnedPlayer {
     try {
       await player.dispose();
     } catch (error, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'PlayerPlaybackController: failed to dispose media player',
         error: error,
         stackTrace: stackTrace,
@@ -169,7 +169,7 @@ abstract class _PlayerPlaybackController with Store {
       await player.play();
       startOffset = 0;
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .w('PlayerController: failed to restart from beginning', error: e);
     }
   }
@@ -320,7 +320,7 @@ abstract class _PlayerPlaybackController with Store {
           if (!isCurrentPlayer(player)) {
             return await _discardIfNotCurrent(candidate);
           }
-          KazumiLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
+          MiruLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
         }
       } else if (SystemProxyService.isActive) {
         final proxy = SystemProxyService.proxyFor('https');
@@ -329,7 +329,7 @@ abstract class _PlayerPlaybackController with Store {
           if (!isCurrentPlayer(player)) {
             return await _discardIfNotCurrent(candidate);
           }
-          KazumiLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
+          MiruLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
         }
       }
 
@@ -392,16 +392,16 @@ abstract class _PlayerPlaybackController with Store {
             return;
           }
           if (event.toString().contains('Failed to open') && playerBuffering) {
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
                 message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
           } else {
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
                 message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
                 duration: const Duration(seconds: 5),
                 showActionButton: true);
           }
         }
-        KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
+        MiruLogger().e('PlayerController: Player intent error ${videoUrl()}',
             error: event);
       });
 
@@ -429,7 +429,7 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       if (cachePolicy.networkForced) {
-        KazumiDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
+        MiruDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
       }
 
       return player;
@@ -483,7 +483,7 @@ abstract class _PlayerPlaybackController with Store {
       }
       superResolutionMode = mode;
     } catch (e) {
-      KazumiLogger().w('PlayerController: failed to set shader', error: e);
+      MiruLogger().w('PlayerController: failed to set shader', error: e);
     }
   }
 
@@ -492,7 +492,7 @@ abstract class _PlayerPlaybackController with Store {
     try {
       mediaPlayer!.setRate(playerSpeed);
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('PlayerController: failed to set playback speed', error: e);
     }
   }

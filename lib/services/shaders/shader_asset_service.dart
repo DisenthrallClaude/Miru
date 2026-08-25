@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart' show rootBundle, AssetManifest;
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -16,7 +16,7 @@ class ShaderAssetService {
 
     if (!await shadersDirectory.exists()) {
       await shadersDirectory.create(recursive: true);
-      KazumiLogger()
+      MiruLogger()
           .i('ShaderManager: Create GLSL Shader: ${shadersDirectory.path}');
     }
 
@@ -29,7 +29,7 @@ class ShaderAssetService {
       final fileName = filePath.split('/').last;
       final targetFile = File(path.join(shadersDirectory.path, fileName));
       if (await targetFile.exists()) {
-        KazumiLogger()
+        MiruLogger()
             .i('ShaderManager: GLSL Shader exists, skip: ${targetFile.path}');
         continue;
       }
@@ -39,13 +39,13 @@ class ShaderAssetService {
         final List<int> bytes = data.buffer.asUint8List();
         await targetFile.writeAsBytes(bytes);
         copiedFilesCount++;
-        KazumiLogger().i('ShaderManager: Copy: ${targetFile.path}');
+        MiruLogger().i('ShaderManager: Copy: ${targetFile.path}');
       } catch (e) {
-        KazumiLogger().e('ShaderManager: Copy: ($filePath)', error: e);
+        MiruLogger().e('ShaderManager: Copy: ($filePath)', error: e);
       }
     }
 
-    KazumiLogger().i(
+    MiruLogger().i(
         'ShaderManager: $copiedFilesCount GLSL files copied to ${shadersDirectory.path}');
   }
 }

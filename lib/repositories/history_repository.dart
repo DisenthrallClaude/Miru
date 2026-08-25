@@ -1,11 +1,11 @@
 import 'package:hive_ce/hive.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/services/sync/history_sync_service.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/history_storage_coordinator.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/services/sync/history_sync_service.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/history_storage_coordinator.dart';
 
 typedef HistoryProgressSyncAppender = Future<void> Function({
   required History history,
@@ -171,7 +171,7 @@ class HistoryRepository implements IHistoryRepository {
       );
       return histories;
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'GStorage: get all histories failed',
         error: e,
         stackTrace: stackTrace,
@@ -189,7 +189,7 @@ class HistoryRepository implements IHistoryRepository {
     try {
       return _findHistory(adapterName, bangumiItem, entryKind);
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'GStorage: get history failed. bangumi=${bangumiItem.name}',
         error: e,
         stackTrace: stackTrace,
@@ -289,7 +289,7 @@ class HistoryRepository implements IHistoryRepository {
           updatedAt: nowMs,
         );
       } catch (e, stackTrace) {
-        KazumiLogger().e(
+        MiruLogger().e(
           'GStorage: update history failed. bangumi=${identity.bangumiItem.name}, episode=${identity.episodeNumber}',
           error: e,
           stackTrace: stackTrace,
@@ -308,7 +308,7 @@ class HistoryRepository implements IHistoryRepository {
       var history = _findHistory(adapterName, bangumiItem, entryKind);
       return history?.progresses[history.lastWatchEpisode];
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'GStorage: get last watching progress failed. bangumi=${bangumiItem.name}',
         error: e,
         stackTrace: stackTrace,
@@ -328,7 +328,7 @@ class HistoryRepository implements IHistoryRepository {
       var history = _findHistory(adapterName, bangumiItem, entryKind);
       return history?.progresses[episode];
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'GStorage: find progress failed. bangumi=${bangumiItem.name}, episode=$episode',
         error: e,
         stackTrace: stackTrace,
@@ -350,7 +350,7 @@ class HistoryRepository implements IHistoryRepository {
         }
         await _deleteSyncAppender(history);
       } catch (e, stackTrace) {
-        KazumiLogger().e(
+        MiruLogger().e(
           'GStorage: delete history failed. bangumi=${history.bangumiItem.name}',
           error: e,
           stackTrace: stackTrace,
@@ -366,7 +366,7 @@ class HistoryRepository implements IHistoryRepository {
         await _historiesBox.clear();
         await _clearSyncAppender();
       } catch (e, stackTrace) {
-        KazumiLogger().e(
+        MiruLogger().e(
           'GStorage: clear all histories failed',
           error: e,
           stackTrace: stackTrace,
@@ -380,7 +380,7 @@ class HistoryRepository implements IHistoryRepository {
     try {
       return _privateModeReader();
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'GStorage: get private mode setting failed, using default false',
         error: e,
         stackTrace: stackTrace,

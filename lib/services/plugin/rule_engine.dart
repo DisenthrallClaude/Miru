@@ -1,13 +1,13 @@
 import 'package:dio/dio.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/plugins/api_rule_config.dart';
-import 'package:kazumi/request/clients/plugin_site_client.dart';
-import 'package:kazumi/request/core/network_exception.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/plugin/api_rule_strategy.dart';
-import 'package:kazumi/services/plugin/plugin_cookie_manager.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart';
-import 'package:kazumi/services/plugin/xpath_rule_strategy.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/plugins/api_rule_config.dart';
+import 'package:miru/request/clients/plugin_site_client.dart';
+import 'package:miru/request/core/network_exception.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/plugin/api_rule_strategy.dart';
+import 'package:miru/services/plugin/plugin_cookie_manager.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart';
+import 'package:miru/services/plugin/xpath_rule_strategy.dart';
 
 abstract interface class RuleRequestExecutor {
   Future<String> execute(
@@ -110,7 +110,7 @@ class RuleEngine {
       );
     } catch (error) {
       if (_logFailures) {
-        KazumiLogger().i(
+        MiruLogger().i(
           'Plugin: ${config.pluginName} harvested page not parseable, '
           'falling back to re-search ($error)',
         );
@@ -206,7 +206,7 @@ class RuleEngine {
   ) {
     if (!_logFailures || diagnostics.isEmpty) return;
     final preview = diagnostics.take(3).join('; ');
-    KazumiLogger().w(
+    MiruLogger().w(
       'Plugin: ${config.pluginName} $phase skipped ${diagnostics.length} '
       'node(s): $preview',
     );
@@ -219,7 +219,7 @@ class RuleEngine {
     StackTrace stackTrace,
   ) {
     if (!_logFailures) return;
-    KazumiLogger().w(
+    MiruLogger().w(
       'Plugin: ${config.pluginName} $phase failed',
       error: error,
       stackTrace: stackTrace,
@@ -238,7 +238,7 @@ class _DefaultRuleRequestExecutor implements RuleRequestExecutor {
         ? await _cookieHeaderFor(config.pluginName, request.url)
         : '';
     final verifiedUserAgent = cookieHeader.isNotEmpty
-        ? PluginCookieManager.instance.userAgentFor(config.pluginName)
+        ? await PluginCookieManager.instance.userAgentFor(config.pluginName)
         : null;
     // Header names are lowercased so a rule-supplied 'User-Agent' collides
     // with ours instead of being sent as a second, conflicting header.

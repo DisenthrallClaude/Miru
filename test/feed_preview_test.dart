@@ -10,11 +10,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/bean/card/bangumi_feed_card.dart';
-import 'package:kazumi/bean/card/bangumi_hero_carousel.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/card/bangumi_feed_card.dart';
+import 'package:miru/bean/card/bangumi_hero_carousel.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/utils/theme.dart';
 
 Future<void> _loadFonts() async {
   Future<void> load(String family, List<String> paths) async {
@@ -124,7 +124,7 @@ void main() {
 
       await tester.pumpWidget(MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: buildKazumiTheme(
+        theme: buildMiruTheme(
             brightness: brightness, fontFamily: 'Noto_Serif_SC'),
         home: Builder(builder: (context) {
           return Scaffold(

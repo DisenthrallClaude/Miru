@@ -1,5 +1,5 @@
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 enum LinuxExternalPlayerResult {
   launched,
@@ -11,7 +11,7 @@ enum LinuxExternalPlayerResult {
 class ExternalPlayer {
   ExternalPlayer._();
 
-  static const _platform = MethodChannel('com.predidit.kazumi/intent');
+  static const _platform = MethodChannel('io.github.disenthrallclaude.miru/intent');
 
   static Future<bool> launchUrlWithMime(String url, String mimeType) async {
     try {
@@ -19,7 +19,7 @@ class ExternalPlayer {
           'openWithMime', <String, String>{'url': url, 'mimeType': mimeType});
       return true;
     } on PlatformException catch (e) {
-      KazumiLogger().e("ExternalPlayer: failed to open with mime", error: e);
+      MiruLogger().e("ExternalPlayer: failed to open with mime", error: e);
       return false;
     }
   }
@@ -30,7 +30,7 @@ class ExternalPlayer {
           'openWithReferer', <String, String>{'url': url, 'referer': referer});
       return true;
     } on PlatformException catch (e) {
-      KazumiLogger().e("ExternalPlayer: failed to open with referer", error: e);
+      MiruLogger().e("ExternalPlayer: failed to open with referer", error: e);
       return false;
     }
   }
@@ -49,7 +49,7 @@ class ExternalPlayer {
         _ => LinuxExternalPlayerResult.failed,
       };
     } on PlatformException catch (e) {
-      KazumiLogger().e(
+      MiruLogger().e(
         "ExternalPlayer: failed to open Linux desktop player",
         error: e,
       );

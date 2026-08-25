@@ -1,4 +1,4 @@
-import 'package:kazumi/services/video_source/video_source_format.dart';
+import 'package:miru/services/video_source/video_source_format.dart';
 
 class PlaybackInitParams {
   final String videoUrl;

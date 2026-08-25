@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/card/rule_card.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/utils/format.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/card/rule_card.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/utils/format.dart';
 
 const Duration _kExpandDuration = Duration(milliseconds: 250);
 const Curve _kExpandCurve = Curves.easeInOutCubic;

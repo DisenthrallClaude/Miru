@@ -1,20 +1,20 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
-import 'package:kazumi/utils/theme.dart';
-import 'package:kazumi/navigation.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/navigation.dart';
+import 'package:miru/utils/constants.dart';
 
 // A simple dialog helper class to show dialogs and toasts based on flutter native implementation (replace flutter_smart_dialog)
 // flutter_smart_dialog use overlays and self-managed route stack to show dialogs.
 // It's powerful but can't behave like the default showDialog, e.g. the lack of mask animation. the lack of snackbar.
 // Use the implementation should be careful, because shared route stack with the whole app, it may cause some unexpected behaviors.
 // Don't use it in double PopScope widget.
-class KazumiDialog {
+class MiruDialog {
   /// The global observer that tracks contexts across the application
-  static final KazumiDialogObserver observer = KazumiDialogObserver();
+  static final MiruDialogObserver observer = MiruDialogObserver();
 
-  KazumiDialog._internal();
+  MiruDialog._internal();
 
   static Future<T?> show<T>({
     BuildContext? context,
@@ -31,20 +31,20 @@ class KazumiDialog {
           useRootNavigator: true,
           barrierDismissible: clickMaskDismiss ?? true,
           // 弹窗出现时把背后页面整体模糊，做出 iOS 的玻璃层次。
-          // 在这里统一处理，所有 KazumiDialog.show 调用点无需改动。
+          // 在这里统一处理，所有 MiruDialog.show 调用点无需改动。
           barrierColor: Colors.black.withValues(alpha: 0.28),
           builder: (context) => _BlurredDialogBackdrop(child: builder(context)),
-          routeSettings: const RouteSettings(name: 'KazumiDialog'),
+          routeSettings: const RouteSettings(name: 'MiruDialog'),
         );
         onDismiss?.call();
         return result;
       } catch (e) {
-        debugPrint('Kazumi Dialog Error: Failed to show dialog: $e');
+        debugPrint('Miru Dialog Error: Failed to show dialog: $e');
         return null;
       }
     } else {
       debugPrint(
-          'Kazumi Dialog Error: No context available to show the dialog');
+          'Miru Dialog Error: No context available to show the dialog');
       return null;
     }
   }
@@ -85,11 +85,11 @@ class KazumiDialog {
             ),
           );
       } catch (e) {
-        debugPrint('Kazumi Dialog Error: Failed to show toast: $e');
+        debugPrint('Miru Dialog Error: Failed to show toast: $e');
       }
     } else {
       debugPrint(
-          'Kazumi Dialog Error: No ScaffoldMessenger available to show Toast');
+          'Miru Dialog Error: No ScaffoldMessenger available to show Toast');
     }
   }
 
@@ -98,6 +98,9 @@ class KazumiDialog {
     String? msg,
     bool barrierDismissible = false,
     Function()? onDismiss,
+    // 播放器上方务必传 false：Impeller 下 BackdropFilter 会对视频
+    // 纹理逐帧采样，加载框常驻期间会持续拖累渲染。
+    bool glass = true,
   }) async {
     final ctx =
         context ?? rootNavigatorKey.currentContext ?? observer.currentContext;
@@ -109,38 +112,47 @@ class KazumiDialog {
           barrierDismissible: barrierDismissible,
           builder: (BuildContext context) {
             return Center(
-              child: Card(
-                // 极简：去投影，靠表面色阶与细描边区分层次
-                elevation: 0,
-                color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                shape: const RoundedRectangleBorder(borderRadius: Radii.brXl),
-                child: Padding(
-                  padding: const EdgeInsets.all(Space.xxl),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: Space.lg),
-                      Text(
-                        msg ?? 'Loading...',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: glass
+                  ? FrostedSurface(
+                      borderRadius: Radii.brXl,
+                      child: _loadingBody(context, msg),
+                    )
+                  : Card(
+                      elevation: 0,
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      shape: const RoundedRectangleBorder(
+                          borderRadius: Radii.brXl),
+                      child: _loadingBody(context, msg),
+                    ),
             );
           },
-          routeSettings: const RouteSettings(name: 'KazumiDialog'),
+          routeSettings: const RouteSettings(name: 'MiruDialog'),
         );
         onDismiss?.call();
       } catch (e) {
-        debugPrint('Kazumi Dialog Error: Failed to show loading dialog: $e');
+        debugPrint('Miru Dialog Error: Failed to show loading dialog: $e');
       }
     } else {
       debugPrint(
-          'Kazumi Dialog Error: No context available to show the loading dialog');
+          'Miru Dialog Error: No context available to show the loading dialog');
     }
+  }
+
+  static Widget _loadingBody(BuildContext context, String? msg) {
+    return Padding(
+      padding: const EdgeInsets.all(Space.xxl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: Space.lg),
+          Text(
+            msg ?? 'Loading...',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
   }
 
   static Future<T?> showBottomSheet<T>({
@@ -184,33 +196,33 @@ class KazumiDialog {
           isDismissible: isDismissible,
           enableDrag: enableDrag,
           routeSettings:
-              routeSettings ?? const RouteSettings(name: 'KazumiBottomSheet'),
+              routeSettings ?? const RouteSettings(name: 'MiruBottomSheet'),
           transitionAnimationController: transitionAnimationController,
           anchorPoint: anchorPoint,
           useSafeArea: useSafeArea,
         );
         return result;
       } catch (e) {
-        debugPrint('Kazumi Dialog Error: Failed to show bottom sheet: $e');
+        debugPrint('Miru Dialog Error: Failed to show bottom sheet: $e');
         return null;
       }
     } else {
       debugPrint(
-          'Kazumi Dialog Error: No context available to show the bottom sheet');
+          'Miru Dialog Error: No context available to show the bottom sheet');
       return null;
     }
   }
 
   // 在存在返回值时弹出并附带返回值
   static void dismiss<T>({T? popWith}) {
-    if (observer.hasKazumiDialog && observer.kazumiDialogContext != null) {
+    if (observer.hasMiruDialog && observer.miruDialogContext != null) {
       try {
-        Navigator.of(observer.kazumiDialogContext!).pop(popWith);
+        Navigator.of(observer.miruDialogContext!).pop(popWith);
       } catch (e) {
-        debugPrint('Kazumi Dialog Error: Failed to dismiss dialog: $e');
+        debugPrint('Miru Dialog Error: Failed to dismiss dialog: $e');
       }
     } else {
-      debugPrint('Kazumi Dialog Debug: No active KazumiDialog to dismiss');
+      debugPrint('Miru Dialog Debug: No active MiruDialog to dismiss');
     }
   }
 
@@ -227,7 +239,7 @@ class KazumiDialog {
     required VoidCallback onComplete,
     Duration duration = const Duration(seconds: 3),
   }) {
-    KazumiDialog.show<bool>(
+    MiruDialog.show<bool>(
       clickMaskDismiss: false,
       builder: (context) => _TimedSuccessDialog(
         title: title,
@@ -319,7 +331,7 @@ class _TimedSuccessDialog extends StatelessWidget {
               TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
                 duration: duration,
-                onEnd: () => KazumiDialog.dismiss(popWith: true),
+                onEnd: () => MiruDialog.dismiss(popWith: true),
                 builder: (context, value, _) =>
                     LinearProgressIndicator(value: value),
               ),
@@ -332,9 +344,9 @@ class _TimedSuccessDialog extends StatelessWidget {
 }
 
 /// Navigator observer to track contexts and dialog routes
-class KazumiDialogObserver extends NavigatorObserver {
+class MiruDialogObserver extends NavigatorObserver {
   /// List of active dialog routes
-  final List<Route<dynamic>> _kazumiDialogRoutes = [];
+  final List<Route<dynamic>> _miruDialogRoutes = [];
   bool _snackBarClearScheduled = false;
 
   /// The most recent context from any MaterialPageRoute or PopupRoute
@@ -354,17 +366,17 @@ class KazumiDialogObserver extends NavigatorObserver {
   BuildContext? get rootContext =>
       _rootContext ?? _scaffoldContext ?? _currentContext;
 
-  bool get hasKazumiDialog => _kazumiDialogRoutes.isNotEmpty;
+  bool get hasMiruDialog => _miruDialogRoutes.isNotEmpty;
 
-  BuildContext? get kazumiDialogContext => _kazumiDialogRoutes.isNotEmpty
-      ? _kazumiDialogRoutes.last.navigator?.context
+  BuildContext? get miruDialogContext => _miruDialogRoutes.isNotEmpty
+      ? _miruDialogRoutes.last.navigator?.context
       : null;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPush(route, previousRoute);
-    if (_isKazumiDialogRoute(route)) {
-      _kazumiDialogRoutes.add(route);
+    if (_isMiruDialogRoute(route)) {
+      _miruDialogRoutes.add(route);
     }
     if (route.navigator?.context != null) {
       _updateContexts(route.navigator!.context, route);
@@ -375,8 +387,8 @@ class KazumiDialogObserver extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPop(route, previousRoute);
     _scheduleSnackBarClear();
-    if (_isKazumiDialogRoute(route)) {
-      _kazumiDialogRoutes.remove(route);
+    if (_isMiruDialogRoute(route)) {
+      _miruDialogRoutes.remove(route);
     }
     if (previousRoute?.navigator?.context != null) {
       _updateContexts(previousRoute!.navigator!.context, previousRoute);
@@ -387,11 +399,11 @@ class KazumiDialogObserver extends NavigatorObserver {
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
     super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
     _scheduleSnackBarClear();
-    if (_isKazumiDialogRoute(oldRoute!)) {
-      _kazumiDialogRoutes.remove(oldRoute);
+    if (_isMiruDialogRoute(oldRoute!)) {
+      _miruDialogRoutes.remove(oldRoute);
     }
-    if (_isKazumiDialogRoute(newRoute!)) {
-      _kazumiDialogRoutes.add(newRoute);
+    if (_isMiruDialogRoute(newRoute!)) {
+      _miruDialogRoutes.add(newRoute);
     }
     if (newRoute.navigator?.context != null) {
       _updateContexts(newRoute.navigator!.context, newRoute);
@@ -403,8 +415,8 @@ class KazumiDialogObserver extends NavigatorObserver {
     super.didRemove(route, previousRoute);
     _scheduleSnackBarClear();
 
-    if (_isKazumiDialogRoute(route)) {
-      _kazumiDialogRoutes.remove(route);
+    if (_isMiruDialogRoute(route)) {
+      _miruDialogRoutes.remove(route);
     }
 
     if (previousRoute?.navigator?.context != null) {
@@ -426,9 +438,9 @@ class KazumiDialogObserver extends NavigatorObserver {
     return Scaffold.maybeOf(context) != null;
   }
 
-  bool _isKazumiDialogRoute(Route<dynamic> route) {
-    return route.settings.name == 'KazumiDialog' ||
-        route.settings.name == 'KazumiBottomSheet';
+  bool _isMiruDialogRoute(Route<dynamic> route) {
+    return route.settings.name == 'MiruDialog' ||
+        route.settings.name == 'MiruBottomSheet';
   }
 
   void _scheduleSnackBarClear() {
@@ -456,16 +468,25 @@ class _BlurredDialogBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 模糊半径为 0 时直接跳过 BackdropFilter：
+    // 全屏模糊层即使无视觉效果也会付出整屏光栅化的代价。
+    if (Frost.scrimBlur <= 0) {
+      return child;
+    }
     return Stack(
       children: [
         Positioned.fill(
           child: IgnorePointer(
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(
-                sigmaX: Frost.scrimBlur,
-                sigmaY: Frost.scrimBlur,
+            // 独立图层隔离整屏模糊：对话框动画期间背景页面的重绘
+            // 不会被模糊层放大成全屏光栅化。
+            child: RepaintBoundary(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(
+                  sigmaX: Frost.scrimBlur,
+                  sigmaY: Frost.scrimBlur,
+                ),
+                child: const SizedBox.expand(),
               ),
-              child: const SizedBox.expand(),
             ),
           ),
         ),
@@ -477,7 +498,7 @@ class _BlurredDialogBackdrop extends StatelessWidget {
 
 /// 把 BottomSheet 内容放到液态玻璃之上。
 ///
-/// 在 `KazumiDialog.showBottomSheet` 内统一包裹，所有调用点无需改动。
+/// 在 `MiruDialog.showBottomSheet` 内统一包裹，所有调用点无需改动。
 /// 顶部圆角与 `bottomSheetTheme.shape` 保持一致。
 class _GlassSheet extends StatelessWidget {
   const _GlassSheet({required this.child});

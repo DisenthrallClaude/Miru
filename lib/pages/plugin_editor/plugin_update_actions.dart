@@ -1,20 +1,20 @@
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/plugins/plugins_controller.dart';
 
 Future<void> updateAllPluginsWithFeedback(
   PluginsController controller, {
   required bool ensureCatalog,
 }) async {
-  KazumiDialog.showLoading(msg: '更新中');
+  MiruDialog.showLoading(msg: '更新中');
   try {
     final result = await controller.tryUpdateAllPlugin(
       ensureCatalog: ensureCatalog,
     );
-    KazumiDialog.dismiss();
-    KazumiDialog.showToast(message: _batchUpdateMessage(result));
+    MiruDialog.dismiss();
+    MiruDialog.showToast(message: _batchUpdateMessage(result));
   } catch (_) {
-    KazumiDialog.dismiss();
-    KazumiDialog.showToast(message: '更新规则失败');
+    MiruDialog.dismiss();
+    MiruDialog.showToast(message: '更新规则失败');
   }
 }
 
@@ -23,12 +23,12 @@ Future<PluginUpdateResult> updatePluginWithFeedback(
   String name, {
   required bool installing,
 }) async {
-  KazumiDialog.showToast(message: installing ? '导入中' : '更新中');
+  MiruDialog.showToast(message: installing ? '导入中' : '更新中');
   late final PluginUpdateResult result;
   try {
     result = await controller.tryUpdatePluginByName(name);
   } catch (_) {
-    KazumiDialog.showToast(message: '保存规则失败');
+    MiruDialog.showToast(message: '保存规则失败');
     return PluginUpdateResult.failed;
   }
   final message = switch (result) {
@@ -37,7 +37,7 @@ Future<PluginUpdateResult> updatePluginWithFeedback(
     PluginUpdateResult.failed => installing ? '导入规则失败' : '更新规则失败',
     PluginUpdateResult.notNewer => '远程规则版本不高于本地，已跳过更新',
   };
-  KazumiDialog.showToast(message: message);
+  MiruDialog.showToast(message: message);
   return result;
 }
 

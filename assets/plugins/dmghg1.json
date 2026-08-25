@@ -1,0 +1,19 @@
+{
+    "api": "5",
+    "type": "anime",
+    "version": "1.0",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "useLegacyParser": false,
+    "userAgent": "",
+    "adBlocker": true,
+    "name": "dmghg1",
+    "baseURL": "https://www.dmghg1.com/",
+    "searchURL": "https://www.dmghg1.com/index.php/vod/search.html?wd=@keyword",
+    "searchList": "//div[contains(@class,'module-card-item')]",
+    "searchName": "//div[contains(@class,'module-card-item-title')]/a",
+    "searchResult": "//div[contains(@class,'module-card-item-title')]/a",
+    "chapterRoads": "//div[contains(@class,'module-play-list-content')]",
+    "chapterResult": "//a[@class='module-play-list-link']"
+}

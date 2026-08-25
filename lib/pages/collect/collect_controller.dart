@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/services/sync/bangumi_sync_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/sync/webdav.dart';
-import 'package:kazumi/repositories/collect_crud_repository.dart';
-import 'package:kazumi/repositories/collect_repository.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/collect/collect_module.dart';
+import 'package:miru/modules/collect/collect_type.dart';
+import 'package:miru/services/sync/bangumi_sync_service.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/sync/webdav.dart';
+import 'package:miru/repositories/collect_crud_repository.dart';
+import 'package:miru/repositories/collect_repository.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 part 'collect_controller.g.dart';
 
@@ -130,7 +130,7 @@ abstract class _CollectController with Store {
       return _BangumiDeleteSyncAction.deleteLocalOnly;
     }
 
-    return KazumiDialog.show<_BangumiDeleteSyncAction>(
+    return MiruDialog.show<_BangumiDeleteSyncAction>(
       clickMaskDismiss: true,
       builder: (context) => AlertDialog(
         title: const Text('Bangumi 不支持删除收藏'),
@@ -167,7 +167,7 @@ abstract class _CollectController with Store {
       await launchUrl(url, mode: LaunchMode.externalApplication);
       return;
     }
-    KazumiDialog.showToast(message: '无法打开 Bangumi 网页');
+    MiruDialog.showToast(message: '无法打开 Bangumi 网页');
   }
 
   Future<bool> _syncBangumiCollectIfEnabled(
@@ -182,8 +182,8 @@ abstract class _CollectController with Store {
 
     final bangumi = BangumiSyncService();
     if (!bangumi.initialized) {
-      KazumiDialog.showToast(message: 'Bangumi 未初始化，同步失败，已取消本次状态修改');
-      KazumiLogger().w(
+      MiruDialog.showToast(message: 'Bangumi 未初始化，同步失败，已取消本次状态修改');
+      MiruLogger().w(
         'Bangumi: immediate collect sync skipped because Bangumi is not initialized. '
         'bangumiId=$bangumiId, type=$localType',
       );
@@ -191,24 +191,24 @@ abstract class _CollectController with Store {
     }
     try {
       if (showImmediateSyncToast) {
-        KazumiDialog.showToast(message: '正在同步到 Bangumi...');
+        MiruDialog.showToast(message: '正在同步到 Bangumi...');
       }
       final bool synced =
           await bangumi.syncCollectibleWhenIdle(bangumiId, localType);
       if (synced && showImmediateSyncToast) {
-        KazumiDialog.showToast(message: '已同步到 Bangumi');
+        MiruDialog.showToast(message: '已同步到 Bangumi');
         return true;
       } else if (!synced) {
-        KazumiDialog.showToast(message: '同步到 Bangumi 失败，已取消本次状态修改');
-        KazumiLogger().w(
+        MiruDialog.showToast(message: '同步到 Bangumi 失败，已取消本次状态修改');
+        MiruLogger().w(
           'Bangumi: immediate collect sync did not complete. bangumiId=$bangumiId, type=$localType',
         );
         return false;
       }
       return true;
     } catch (e, stackTrace) {
-      KazumiDialog.showToast(message: '同步到 Bangumi 失败，已取消本次状态修改: $e');
-      KazumiLogger().e(
+      MiruDialog.showToast(message: '同步到 Bangumi 失败，已取消本次状态修改: $e');
+      MiruLogger().e(
         'Bangumi: immediate collect sync failed. bangumiId=$bangumiId, type=$localType',
         error: e,
         stackTrace: stackTrace,
@@ -226,19 +226,19 @@ abstract class _CollectController with Store {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
     if (!webDavCollectEnable) {
-      KazumiDialog.showToast(message: '未开启WebDav收藏同步');
+      MiruDialog.showToast(message: '未开启WebDav收藏同步');
       return false;
     }
     if (!WebDav().initialized) {
-      KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
+      MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
       return false;
     }
     bool flag = true;
     try {
       await WebDav().ping();
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDav connection failed', error: e);
-      KazumiDialog.showToast(message: 'WebDav连接失败: $e');
+      MiruLogger().e('WebDav: WebDav connection failed', error: e);
+      MiruDialog.showToast(message: 'WebDav连接失败: $e');
       flag = false;
     }
     if (!flag) {
@@ -247,10 +247,10 @@ abstract class _CollectController with Store {
     try {
       await WebDav().syncCollectibles();
       if (showSuccessToast) {
-        KazumiDialog.showToast(message: 'WebDav同步完成');
+        MiruDialog.showToast(message: 'WebDav同步完成');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: 'WebDav同步失败 $e');
+      MiruDialog.showToast(message: 'WebDav同步失败 $e');
       return false;
     }
     loadCollectibles();
@@ -264,19 +264,19 @@ abstract class _CollectController with Store {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
     if (!webDavCollectEnable) {
-      KazumiDialog.showToast(message: '未开启WebDav收藏同步');
+      MiruDialog.showToast(message: '未开启WebDav收藏同步');
       return false;
     }
     if (!WebDav().initialized) {
-      KazumiDialog.showToast(message: '未开启WebDav同步或配置无效');
+      MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
       return false;
     }
     bool flag = true;
     try {
       await WebDav().ping();
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDav connection failed', error: e);
-      KazumiDialog.showToast(message: 'WebDav连接失败: $e');
+      MiruLogger().e('WebDav: WebDav connection failed', error: e);
+      MiruDialog.showToast(message: 'WebDav连接失败: $e');
       flag = false;
     }
     if (!flag) {
@@ -285,10 +285,10 @@ abstract class _CollectController with Store {
     try {
       await WebDav().updateCollectibles();
       if (showSuccessToast) {
-        KazumiDialog.showToast(message: 'WebDav上传完成');
+        MiruDialog.showToast(message: 'WebDav上传完成');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: 'WebDav上传失败 $e');
+      MiruDialog.showToast(message: 'WebDav上传失败 $e');
       return false;
     }
     return true;
@@ -313,7 +313,7 @@ abstract class _CollectController with Store {
       }
       await _collectCrudRepository.clearFavorites();
       loadCollectibles();
-      KazumiLogger().d(
+      MiruLogger().d(
           'GStorage: detected $count uncategorized favorites, migrated to collectibles');
     }
   }
@@ -343,12 +343,12 @@ abstract class _CollectController with Store {
       bool showSuccessToast = true}) async {
     final bool syncEnable = GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (!syncEnable) {
-      KazumiDialog.showToast(message: '未开启Bangumi同步，请先在设置中启用');
+      MiruDialog.showToast(message: '未开启Bangumi同步，请先在设置中启用');
       return false;
     }
 
     if (!BangumiSyncService().initialized) {
-      KazumiDialog.showToast(message: 'Bangumi同步已开启但未初始化，请检查Token后重试');
+      MiruDialog.showToast(message: 'Bangumi同步已开启但未初始化，请检查Token后重试');
       return false;
     }
     try {
@@ -357,17 +357,17 @@ abstract class _CollectController with Store {
         final hasChanges =
             await BangumiSyncService().syncCollectibles(onProgress: onProgress);
         if (showSuccessToast) {
-          KazumiDialog.showToast(
+          MiruDialog.showToast(
             message: hasChanges ? 'Bangumi同步完成' : '未发现状态差异，无需同步',
           );
         }
       } catch (e) {
-        KazumiDialog.showToast(message: 'Bangumi同步失败 $e');
+        MiruDialog.showToast(message: 'Bangumi同步失败 $e');
         return false;
       }
     } catch (e) {
-      KazumiLogger().e('Bangumi: Bangumi connection failed', error: e);
-      KazumiDialog.showToast(message: 'Bangumi访问失败: $e');
+      MiruLogger().e('Bangumi: Bangumi connection failed', error: e);
+      MiruDialog.showToast(message: 'Bangumi访问失败: $e');
       return false;
     }
     loadCollectibles();

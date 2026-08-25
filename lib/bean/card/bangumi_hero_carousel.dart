@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/request/config/hero_banners.dart';
-import 'package:kazumi/services/storage/feed_cache.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/request/config/hero_banners.dart';
+import 'package:miru/services/storage/feed_cache.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 首页顶部大横幅轮播。
 ///
@@ -96,7 +96,7 @@ class _BangumiHeroCarouselState extends State<BangumiHeroCarousel> {
       final fetched = await BangumiApi.getBangumiInfoByID(banner.subjectId);
       if (!mounted) return;
       if (fetched == null) {
-        KazumiDialog.showToast(
+        MiruDialog.showToast(
             message: '「${banner.title}」暂时打不开，请检查网络后重试',
             context: context);
         return;

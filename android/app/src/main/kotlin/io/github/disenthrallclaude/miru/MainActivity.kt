@@ -1,4 +1,4 @@
-package com.example.kazumi
+package io.github.disenthrallclaude.miru
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -12,6 +12,9 @@ import android.os.StatFs
 import android.net.Uri
 import android.app.PictureInPictureParams
 import android.graphics.drawable.Icon
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.util.Rational
 import androidx.annotation.NonNull
 import androidx.core.content.ContextCompat
@@ -21,13 +24,24 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.ryanheise.audioservice.AudioServiceActivity
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity: AudioServiceActivity() {
-    private val CHANNEL = "com.predidit.kazumi/intent"
-    private val STORAGE_CHANNEL = "com.predidit.kazumi/storage"
-    private val PIP_CHANNEL = "com.predidit.kazumi/pip"
+    private val CHANNEL = "io.github.disenthrallclaude.miru/intent"
+    private val STORAGE_CHANNEL = "io.github.disenthrallclaude.miru/storage"
+    private val PIP_CHANNEL = "io.github.disenthrallclaude.miru/pip"
+    private val CRYPTO_CHANNEL = "io.github.disenthrallclaude.miru/crypto"
     private var intentChannel: MethodChannel? = null
     private var pipChannel: MethodChannel? = null
+
+    // Android Keystore 别名：硬件级密钥用于加密敏感设置项（如 WebDAV 密码），
+    // 密钥不可导出，卸载应用后自动销毁。
+    private val keystoreAlias = "miru_secure_field_key"
+    private val cipherPrefix = "v1:"
 
     private var pipIsPlaying = false
     private var pipDanmakuEnabled = false
@@ -38,9 +52,9 @@ class MainActivity: AudioServiceActivity() {
     private var pipAspectHeight = 9
     private var androidFullscreen = false
 
-    private val actionPipPlayPause = "com.predidit.kazumi.pip.PLAY_PAUSE"
-    private val actionPipForward = "com.predidit.kazumi.pip.FORWARD"
-    private val actionPipToggleDanmaku = "com.predidit.kazumi.pip.TOGGLE_DANMAKU"
+    private val actionPipPlayPause = "io.github.disenthrallclaude.miru.pip.PLAY_PAUSE"
+    private val actionPipForward = "io.github.disenthrallclaude.miru.pip.FORWARD"
+    private val actionPipToggleDanmaku = "io.github.disenthrallclaude.miru.pip.TOGGLE_DANMAKU"
 
     private val pipActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
@@ -107,6 +121,40 @@ class MainActivity: AudioServiceActivity() {
                 result.success(availableBytes)
             } else {
                 result.notImplemented()
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CRYPTO_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "encrypt" -> {
+                    val value = call.argument<String>("value")
+                    if (value == null) {
+                        result.error("INVALID_ARGUMENT", "value required", null)
+                    } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        result.error("UNSUPPORTED", "Android Keystore requires API 23+", null)
+                    } else {
+                        try {
+                            result.success(encryptWithKeystore(value))
+                        } catch (e: Exception) {
+                            result.error("CRYPTO_ERROR", e.message, null)
+                        }
+                    }
+                }
+                "decrypt" -> {
+                    val value = call.argument<String>("value")
+                    if (value == null) {
+                        result.error("INVALID_ARGUMENT", "value required", null)
+                    } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        result.error("UNSUPPORTED", "Android Keystore requires API 23+", null)
+                    } else {
+                        try {
+                            result.success(decryptWithKeystore(value))
+                        } catch (e: Exception) {
+                            result.error("CRYPTO_ERROR", e.message, null)
+                        }
+                    }
+                }
+                else -> result.notImplemented()
             }
         }
 
@@ -333,5 +381,57 @@ class MainActivity: AudioServiceActivity() {
         } catch (e: Exception) {
             -1L
         }
+    }
+
+    private fun getOrCreateKeystoreKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (keyStore.getEntry(keystoreAlias, null) as? KeyStore.SecretKeyEntry)?.let {
+            return it.secretKey
+        }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                keystoreAlias,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    // 输出格式: v1:base64(iv):base64(ciphertext)。AES-GCM 每次加密使用随机 IV。
+    private fun encryptWithKeystore(plainText: String): String {
+        if (plainText.isEmpty()) {
+            return plainText
+        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKeystoreKey())
+        val iv = cipher.iv
+        val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+        val ivB64 = Base64.encodeToString(iv, Base64.NO_WRAP)
+        val dataB64 = Base64.encodeToString(encrypted, Base64.NO_WRAP)
+        return "$cipherPrefix$ivB64:$dataB64"
+    }
+
+    // 非 v1: 前缀的历史明文直接透传，由 Dart 侧决定是否回写升级为密文。
+    private fun decryptWithKeystore(storedValue: String): String? {
+        if (!storedValue.startsWith(cipherPrefix)) {
+            return storedValue
+        }
+        val parts = storedValue.split(":")
+        if (parts.size != 3) {
+            throw IllegalArgumentException("Malformed cipher payload")
+        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            getOrCreateKeystoreKey(),
+            GCMParameterSpec(128, Base64.decode(parts[1], Base64.NO_WRAP))
+        )
+        val plain = cipher.doFinal(Base64.decode(parts[2], Base64.NO_WRAP))
+        return String(plain, Charsets.UTF_8)
     }
 }

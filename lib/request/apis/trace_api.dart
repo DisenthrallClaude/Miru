@@ -1,8 +1,8 @@
 import 'dart:io';
 
-import 'package:kazumi/request/clients/trace_client.dart';
-import 'package:kazumi/modules/search/image_search_module.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:miru/request/clients/trace_client.dart';
+import 'package:miru/modules/search/image_search_module.dart';
+import 'package:miru/request/config/api_endpoints.dart';
 
 class TraceApi {
   static final TraceClient _client = TraceClient.instance;

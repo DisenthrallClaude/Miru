@@ -3,16 +3,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/pages/onboarding/steps/disclaimer_step.dart';
-import 'package:kazumi/pages/onboarding/steps/mirror_settings_step.dart';
-import 'package:kazumi/pages/onboarding/steps/update_source_step.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/update/startup_update_check.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/onboarding/steps/disclaimer_step.dart';
+import 'package:miru/pages/onboarding/steps/mirror_settings_step.dart';
+import 'package:miru/pages/onboarding/steps/update_source_step.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/update/startup_update_check.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({
@@ -109,7 +109,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
     try {
       await pluginsController.copyPluginsToExternalDirectory();
     } catch (error, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'Plugin: failed to install bundled rules',
         error: error,
         stackTrace: stackTrace,
@@ -119,7 +119,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
           installingBundled = false;
         });
       }
-      KazumiDialog.showToast(message: '初始化规则失败');
+      MiruDialog.showToast(message: '初始化规则失败');
       return;
     }
     if (!mounted) {
@@ -161,15 +161,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
           if (result == PluginUpdateResult.updated) installed++;
         } catch (error) {
           // 单条失败不阻断整体流程
-          KazumiLogger().w('Plugin: auto install failed for ${catalog[i].name}',
+          MiruLogger().w('Plugin: auto install failed for ${catalog[i].name}',
               error: error);
         }
       }
     } catch (error, stackTrace) {
-      KazumiLogger()
+      MiruLogger()
           .e('Plugin: auto setup failed', error: error, stackTrace: stackTrace);
       if (mounted) {
-        KazumiDialog.showToast(message: '规则自动安装失败，可稍后在 设置 → 规则管理 中重试');
+        MiruDialog.showToast(message: '规则自动安装失败，可稍后在 设置 → 规则管理 中重试');
       }
     }
 
@@ -179,7 +179,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       autoSetupMessage = null;
     });
     if (installed > 0) {
-      KazumiDialog.showToast(message: '已自动安装 $installed 条规则');
+      MiruDialog.showToast(message: '已自动安装 $installed 条规则');
     }
     _finish();
   }

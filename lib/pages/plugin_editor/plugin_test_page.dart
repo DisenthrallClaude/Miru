@@ -2,10 +2,10 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/services/logging/logger.dart';
 
 import '../../modules/roads/road_module.dart';
 import '../../plugins/api_rule_config.dart';
@@ -92,7 +92,7 @@ class _PluginTestPageState extends State<PluginTestPage> {
   }
 
   void _onBackPressed() =>
-      KazumiDialog.observer.hasKazumiDialog ? KazumiDialog.dismiss() : null;
+      MiruDialog.observer.hasMiruDialog ? MiruDialog.dismiss() : null;
 
   void _resetState() => setState(() {
         _testSearchRequestCancelToken?.cancel();
@@ -147,7 +147,7 @@ class _PluginTestPageState extends State<PluginTestPage> {
         }
       }
     } catch (e, stack) {
-      KazumiLogger().e("PluginTest: test failed", error: e, stackTrace: stack);
+      MiruLogger().e("PluginTest: test failed", error: e, stackTrace: stack);
       if (mounted) {
         setState(() => errorMsg = e.toString());
       }

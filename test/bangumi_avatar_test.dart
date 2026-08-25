@@ -1,7 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/bean/widget/bangumi_avatar.dart';
+import 'package:miru/bean/widget/bangumi_avatar.dart';
 
 void main() {
   testWidgets('uses the proxy-aware cached image widget', (tester) async {

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/network/proxy_manager.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/network/proxy_manager.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 
 class ProxySettingsPage extends StatefulWidget {
   const ProxySettingsPage({super.key});
@@ -23,8 +23,8 @@ class _ProxySettingsPageState extends State<ProxySettingsPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
@@ -33,7 +33,7 @@ class _ProxySettingsPageState extends State<ProxySettingsPage> {
     if (value) {
       final proxyConfigured = GStorage.getSetting(SettingsKeys.proxyConfigured);
       if (!proxyConfigured) {
-        KazumiDialog.showToast(message: '请先在代理配置中完成测试');
+        MiruDialog.showToast(message: '请先在代理配置中完成测试');
         return;
       }
       await GStorage.putSetting(SettingsKeys.proxyEnable, true);

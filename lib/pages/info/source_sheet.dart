@@ -4,25 +4,26 @@ import 'package:flutter_modular/flutter_modular.dart';
 // Only the reaction API: mobx also exports a Listenable, which collides with
 // the Flutter one used further down this file.
 import 'package:mobx/mobx.dart' show reaction, ReactionDisposer;
-import 'package:kazumi/pages/info/info_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/pages/video/video_playback_args.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart'
+import 'package:miru/pages/info/info_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:kazumi/services/plugin/plugin_search_service.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
+import 'package:miru/services/plugin/plugin_search_service.dart';
+import 'package:miru/services/plugin/plugin_health.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'package:kazumi/services/plugin/captcha_verification_service.dart';
-import 'package:kazumi/plugins/anti_crawler_config.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/services/plugin/captcha_verification_service.dart';
+import 'package:miru/plugins/anti_crawler_config.dart';
+import 'package:miru/utils/device.dart';
 
 class SourceSheet extends StatefulWidget {
   const SourceSheet({
@@ -41,8 +42,9 @@ class _SourceSheetState extends State<SourceSheet> {
   final PluginsController pluginsController = inject<PluginsController>();
   late String keyword;
 
-  /// Plugin name whose results are expanded, or null for none.
-  String? expandedSource;
+  /// Plugins whose result list is expanded. Multiple sources can stay open at
+  /// once so results from different sites can be compared side by side.
+  final Set<String> expandedSources = <String>{};
   ReactionDisposer? autoExpandDisposer;
 
   /// Concurrent plugin search service.
@@ -64,13 +66,13 @@ class _SourceSheetState extends State<SourceSheet> {
       pluginsController: pluginsController,
     );
     pluginSearchService?.queryAllSource(keyword);
-    // One shot: whichever source reports results first opens, and from then on
-    // the open card only moves when tapped.
+    // One shot: whichever source reports results first opens automatically;
+    // from then on every card expands/collapses only when tapped.
     autoExpandDisposer = reaction<String?>(
       (_) => firstSourceWithResults(),
       (name) {
-        if (name == null || expandedSource != null) return;
-        setState(() => expandedSource = name);
+        if (name == null || expandedSources.isNotEmpty) return;
+        setState(() => expandedSources.add(name));
         stopAutoExpand();
       },
     );
@@ -104,12 +106,12 @@ class _SourceSheetState extends State<SourceSheet> {
         ) ??
         false;
     if (harvested) {
-      KazumiDialog.showToast(message: '验证成功');
+      MiruDialog.showToast(message: '验证成功');
       return;
     }
     // show a 3s countdown progress dialog before re-querying,
     // to avoid triggering rate limits immediately after verification.
-    KazumiDialog.showTimedSuccessDialog(
+    MiruDialog.showTimedSuccessDialog(
       title: '验证成功',
       message: '即将重新检索',
       onComplete: () => pluginSearchService?.querySource(keyword, plugin.name),
@@ -165,7 +167,7 @@ class _SourceSheetState extends State<SourceSheet> {
         },
         onVerified: (pageHtml) {
           verified = true;
-          KazumiDialog.dismiss();
+          MiruDialog.dismiss();
           _showVerifiedResult(plugin, pageHtml);
         },
       );
@@ -176,13 +178,13 @@ class _SourceSheetState extends State<SourceSheet> {
         _captchaVerifyTimer?.cancel();
         _captchaVerifyTimer = Timer(const Duration(seconds: 8), () {
           if (!finalizing) {
-            KazumiDialog.dismiss();
+            MiruDialog.dismiss();
           }
         });
       }
     }
 
-    KazumiDialog.show(
+    MiruDialog.show(
       onDismiss: () async {
         _captchaVerifyTimer?.cancel();
         _captchaVerifyTimer = null;
@@ -261,13 +263,13 @@ class _SourceSheetState extends State<SourceSheet> {
 
     void onVerified(String pageHtml) {
       verified = true;
-      KazumiDialog.dismiss();
+      MiruDialog.dismiss();
       _showVerifiedResult(plugin, pageHtml);
     }
 
     unawaited(startVerification(captchaService, searchUrl, onVerified));
 
-    KazumiDialog.show(
+    MiruDialog.show(
       onDismiss: () async {
         final captchaService = _captchaVerificationService;
         _captchaVerificationService = null;
@@ -310,7 +312,7 @@ class _SourceSheetState extends State<SourceSheet> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () => KazumiDialog.dismiss(),
+                    onPressed: () => MiruDialog.dismiss(),
                     child: Text(
                       '取消',
                       style: TextStyle(
@@ -338,6 +340,60 @@ class _SourceSheetState extends State<SourceSheet> {
     return results;
   }
 
+  /// 收集同番剧的自动兜底候选：其他搜索成功且非空的源，每源取首条结果。
+  /// 健康档案里连续失败的源排到最后；按插件去重（别名搜索会产生
+  /// 同插件多条响应），标题与当前条目一致的排最前，合并后最多 3 个。
+  List<SourceFallback> _collectFallbacks({required Plugin exclude}) {
+    final currentTitle = widget.infoController.bangumiItem.nameCn.isNotEmpty
+        ? widget.infoController.bangumiItem.nameCn
+        : widget.infoController.bangumiItem.name;
+    final seen = <String>{};
+    final matched = <SourceFallback>[];
+    final candidates = <SourceFallback>[];
+    final unhealthy = <SourceFallback>[];
+    for (final response in widget.infoController.pluginSearchResponseList) {
+      if (response.pluginName == exclude.name) continue;
+      // 同一插件的别名搜索结果只取一条
+      if (!seen.add(response.pluginName)) continue;
+      if ((widget.infoController.pluginSearchStatus[response.pluginName] ??
+              PluginSearchStatus.pending) !=
+          PluginSearchStatus.success) {
+        continue;
+      }
+      if (response.data.isEmpty) continue;
+      Plugin? plugin;
+      for (final p in pluginsController.pluginList) {
+        if (p.name == response.pluginName) {
+          plugin = p;
+          break;
+        }
+      }
+      if (plugin == null) continue;
+      // 标题与当前条目一致的结果才是同一部番，优先兜到它
+      var hit = response.data.first;
+      for (final item in response.data) {
+        if (item.name == currentTitle || item.name.contains(currentTitle)) {
+          hit = item;
+          break;
+        }
+      }
+      final fallback = SourceFallback(
+        plugin: plugin,
+        title: hit.name,
+        src: hit.src,
+      );
+      if (hit.name == currentTitle || hit.name.contains(currentTitle)) {
+        matched.add(fallback);
+      } else if (PluginHealthTracker.instance
+          .isReliableSync(response.pluginName)) {
+        candidates.add(fallback);
+      } else {
+        unhealthy.add(fallback);
+      }
+    }
+    return [...matched, ...candidates, ...unhealthy].take(3).toList();
+  }
+
   void openInBrowser(Plugin plugin) {
     final targetUrl = plugin.usesApiSearch
         ? plugin.baseUrl
@@ -350,7 +406,7 @@ class _SourceSheetState extends State<SourceSheet> {
 
   Future<void> openSearchItem(Plugin plugin, SearchItem searchItem) async {
     final cancelToken = RuleCancelToken();
-    KazumiDialog.showLoading(
+    MiruDialog.showLoading(
       msg: '获取中',
       barrierDismissible: isDesktop(),
       onDismiss: cancelToken.cancel,
@@ -363,7 +419,7 @@ class _SourceSheetState extends State<SourceSheet> {
       if (roads.isEmpty) {
         throw ChapterErrorException(plugin.name);
       }
-      KazumiDialog.dismiss();
+      MiruDialog.dismiss();
       if (!mounted) return;
       context.pushNamed(
         '/video/',
@@ -373,19 +429,70 @@ class _SourceSheetState extends State<SourceSheet> {
           title: searchItem.name,
           src: searchItem.src,
           roads: roads,
+          // 携带同番剧的其他可用源：播放中解析失败时自动兜底切换。
+          fallbacks: _collectFallbacks(exclude: plugin),
         ),
       );
-    } catch (_) {
-      KazumiLogger()
-          .w("PluginSearchService: failed to query video playlist");
-      KazumiDialog.dismiss();
+    } on CaptchaRequiredException {
+      MiruDialog.dismiss();
+      if (!mounted) return;
+      // 章节页被验证码拦截：给出明确出路而不是误导性的「解析不到」。
+      MiruDialog.show(
+        builder: (context) => AlertDialog(
+          title: const Text('该源需要人机验证'),
+          content: Text(
+              '「${plugin.name}」的选集页面被站点验证拦截。\n请在该源的搜索结果面板完成一次验证后重试。'),
+          actions: [
+            TextButton(
+              onPressed: MiruDialog.dismiss,
+              child: Text(
+                '知道了',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                MiruDialog.dismiss();
+                if (mounted) {
+                  showAntiCrawlerDialog(plugin);
+                }
+              },
+              child: const Text('去验证'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      MiruLogger()
+          .w("PluginSearchService: failed to query video playlist", error: e);
+      MiruDialog.dismiss();
+      if (!mounted) return;
+      // 选集拉取失败必须给用户可见反馈，不能静默吞掉。
+      MiruDialog.show(
+        builder: (context) => AlertDialog(
+          title: const Text('选集获取失败'),
+          content: Text(
+              '无法从「${plugin.name}」获取选集列表，请检查网络或稍后重试。\n$e'),
+          actions: [
+            TextButton(
+              onPressed: MiruDialog.dismiss,
+              child: Text(
+                '知道了',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+          ],
+        ),
+      );
     }
   }
 
-  /// One source, collapsed to a row until opened. The row is both the picker
-  /// and its own heading, so no separate strip of source buttons is needed.
-  /// A source that came back empty opens onto its recovery actions instead of
-  /// results, and only one source is open at a time.
+  /// A source card: collapsed to a header row until opened. Tapping the
+  /// header expands (or collapses) that source's own results beneath it —
+  /// an accordion, so users can see which site offers what. A source that
+  /// came back empty opens onto its recovery actions instead of results.
   Widget buildSourceCard(Plugin plugin, List<SearchItem> results, bool open) {
     final searching = widget.infoController.pluginSearchStatus[plugin.name] ==
         PluginSearchStatus.pending;
@@ -426,9 +533,9 @@ class _SourceSheetState extends State<SourceSheet> {
     };
   }
 
-  /// The open source's row is inert: exactly one source is open at a time, so
-  /// tapping the open one has nothing to do, and a no-op there means a thumb
-  /// overshooting the first result cannot throw the whole list away.
+  /// The header row doubles as the accordion toggle: tap to expand, tap again
+  /// to collapse. While a source is still searching the row is inert — there
+  /// is nothing to expand yet.
   Widget buildSourceRow(
       Plugin plugin, List<SearchItem> results, bool searching, bool open) {
     // A Builder so the row's context sits below the group's press scope.
@@ -483,21 +590,31 @@ class _SourceSheetState extends State<SourceSheet> {
                     ),
                   ],
                 )
-              else if (!open) ...[
+              else ...[
                 const SizedBox(width: 10),
-                Icon(
-                  Icons.expand_more_rounded,
-                  size: 20,
-                  color: theme.colorScheme.onSurfaceVariant,
+                // Chevron flips when the card opens; tapping the header
+                // collapses it again.
+                AnimatedRotation(
+                  turns: open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ],
           ),
         );
-        if (open || searching) return row;
+        if (searching) return row;
         return InkWell(
           onTap: () => setState(() {
-            expandedSource = plugin.name;
+            // Accordion toggle: an open header collapses its own list.
+            if (!expandedSources.remove(plugin.name)) {
+              expandedSources.add(plugin.name);
+            }
             stopAutoExpand();
           }),
           onHighlightChanged: SettingsSplitGroup.pressReporterOf(context),
@@ -593,15 +710,15 @@ class _SourceSheetState extends State<SourceSheet> {
 
   void showAliasSearchDialog(String pluginName) {
     if (widget.infoController.bangumiItem.alias.isEmpty) {
-      KazumiDialog.showToast(message: '无可用别名，试试手动检索');
+      MiruDialog.showToast(message: '无可用别名，试试手动检索');
       return;
     }
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return _AliasDialog(
           aliases: widget.infoController.bangumiItem.alias,
           onAliasSelected: (alias) {
-            KazumiDialog.dismiss();
+            MiruDialog.dismiss();
             pluginSearchService?.querySource(alias, pluginName);
           },
           onAliasesChanged: () {
@@ -623,11 +740,11 @@ class _SourceSheetState extends State<SourceSheet> {
       }
       widget.infoController.bangumiItem.alias.add(alias);
       collectController.updateLocalCollect(widget.infoController.bangumiItem);
-      KazumiDialog.dismiss();
+      MiruDialog.dismiss();
       pluginSearchService?.querySource(alias, pluginName);
     }
 
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('输入别名'),
@@ -640,7 +757,7 @@ class _SourceSheetState extends State<SourceSheet> {
           actions: [
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: Text(
                 '取消',
@@ -662,33 +779,17 @@ class _SourceSheetState extends State<SourceSheet> {
   /// Always plugin order, never ranked by what came back. A source can fill up
   /// long after the search settles — a captcha source does exactly that once
   /// verified — and ranking would slide the card someone just acted on out
-  /// from under them. [expandedSource] is what leads to something playable.
+  /// from under them. Each source renders as its own accordion card: the
+  /// header shows the site name plus how many titles it found, and tapping it
+  /// expands that site's results underneath.
   List<Widget> buildSourceCards() {
-    // 平铺展示：观看时不再按来源分组折叠，直接把所有检索到的结果
-    // 依「规则顺序」列出来，用户不需要先选来源再选结果。
-    // 来源名称只在 设置 → 规则管理 里查看。
-    final rows = <Widget>[];
-    for (final plugin in pluginsController.pluginList) {
-      for (final item in resultsFor(plugin.name)) {
-        rows.add(buildResultRow(plugin, item));
-      }
-    }
-
     final cards = <Widget>[];
-    if (rows.isNotEmpty) {
-      cards.add(Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: SettingsSplitGroup(children: rows),
+    for (final plugin in pluginsController.pluginList) {
+      cards.add(buildSourceCard(
+        plugin,
+        resultsFor(plugin.name),
+        expandedSources.contains(plugin.name),
       ));
-    } else {
-      // 一条都没有时，仍按来源列出，便于用户对失败的源做重试/换关键词
-      for (final plugin in pluginsController.pluginList) {
-        cards.add(buildSourceCard(
-          plugin,
-          resultsFor(plugin.name),
-          expandedSource == plugin.name,
-        ));
-      }
     }
     cards.add(const SafeArea(top: false, child: SizedBox(height: 12)));
     return cards;
@@ -719,7 +820,9 @@ class _SourceSheetState extends State<SourceSheet> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      // 透明背景：showAdaptiveBottomSheet 已经提供了液态玻璃底，
+      // 这里再铺一层不透明 surface 会把它遮死 —— 玻璃在背后白白采样。
+      backgroundColor: Colors.transparent,
       body: Observer(
         builder: (context) {
           // Must be read here, not behind a nested Builder: mobx only tracks
@@ -790,7 +893,7 @@ class _CaptchaDialogState extends State<_CaptchaDialog> {
     if (_submittingNotifier.value) return;
     final captchaCode = _captchaCode.trim();
     if (captchaCode.isEmpty) {
-      KazumiDialog.showToast(message: '请输入验证码');
+      MiruDialog.showToast(message: '请输入验证码');
       return;
     }
     _submittingNotifier.value = true;
@@ -877,7 +980,7 @@ class _CaptchaDialogState extends State<_CaptchaDialog> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
-                        onPressed: () => KazumiDialog.dismiss(),
+                        onPressed: () => MiruDialog.dismiss(),
                         child: Text(
                           '取消',
                           style: TextStyle(
@@ -953,7 +1056,7 @@ class _AliasDialogState extends State<_AliasDialog> {
                   title: Text(alias),
                   trailing: IconButton(
                     onPressed: () {
-                      KazumiDialog.show(
+                      MiruDialog.show(
                         builder: (context) {
                           return AlertDialog(
                             title: const Text('删除确认'),
@@ -961,7 +1064,7 @@ class _AliasDialogState extends State<_AliasDialog> {
                             actions: [
                               TextButton(
                                 onPressed: () {
-                                  KazumiDialog.dismiss();
+                                  MiruDialog.dismiss();
                                 },
                                 child: Text(
                                   '取消',
@@ -973,7 +1076,7 @@ class _AliasDialogState extends State<_AliasDialog> {
                               ),
                               TextButton(
                                 onPressed: () {
-                                  KazumiDialog.dismiss();
+                                  MiruDialog.dismiss();
                                   widget.aliases.removeAt(index);
                                   aliasNotifier.value =
                                       List.from(widget.aliases);

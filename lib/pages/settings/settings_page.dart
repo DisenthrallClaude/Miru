@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/pages/about/about_page.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_view_page.dart';
-import 'package:kazumi/pages/settings/danmaku/danmaku_settings.dart';
-import 'package:kazumi/pages/settings/download_settings.dart';
-import 'package:kazumi/pages/settings/interface_settings.dart';
-import 'package:kazumi/pages/settings/keyboard_settings.dart';
-import 'package:kazumi/pages/settings/player_settings.dart';
-import 'package:kazumi/pages/settings/proxy/proxy_settings_page.dart';
-import 'package:kazumi/pages/settings/theme_settings_page.dart';
-import 'package:kazumi/pages/webdav_editor/webdav_setting.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/pages/about/about_page.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/plugin_editor/plugin_view_page.dart';
+import 'package:miru/pages/settings/danmaku/danmaku_settings.dart';
+import 'package:miru/pages/settings/download_settings.dart';
+import 'package:miru/pages/settings/interface_settings.dart';
+import 'package:miru/pages/settings/keyboard_settings.dart';
+import 'package:miru/pages/settings/player_settings.dart';
+import 'package:miru/pages/settings/proxy/proxy_settings_page.dart';
+import 'package:miru/pages/settings/theme_settings_page.dart';
+import 'package:miru/pages/webdav_editor/webdav_setting.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/utils/constants.dart';
 
 class _SettingsCategory {
   const _SettingsCategory({

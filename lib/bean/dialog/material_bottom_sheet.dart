@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/utils/theme.dart';
 
 const double materialBottomSheetRadius = Radii.xl;
 const EdgeInsets materialBottomSheetContentPadding =
@@ -254,13 +254,12 @@ class MaterialBottomSheetSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final radius = BorderRadius.circular(materialBottomSheetRadius);
 
-    return Material(
-      color: colorScheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(materialBottomSheetRadius),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: padding,
+    return Padding(
+      padding: padding,
+      child: _GlassPanel(
+        borderRadius: radius,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -305,6 +304,45 @@ class MaterialBottomSheetSection extends StatelessWidget {
   }
 }
 
+/// 弹层内部的「轻玻璃」面板：半透明底 + 斜向高光 + 发丝描边。
+/// 静态可见的玻璃质感且零 GPU 开销，替代原先不透明的
+/// surfaceContainerLow 底色 —— 玻璃语言贯穿弹层内外。
+class _GlassPanel extends StatelessWidget {
+  const _GlassPanel({required this.borderRadius, required this.child});
+
+  final BorderRadius borderRadius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        color: isLight
+            ? Colors.white.withValues(alpha: 0.30)
+            : Colors.white.withValues(alpha: 0.05),
+        border: Border.all(
+          color: isLight
+              ? Colors.black.withValues(alpha: 0.07)
+              : Colors.white.withValues(alpha: 0.18),
+          width: 0.6,
+        ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: isLight ? 0.32 : 0.10),
+            Colors.white.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.72],
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
 class MaterialBottomSheetGroup extends StatelessWidget {
   const MaterialBottomSheetGroup({
     super.key,
@@ -335,10 +373,8 @@ class MaterialBottomSheetGroup extends StatelessWidget {
             ),
           ),
         ),
-        Material(
-          color: colorScheme.surfaceContainerLow,
+        _GlassPanel(
           borderRadius: BorderRadius.circular(materialBottomSheetRadius),
-          clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
               for (var index = 0; index < children.length; index++) ...[

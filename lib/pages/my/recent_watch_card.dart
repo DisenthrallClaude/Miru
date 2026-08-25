@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/my/recent_watch_item.dart';
-import 'package:kazumi/services/player/history_playback_service.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart'
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/my/recent_watch_item.dart';
+import 'package:miru/services/player/history_playback_service.dart';
+import 'package:miru/bean/widget/pressable_glass.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
-import 'package:kazumi/utils/date_time.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/utils/date_time.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/theme.dart';
 
 /// Continue-watching card: opens playback, nothing else.
 class RecentWatchCard extends StatefulWidget {
@@ -38,7 +40,7 @@ class _RecentWatchCardState extends State<RecentWatchCard> {
     _cancelToken?.cancel();
     final cancelToken = RuleCancelToken();
     _cancelToken = cancelToken;
-    KazumiDialog.showLoading(
+    MiruDialog.showLoading(
       msg: '获取中',
       barrierDismissible: isDesktop(),
       onDismiss: cancelToken.cancel,
@@ -47,13 +49,13 @@ class _RecentWatchCardState extends State<RecentWatchCard> {
       widget.item.history,
       cancelToken: cancelToken,
     );
-    KazumiDialog.dismiss();
+    MiruDialog.dismiss();
     if (!mounted) return;
     switch (result) {
       case HistoryPlaybackReady(:final args):
         context.pushNamed('/video/', arguments: args);
       case HistoryPlaybackUnavailable(:final reason):
-        KazumiDialog.showToast(message: reason);
+        MiruDialog.showToast(message: reason);
     }
   }
 
@@ -63,78 +65,91 @@ class _RecentWatchCardState extends State<RecentWatchCard> {
     final colorScheme = theme.colorScheme;
     final item = widget.item;
 
-    return Material(
-      color: colorScheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _play,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _cover(colorScheme),
-              const SizedBox(width: 14),
-              Expanded(
-                child: SizedBox(
-                  height: _coverHeight,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    // Titles run one or two lines; splitting the slack keeps
-                    // both cases balanced against the cover height.
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        item.title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
+    // 整卡可点击入口：包一层 PressableGlass 获得弹簧按压反馈，
+    // onTap 仍是原有的 _play，业务逻辑零改动。
+    // 底色改为半透明 + 发丝描边的轻量玻璃观感（不挂 BackdropFilter）：
+    // 「继续观看」一屏最多出现 3~6 张卡，逐卡常驻模糊会超出同屏
+    // BackdropFilter 预算，故玻璃模糊只留给上方的大面板。
+    return PressableGlass(
+      onTap: _play,
+      borderRadius: Radii.brLg,
+      child: ClipRRect(
+        borderRadius: Radii.brLg,
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow.withValues(alpha: 0.55),
+            border: Border.all(
+              color: colorScheme.outlineVariant,
+              width: 0.5,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _cover(colorScheme),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: SizedBox(
+                    height: _coverHeight,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      // Titles run one or two lines; splitting the slack keeps
+                      // both cases balanced against the cover height.
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          item.title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                            height: 1.25,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '看到 ${item.episodeLabel}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
+                        Text(
+                          '看到 ${item.episodeLabel}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Row(
-                        children: [
-                          _pill(
-                            label: item.sourceLabel,
-                            background: colorScheme.secondaryContainer,
-                            foreground: colorScheme.onSecondaryContainer,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: _pill(
-                              label: item.adapterName,
-                              background: colorScheme.surfaceContainerHighest,
-                              foreground: colorScheme.onSurfaceVariant,
+                        Row(
+                          children: [
+                            _pill(
+                              label: item.sourceLabel,
+                              background: colorScheme.secondaryContainer,
+                              foreground: colorScheme.onSecondaryContainer,
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formatTimestampToRelativeTime(
-                              item.lastWatchTime.millisecondsSinceEpoch ~/ 1000,
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: _pill(
+                                label: item.adapterName,
+                                background: colorScheme.surfaceContainerHighest,
+                                foreground: colorScheme.onSurfaceVariant,
+                              ),
                             ),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: colorScheme.outline,
+                            const SizedBox(width: 8),
+                            Text(
+                              formatTimestampToRelativeTime(
+                                item.lastWatchTime.millisecondsSinceEpoch ~/ 1000,
+                              ),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colorScheme.outline,
+                              ),
+                              maxLines: 1,
                             ),
-                            maxLines: 1,
-                          ),
-                        ],
-                      ),
-                    ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

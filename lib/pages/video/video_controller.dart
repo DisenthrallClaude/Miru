@@ -1,30 +1,33 @@
 import 'dart:async';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/modules/roads/road_module.dart';
-import 'package:kazumi/pages/video/video_playback_args.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/pages/history/history_controller.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/repositories/download_repository.dart';
-import 'package:kazumi/services/download/download_manager.dart';
-import 'package:kazumi/services/video_source/services.dart';
+import 'package:miru/modules/roads/road_module.dart';
+import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/repositories/download_repository.dart';
+import 'package:miru/services/download/download_manager.dart';
+import 'package:miru/services/video_source/services.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/modules/bangumi/episode_item.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/modules/comments/comment_response.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/episode_url.dart';
-import 'package:kazumi/utils/http_headers.dart';
-import 'package:kazumi/utils/media.dart';
-import 'package:kazumi/utils/async_session.dart';
-import 'package:kazumi/services/platform/display_mode_service.dart';
+import 'package:miru/modules/bangumi/episode_item.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/modules/comments/comment_response.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/episode_url.dart';
+import 'package:miru/utils/http_headers.dart';
+import 'package:miru/services/plugin/plugin_cookie_manager.dart';
+import 'package:miru/services/plugin/plugin_health.dart';
+import 'package:miru/utils/media.dart';
+import 'package:miru/utils/async_session.dart';
+import 'package:miru/services/platform/display_mode_service.dart';
 
 part 'video_controller.g.dart';
 
@@ -136,6 +139,9 @@ abstract class _VideoPageController with Store implements Disposable {
   @observable
   var roadList = ObservableList<Road>();
 
+  /// 当前播放的自动兜底候选，按优先级排列，失败一次消费一个。
+  final List<SourceFallback> _playbackFallbacks = [];
+
   late Plugin currentPlugin;
 
   String _offlinePluginName = '';
@@ -156,6 +162,12 @@ abstract class _VideoPageController with Store implements Disposable {
   /// Applies the route arguments exactly once, from [VideoPage.initState].
   @action
   void applyPlaybackArgs(VideoPlaybackArgs args) {
+    // 每次进页都全量重置兜底候选：离线播放不允许残留上次的在线候选。
+    final List<SourceFallback> routeFallbacks =
+        args is OnlineVideoPlaybackArgs ? args.fallbacks : const [];
+    _playbackFallbacks
+      ..clear()
+      ..addAll(routeFallbacks);
     switch (args) {
       case OnlineVideoPlaybackArgs():
         bangumiItem = args.bangumiItem;
@@ -212,7 +224,7 @@ abstract class _VideoPageController with Store implements Disposable {
     } else {
       _playbackHistoryIdentity = null;
     }
-    KazumiLogger().i(
+    MiruLogger().i(
         'VideoPageController: initialized for offline playback, episode $episodeNumber (position: ${selected.episode})');
   }
 
@@ -415,6 +427,81 @@ abstract class _VideoPageController with Store implements Disposable {
     _errorMessage = message;
   }
 
+  /// 解析失败后的自动换源兜底。
+  ///
+  /// 按候选顺序尝试拉取备选源的线路；拉到可用线路即替换当前源上下文，
+  /// 并以相同集号重新进入解析链路。全部候选失败返回 false。
+  Future<bool> _switchToFallbackSource({
+    required AsyncSession session,
+    required PlayerController playerController,
+    required int offset,
+  }) async {
+    while (_playbackFallbacks.isNotEmpty && !session.isStale) {
+      final candidate = _playbackFallbacks.removeAt(0);
+      MiruDialog.showToast(
+        message:
+            '「${currentPlugin.name}」解析失败，正在尝试「${candidate.plugin.name}」',
+      );
+      final List<Road> roads;
+      try {
+        roads = await candidate.plugin.queryChapterRoads(candidate.src);
+      } catch (e) {
+        MiruLogger().w(
+            'VideoPageController: fallback source ${candidate.plugin.name} failed',
+            error: e);
+        unawaited(PluginHealthTracker.instance
+            .recordFailure(candidate.plugin.name));
+        continue;
+      }
+      if (roads.isEmpty || roads.every((road) => road.data.isEmpty)) {
+        unawaited(PluginHealthTracker.instance
+            .recordFailure(candidate.plugin.name));
+        continue;
+      }
+      _applyFallbackContext(candidate, roads);
+      // 目标集号沿用当前播放位置；优先在全部线路里查找同集号，
+      // 新源任何线路都没有该集时才回落到第一集。
+      final targetEpisode = playingEpisode?.episode ?? selectedEpisode.episode;
+      var targetRoad = 0;
+      var episode = targetEpisode;
+      final firstRoadCount =
+          roads.first.data.isEmpty ? 0 : roads.first.data.length;
+      if (targetEpisode > firstRoadCount) {
+        int? hitRoad;
+        for (var i = 0; i < roads.length; i++) {
+          if (roads[i].data.length >= targetEpisode) {
+            hitRoad = i;
+            break;
+          }
+        }
+        if (hitRoad != null) {
+          targetRoad = hitRoad;
+        } else {
+          episode = 1;
+        }
+      }
+      await changeEpisode(
+        episode,
+        currentRoad: targetRoad,
+        offset: offset,
+        playerController: playerController,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /// 兜底换源后的上下文替换。roadList 是 @observable，
+  /// 必须在 action 内写入，否则 Observer 订阅方会抛运行时错误。
+  @action
+  void _applyFallbackContext(SourceFallback candidate, List<Road> roads) {
+    currentPlugin = candidate.plugin;
+    title = candidate.title;
+    src = candidate.src;
+    roadList.clear();
+    roadList.addAll(roads);
+  }
+
   Future<void> changeEpisode(
     int episode, {
     int currentRoad = 0,
@@ -448,7 +535,7 @@ abstract class _VideoPageController with Store implements Disposable {
 
     final resolvedEpisode = _resolveOnlineEpisode(episode, road: currentRoad);
     if (resolvedEpisode == null) {
-      KazumiLogger().e(
+      MiruLogger().e(
           'VideoPageController: failed to resolve online episode. road=$currentRoad, episode=$episode');
       _failLoading('集数解析失败');
       return;
@@ -457,7 +544,7 @@ abstract class _VideoPageController with Store implements Disposable {
     _applyResolvedSelection(resolvedEpisode);
     _setOnlineHistoryIdentity(resolvedEpisode);
 
-    KazumiLogger()
+    MiruLogger()
         .i('VideoPageController: changed to ${resolvedEpisode.displayTitle}');
     final urlItem = normalizeEpisodeUrl(
       currentPlugin.baseUrl,
@@ -482,7 +569,7 @@ abstract class _VideoPageController with Store implements Disposable {
     final resolvedEpisode =
         _resolveOfflineEpisode(selection.episode, road: selection.road);
     if (resolvedEpisode == null) {
-      KazumiLogger().e(
+      MiruLogger().e(
           'VideoPageController: failed to resolve offline episode. road=${selection.road}, episode=${selection.episode}');
       _failLoading('集数解析失败');
       return;
@@ -506,7 +593,7 @@ abstract class _VideoPageController with Store implements Disposable {
     final resolvedOffset =
         offset > 0 ? offset : getHistoryOffsetFor(_playbackHistoryIdentity!);
 
-    KazumiLogger().i(
+    MiruLogger().i(
         'VideoPageController: offline episode changed to ${resolvedEpisode.historyEpisodeNumber} (index: ${selection.episode}), path: $localPath');
 
     final params = PlaybackInitParams(
@@ -564,7 +651,7 @@ abstract class _VideoPageController with Store implements Disposable {
           // 弹幕服务当前不可用，不再每次进播放页都弹失败提示打扰用户。
           // 失败仍记录到日志，便于排查。
           if (result.isFailed) {
-            KazumiLogger().w('VideoPageController: danmaku unavailable');
+            MiruLogger().w('VideoPageController: danmaku unavailable');
           }
         }
       }
@@ -572,7 +659,7 @@ abstract class _VideoPageController with Store implements Disposable {
       if (session.isActive && danmakuSession.isActive) {
         playerController.danmaku.finishDanmakuLoad(disableDanmaku: true);
       }
-      KazumiLogger().w('VideoPageController: failed to load danmaku', error: e);
+      MiruLogger().w('VideoPageController: failed to load danmaku', error: e);
     }
   }
 
@@ -604,17 +691,42 @@ abstract class _VideoPageController with Store implements Disposable {
     });
 
     try {
-      final source = await _videoSourceService!.resolve(
-        url,
-        useLegacyParser: currentPlugin.useLegacyParser,
-        offset: offset,
-      );
+      final timeoutSeconds = GStorage.getSetting(SettingsKeys.parseTimeout)
+          .clamp(5, 120)
+          .toInt();
+      final Duration timeout = Duration(seconds: timeoutSeconds);
+      VideoSource source;
+      try {
+        source = await _videoSourceService!.resolve(
+          url,
+          useLegacyParser: currentPlugin.useLegacyParser,
+          offset: offset,
+          timeout: timeout,
+        );
+      } on VideoSourceTimeoutException {
+        unawaited(PluginHealthTracker.instance
+            .recordFailure(currentPlugin.name));
+        // 超时后自动换另一种解析器重试一次，而不是直接把失败甩给用户。
+        if (session.isStale) {
+          return;
+        }
+        MiruLogger().w(
+            'VideoPageController: resolve timed out, retrying with ${currentPlugin.useLegacyParser ? 'standard' : 'legacy'} parser');
+        source = await _videoSourceService!.resolve(
+          url,
+          useLegacyParser: !currentPlugin.useLegacyParser,
+          offset: offset,
+          timeout: timeout,
+        );
+      }
 
       if (session.isStale) {
         return;
       }
+      // 解析成功即记一次健康样本：连续失败的源会在选源界面被排后。
+      unawaited(PluginHealthTracker.instance.recordSuccess(currentPlugin.name));
       _finishLoading();
-      KazumiLogger()
+      MiruLogger()
           .i('VideoPageController: resolved video URL: ${source.url}');
 
       final bool forceAdBlocker =
@@ -632,11 +744,22 @@ abstract class _VideoPageController with Store implements Disposable {
         pageUrl: resolvedEpisode.pageUrl,
         sortNumber: resolvedEpisode.sortNumber,
         httpHeaders: {
+          // UA 与 WebView 解析阶段共用会话值；规则自带 UA 时优先。
+          // Cookie 一并透传：验证通过后的 clearance/token 类凭据
+          // 不带给 mpv 的话，浏览器能播而 app 必 403。
           'user-agent': currentPlugin.userAgent.isEmpty
-              ? getRandomUA()
+              ? getSessionUA()
               : currentPlugin.userAgent,
           if (currentPlugin.referer.isNotEmpty)
             'referer': currentPlugin.referer,
+          ...await PluginCookieManager.instance.cookieHeaderFor(
+            currentPlugin.name,
+            // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等
+            // 子域上，与 baseUrl 的 host 不一致时按域过滤会拿不到。
+            Uri.parse(
+              normalizeEpisodeUrl(currentPlugin.baseUrl, resolvedEpisode.pageUrl),
+            ),
+          ),
         },
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
@@ -659,14 +782,36 @@ abstract class _VideoPageController with Store implements Disposable {
         _playbackSessions.cancel();
       }
     } on VideoSourceTimeoutException {
+      // 健康度已在内层超时分支记录过，这里不再重复计数，
+      // 否则一次用户可感知的失败会被计两次，健康度过快拉黑。
       if (session.isStale) {
+        return;
+      }
+      // 换解析器重试已失败，自动切换备选源；无候选才报错。
+      final switched = await _switchToFallbackSource(
+        session: session,
+        playerController: playerController,
+        offset: offset,
+      );
+      if (switched || session.isStale) {
         return;
       }
       _failLoading('视频解析超时，请重试');
     } on VideoSourceCancelledException {
-      KazumiLogger().i('VideoPageController: video URL resolution cancelled');
+      MiruLogger().i('VideoPageController: video URL resolution cancelled');
     } catch (e) {
+      unawaited(
+          PluginHealthTracker.instance.recordFailure(currentPlugin.name));
       if (session.isStale) {
+        return;
+      }
+      // 自动切换备选源；全部候选失败才把错误交给用户。
+      final switched = await _switchToFallbackSource(
+        session: session,
+        playerController: playerController,
+        offset: offset,
+      );
+      if (switched || session.isStale) {
         return;
       }
       _failLoading('视频解析失败：${e.toString()}');
@@ -715,7 +860,7 @@ abstract class _VideoPageController with Store implements Disposable {
           .sort((a, b) => a.comment.createdAt.compareTo(b.comment.createdAt));
     }
     _applyEpisodeComments(episode, latestEpisodeInfo, commentsList);
-    KazumiLogger().i(
+    MiruLogger().i(
         'VideoPageController: loaded comments list length ${episodeCommentsList.length}');
     return true;
   }

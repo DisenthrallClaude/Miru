@@ -1,6 +1,6 @@
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/pages/my/my_page.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/my/my_page.dart';
 
 final myModule = createModule(
   path: '/my',

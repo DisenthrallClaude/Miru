@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class RatingReviewResult {
   const RatingReviewResult({
@@ -169,7 +169,7 @@ class _RatingReviewDialogState extends State<RatingReviewDialog> {
         return;
       }
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'RatingReviewDialog: failed to submit rating review',
         error: e,
         stackTrace: stackTrace,

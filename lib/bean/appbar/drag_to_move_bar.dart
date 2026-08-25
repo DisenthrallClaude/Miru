@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/utils/device.dart';
 
 /// A widget for drag to move window.
 ///

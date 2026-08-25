@@ -4,25 +4,25 @@ import 'dart:typed_data';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/services/player/external_playback_launcher.dart';
-import 'package:kazumi/pages/player/controller/player_danmaku_controller.dart';
-import 'package:kazumi/pages/player/controller/player_debug_controller.dart';
-import 'package:kazumi/pages/player/controller/player_models.dart';
-import 'package:kazumi/pages/player/controller/player_seek_controller.dart';
-import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
-import 'package:kazumi/pages/player/controller/player_panel_controller.dart';
-import 'package:kazumi/pages/player/controller/player_playback_controller.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/pages/player/controller/player_syncplay_controller.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/shaders/shader_asset_service.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/services/player/audio_controller.dart';
-import 'package:kazumi/utils/async_session.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/services/player/external_playback_launcher.dart';
+import 'package:miru/pages/player/controller/player_danmaku_controller.dart';
+import 'package:miru/pages/player/controller/player_debug_controller.dart';
+import 'package:miru/pages/player/controller/player_models.dart';
+import 'package:miru/pages/player/controller/player_seek_controller.dart';
+import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
+import 'package:miru/pages/player/controller/player_panel_controller.dart';
+import 'package:miru/pages/player/controller/player_playback_controller.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/pages/player/controller/player_syncplay_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/shaders/shader_asset_service.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/services/player/audio_controller.dart';
+import 'package:miru/utils/async_session.dart';
+import 'package:miru/utils/device.dart';
 
-export 'package:kazumi/pages/player/controller/player_models.dart';
+export 'package:miru/pages/player/controller/player_models.dart';
 
 class PlayerController implements Disposable {
   PlayerController(
@@ -175,7 +175,7 @@ class PlayerController implements Disposable {
     currentRoad = params.currentRoad;
     referer = params.referer;
 
-    KazumiLogger().i(
+    MiruLogger().i(
         'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}');
 
     playback.resetForInit();
@@ -209,7 +209,7 @@ class PlayerController implements Disposable {
         return false;
       }
       playback.loading = false;
-      KazumiLogger()
+      MiruLogger()
           .e('PlayerController: failed to initialize video', error: e);
       return false;
     }
@@ -268,7 +268,7 @@ class PlayerController implements Disposable {
     if (!_ownsInitialization(initialization, player)) {
       return false;
     }
-    KazumiLogger().i('PlayerController: video initialized');
+    MiruLogger().i('PlayerController: video initialized');
     playback.loading = false;
 
     coverUrl = params.coverUrl;
@@ -389,7 +389,7 @@ class PlayerController implements Disposable {
     _shutdownFuture = shutdown;
     unawaited(
       shutdown.catchError((Object error, StackTrace stackTrace) {
-        KazumiLogger().e(
+        MiruLogger().e(
           'PlayerController: failed to dispose asynchronously',
           error: error,
           stackTrace: stackTrace,
@@ -420,7 +420,7 @@ class PlayerController implements Disposable {
     try {
       await FlutterVolumeController.updateShowSystemUI(true);
     } catch (error, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'PlayerController: failed to restore the system volume UI',
         error: error,
         stackTrace: stackTrace,

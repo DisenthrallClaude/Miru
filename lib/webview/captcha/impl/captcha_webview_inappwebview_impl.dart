@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/webview/captcha/captcha_webview_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/webview/captcha/captcha_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
-import 'package:kazumi/utils/http_headers.dart';
+import 'package:miru/utils/http_headers.dart';
 
 class CaptchaWebviewInAppWebviewImpl
     extends CaptchaWebviewController<PlatformInAppWebViewController> {
@@ -36,7 +36,7 @@ class CaptchaWebviewInAppWebviewImpl
         onLoadStop: (controller, url) {
           logEventController.add('[Captcha WebView] Load stop: $url');
           if (buttonWasClicked && !captchaDisappearedController.isClosed) {
-            KazumiLogger().i(
+            MiruLogger().i(
                 '[Captcha WebView] Button click → page navigated, verification done');
             buttonWasClicked = false;
             captchaDisappearedController.add(null);
@@ -75,7 +75,7 @@ class CaptchaWebviewInAppWebviewImpl
         if (status == 'absent' &&
             captchaWasFound &&
             !captchaDisappearedController.isClosed) {
-          KazumiLogger().i(
+          MiruLogger().i(
               '[Captcha WebView] Captcha gone after navigation (StatusBridge)');
           captchaWasFound = false;
           captchaDisappearedController.add(null);
@@ -310,7 +310,7 @@ if (!_checkForCaptcha()) {
     final source = '''
 (function() {
   try {
-    window.KazumiCaptcha = {
+    window.MiruCaptcha = {
       log: function(message) {
         try { window.flutter_inappwebview.callHandler('CaptchaLogBridge', String(message)); } catch(e) {}
       },
@@ -324,19 +324,19 @@ if (!_checkForCaptcha()) {
         try { window.flutter_inappwebview.callHandler('CaptchaLogBridge', 'Custom script failed: ' + String(message)); } catch(e) {}
       }
     };
-    window.KazumiCaptcha.log('CustomScript loaded on: ' + window.location.href);
+    window.MiruCaptcha.log('CustomScript loaded on: ' + window.location.href);
     if (!${script.trim().isEmpty ? 'false' : 'true'}) {
-      window.KazumiCaptcha.fail('empty captchaScript');
+      window.MiruCaptcha.fail('empty captchaScript');
       return;
     }
-    var __kazumiResult = (function() {
+    var __miruResult = (function() {
 $script
     })();
-    if (__kazumiResult === true) {
-      window.KazumiCaptcha.done();
+    if (__miruResult === true) {
+      window.MiruCaptcha.done();
     }
   } catch(e) {
-    try { window.KazumiCaptcha.fail(e && e.message ? e.message : e); } catch(e2) {}
+    try { window.MiruCaptcha.fail(e && e.message ? e.message : e); } catch(e2) {}
   }
 })();
 ''';
@@ -470,7 +470,7 @@ if (!_checkAndClick()) {
       final cookies = await cookieManager.getCookies(url: WebUri(pageUrl));
       return cookies.map((c) => '${c.name}=${c.value}').join('; ');
     } catch (e) {
-      KazumiLogger().e('[Captcha WebView] getCookieString error: $e');
+      MiruLogger().e('[Captcha WebView] getCookieString error: $e');
       return '';
     }
   }
@@ -483,7 +483,7 @@ if (!_checkAndClick()) {
               "document.readyState === 'loading' ? '' : document.documentElement.outerHTML;");
       return result is String ? result : '';
     } catch (e) {
-      KazumiLogger().d('[Captcha WebView] getPageHtml error: $e');
+      MiruLogger().d('[Captcha WebView] getPageHtml error: $e');
       return '';
     }
   }
@@ -495,7 +495,7 @@ if (!_checkAndClick()) {
           source: 'navigator.userAgent;');
       return result is String ? result : '';
     } catch (e) {
-      KazumiLogger().d('[Captcha WebView] getUserAgent error: $e');
+      MiruLogger().d('[Captcha WebView] getUserAgent error: $e');
       return '';
     }
   }

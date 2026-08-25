@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/theme.dart';
 
 // 视频卡片 - 垂直布局
 class BangumiCardV extends StatelessWidget {
@@ -28,7 +28,7 @@ class BangumiCardV extends StatelessWidget {
         borderRadius: Radii.brMd,
         onTap: () {
           if (!canTap) {
-            KazumiDialog.showToast(
+            MiruDialog.showToast(
               message: '编辑模式',
             );
             return;

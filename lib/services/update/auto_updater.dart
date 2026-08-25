@@ -2,27 +2,27 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/request/clients/download_http_client.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/request/clients/download_http_client.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/date_time.dart';
-import 'package:kazumi/utils/crypto.dart';
-import 'package:kazumi/utils/version.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/date_time.dart';
+import 'package:miru/utils/crypto.dart';
+import 'package:miru/utils/version.dart';
 
 /// 安装类型枚举
 enum InstallationType {
-  windowsMsix, // Kazumi_windows_1.7.5.msix
-  windowsPortable, // Kazumi_windows_1.7.5.zip
-  linuxDeb, // Kazumi_linux_1.7.5_amd64.deb
-  linuxTar, // Kazumi_linux_1.7.5_amd64.tar.gz
-  macosDmg, // Kazumi_macos_1.7.5.dmg
-  androidApk, // Kazumi_android_1.7.5.apk
+  windowsMsix, // Miru_windows_1.7.5.msix
+  windowsPortable, // Miru_windows_1.7.5.zip
+  linuxDeb, // Miru_linux_1.7.5_amd64.deb
+  linuxTar, // Miru_linux_1.7.5_amd64.tar.gz
+  macosDmg, // Miru_macos_1.7.5.dmg
+  androidApk, // Miru_android_1.7.5.apk
   ios, // iOS App
   unknown,
 }
@@ -143,7 +143,7 @@ class AutoUpdater {
         availableTypes.add(InstallationType.androidApk);
       }
     } catch (e) {
-      KazumiLogger().w('Update: detect installation types failed', error: e);
+      MiruLogger().w('Update: detect installation types failed', error: e);
     }
 
     if (availableTypes.isEmpty) {
@@ -184,18 +184,30 @@ class AutoUpdater {
 
       return null;
     } catch (e) {
-      KazumiLogger().e('Update: check for updates failed', error: e);
+      MiruLogger().e('Update: check for updates failed', error: e);
       rethrow;
     }
   }
 
   Future<Map<String, dynamic>> _latestRelease() async {
-    final raw = await _downloadClient.getPlain(ApiEndpoints.latestAppMirror);
-    final data = json.decode(raw);
-    if (data is! Map) {
-      throw Exception('Invalid update response');
+    // 优先请求 GitHub Releases（Miru 自己的仓库），失败后降级到镜像源。
+    final sources = [ApiEndpoints.latestApp, ApiEndpoints.latestAppMirror];
+    Object? lastError;
+    for (final source in sources) {
+      try {
+        final raw = await _downloadClient.getPlain(source);
+        final data = json.decode(raw);
+        if (data is! Map) {
+          throw Exception('Invalid update response');
+        }
+        return Map<String, dynamic>.from(data);
+      } catch (e) {
+        lastError = e;
+        MiruLogger().w('Update: failed to fetch release from $source',
+            error: e);
+      }
     }
-    return Map<String, dynamic>.from(data);
+    throw lastError ?? Exception('All update sources failed');
   }
 
   /// 自动检查更新（仅在启用自动更新时）
@@ -210,7 +222,7 @@ class AutoUpdater {
       }
     } catch (e) {
       // 自动检查失败时不显示错误
-      KazumiLogger().w('Update: auto check for updates failed', error: e);
+      MiruLogger().w('Update: auto check for updates failed', error: e);
     }
   }
 
@@ -221,16 +233,16 @@ class AutoUpdater {
       if (updateInfo != null) {
         _showUpdateDialog(updateInfo, isAutoCheck: false);
       } else {
-        KazumiDialog.showToast(message: '当前已经是最新版本！');
+        MiruDialog.showToast(message: '当前已经是最新版本！');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: '检查更新失败');
+      MiruDialog.showToast(message: '检查更新失败');
     }
   }
 
   /// 显示更新对话框
   void _showUpdateDialog(UpdateInfo updateInfo, {bool isAutoCheck = false}) {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: Text('发现新版本 ${updateInfo.version}'),
@@ -272,7 +284,7 @@ class AutoUpdater {
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(4),
                                 onTap: () {
-                                  KazumiDialog.dismiss();
+                                  MiruDialog.dismiss();
                                   _downloadUpdateWithType(updateInfo, type);
                                 },
                                 child: Container(
@@ -331,8 +343,8 @@ class AutoUpdater {
               TextButton(
                 onPressed: () {
                   GStorage.putSetting(SettingsKeys.autoUpdate, false);
-                  KazumiDialog.dismiss();
-                  KazumiDialog.showToast(message: '已关闭自动更新');
+                  MiruDialog.dismiss();
+                  MiruDialog.showToast(message: '已关闭自动更新');
                 },
                 child: Text(
                   '关闭自动更新',
@@ -341,7 +353,7 @@ class AutoUpdater {
                 ),
               ),
             TextButton(
-              onPressed: () => KazumiDialog.dismiss(),
+              onPressed: () => MiruDialog.dismiss(),
               child: Text(
                 '稍后提醒',
                 style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -357,7 +369,7 @@ class AutoUpdater {
               ),
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
                 // 直接使用第一个可用的安装类型
                 if (updateInfo.availableInstallationTypes.isNotEmpty) {
                   _downloadUpdateWithType(
@@ -413,7 +425,7 @@ class AutoUpdater {
       final asset = getUpdateAssetForType(updateInfo.assets, selectedType);
       final downloadUrl = getUpdateDownloadUrlFromAsset(asset);
       if (asset == null || downloadUrl.isEmpty) {
-        KazumiDialog.showToast(
+        MiruDialog.showToast(
             message:
                 '没有找到 ${_getInstallationTypeDescription(selectedType)} 的下载链接');
         return;
@@ -435,8 +447,8 @@ class AutoUpdater {
 
       _downloadUpdate(downloadInfo, expectedHash);
     } catch (e) {
-      KazumiDialog.showToast(message: '下载失败: ${e.toString()}');
-      KazumiLogger().e('Update: download update failed', error: e);
+      MiruDialog.showToast(message: '下载失败: ${e.toString()}');
+      MiruLogger().e('Update: download update failed', error: e);
     }
   }
 
@@ -444,12 +456,12 @@ class AutoUpdater {
   Future<void> _downloadUpdate(
       UpdateInfo updateInfo, String expectedHash) async {
     if (updateInfo.downloadUrl.isEmpty) {
-      KazumiDialog.showToast(message: '没有找到合适的下载链接');
+      MiruDialog.showToast(message: '没有找到合适的下载链接');
       return;
     }
 
     // 显示下载进度对话框
-    KazumiDialog.show(
+    MiruDialog.show(
       clickMaskDismiss: false,
       builder: (context) {
         return AlertDialog(
@@ -475,7 +487,7 @@ class AutoUpdater {
             TextButton(
               onPressed: () {
                 _cancelDownload();
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: const Text('取消'),
             ),
@@ -491,7 +503,7 @@ class AutoUpdater {
       // 不自动关闭对话框，而是显示下载完成状态
       _showDownloadCompleteDialog(downloadPath, updateInfo);
     } catch (e) {
-      KazumiDialog.dismiss();
+      MiruDialog.dismiss();
 
       // 显示详细的错误信息
       String errorMessage = '下载失败';
@@ -506,7 +518,7 @@ class AutoUpdater {
         errorMessage = '文件完整性验证失败，可能是网络传输错误';
       }
 
-      KazumiDialog.show(
+      MiruDialog.show(
         builder: (context) {
           return AlertDialog(
             title: const Text('下载失败'),
@@ -524,12 +536,12 @@ class AutoUpdater {
             ),
             actions: [
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(),
+                onPressed: () => MiruDialog.dismiss(),
                 child: const Text('确定'),
               ),
               TextButton(
                 onPressed: () {
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                   // 重新尝试下载
                   _downloadUpdate(updateInfo, expectedHash);
                 },
@@ -540,7 +552,7 @@ class AutoUpdater {
         },
       );
 
-      KazumiLogger().e('Update: download update failed', error: e);
+      MiruLogger().e('Update: download update failed', error: e);
     }
   }
 
@@ -554,9 +566,9 @@ class AutoUpdater {
   /// 显示下载完成对话框
   void _showDownloadCompleteDialog(String filePath, UpdateInfo updateInfo) {
     // 替换当前的下载进度对话框内容
-    KazumiDialog.dismiss();
+    MiruDialog.dismiss();
 
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('下载完成'),
@@ -613,7 +625,7 @@ class AutoUpdater {
           ),
           actions: [
             TextButton(
-              onPressed: () => KazumiDialog.dismiss(),
+              onPressed: () => MiruDialog.dismiss(),
               child: Text(
                 '稍后安装',
                 style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -629,7 +641,7 @@ class AutoUpdater {
               ),
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
                 _installUpdate(
                     filePath, updateInfo.recommendedInstallationType);
               },
@@ -658,19 +670,19 @@ class AutoUpdater {
         final localHash = await calculateFileHash(file);
         if (localHash == expectedHash) {
           // 文件已存在且哈希匹配，直接返回
-          KazumiLogger().i(
+          MiruLogger().i(
               'Update: file already exists and hash verified, skipping download: $filePath');
           _downloadProgress.value = 1.0;
           return filePath;
         } else {
           // 文件存在但哈希不匹配，删除后重新下载
-          KazumiLogger().i(
+          MiruLogger().i(
               'Update: file hash mismatch detected (local: $localHash, expected: $expectedHash), deleting and re-downloading');
           await file.delete();
         }
       } catch (e) {
         // 验证过程中出错，删除文件重新下载
-        KazumiLogger().w(
+        MiruLogger().w(
             'Update: file verification failed, deleting and re-downloading',
             error: e);
         if (await file.exists()) {
@@ -699,7 +711,7 @@ class AutoUpdater {
       await file.delete();
       throw Exception('文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
     }
-    KazumiLogger().i('Update: file downloaded and hash verified: $filePath');
+    MiruLogger().i('Update: file downloaded and hash verified: $filePath');
 
     return filePath;
   }
@@ -709,7 +721,7 @@ class AutoUpdater {
       String filePath, InstallationType installationType) async {
     try {
       // 显示准备退出的提示
-      KazumiDialog.showToast(message: '准备安装更新，应用即将退出...');
+      MiruDialog.showToast(message: '准备安装更新，应用即将退出...');
 
       await Future.delayed(const Duration(seconds: 2));
 
@@ -734,13 +746,13 @@ class AutoUpdater {
       } else if (Platform.isAndroid) {
         final result = await OpenFilex.open(filePath);
         if (result.type != ResultType.done) {
-          KazumiDialog.showToast(message: '无法打开安装文件: ${result.message}');
+          MiruDialog.showToast(message: '无法打开安装文件: ${result.message}');
           return;
         }
       }
     } catch (e) {
-      KazumiDialog.showToast(message: '启动安装程序失败: ${e.toString()}');
-      KazumiLogger().e('Update: launch installer failed', error: e);
+      MiruDialog.showToast(message: '启动安装程序失败: ${e.toString()}');
+      MiruLogger().e('Update: launch installer failed', error: e);
     }
   }
 
@@ -753,7 +765,7 @@ class AutoUpdater {
       // 如果传入的本来就是目录则打开这个目录
       // 如果是文件则打开包含它的目录
       if (type == FileSystemEntityType.notFound) {
-        KazumiDialog.showToast(message: '文件或目录不存在');
+        MiruDialog.showToast(message: '文件或目录不存在');
         return;
       } else if (type == FileSystemEntityType.directory) {
         targetDirOrFile = filePath;
@@ -780,15 +792,15 @@ class AutoUpdater {
         // 尝试打开包含文件的文件夹
         await Process.start('xdg-open', [targetDirOrFile]);
       } else {
-        KazumiDialog.showToast(message: '此平台不支持通过此方法打开文件管理器');
+        MiruDialog.showToast(message: '此平台不支持通过此方法打开文件管理器');
       }
     } catch (e) {
-      KazumiDialog.showToast(message: '无法打开文件管理器');
-      KazumiLogger().w('Update: reveal in file manager failed', error: e);
+      MiruDialog.showToast(message: '无法打开文件管理器');
+      MiruLogger().w('Update: reveal in file manager failed', error: e);
     } finally {
       try {
         // 确保对话框被关闭
-        KazumiDialog.dismiss();
+        MiruDialog.dismiss();
       } catch (_) {}
     }
   }
@@ -813,6 +825,6 @@ class AutoUpdater {
     } else if (Platform.isAndroid) {
       extension = '.apk';
     }
-    return 'Kazumi-$version$extension';
+    return 'Miru-$version$extension';
   }
 }

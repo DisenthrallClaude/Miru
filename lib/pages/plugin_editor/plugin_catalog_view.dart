@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/card/rule_card.dart';
-import 'package:kazumi/bean/widget/error_widget.dart';
-import 'package:kazumi/modules/plugin/plugin_http_module.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/bean/card/rule_card.dart';
+import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/modules/plugin/plugin_http_module.dart';
+import 'package:miru/pages/plugin_editor/plugin_update_actions.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/services/storage/storage.dart';
 
 enum PluginCatalogSort { lastUpdate, name }
 

@@ -3,12 +3,12 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
-import 'package:kazumi/services/player/syncplay_endpoint.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/services/player/syncplay_endpoint.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/device.dart';
 
 /// The lobby pops itself with the step to open next, so the framework animates
 /// the swap. Steps never route back — dismissing one ends the flow.
@@ -49,7 +49,9 @@ Future<T?> _showStep<T>(BuildContext context, WidgetBuilder builder) {
     context: context,
     maxHeightFactor: 0.8,
     compactLandscapeMaxHeightFactor: 0.95,
+    // 播放器上方关闭玻璃：避免 BackdropFilter 逐帧采样视频纹理
     builder: builder,
+    glass: false,
   );
 }
 

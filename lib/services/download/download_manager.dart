@@ -2,16 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/request/clients/download_http_client.dart';
-import 'package:kazumi/request/core/network_exception.dart';
-import 'package:kazumi/utils/m3u8_parser.dart';
-import 'package:kazumi/utils/m3u8_ad_filter.dart';
-import 'package:kazumi/utils/format.dart' as fmt;
-import 'package:kazumi/utils/file_system.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/platform/secure_bookmark_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/request/clients/download_http_client.dart';
+import 'package:miru/request/core/network_exception.dart';
+import 'package:miru/utils/m3u8_parser.dart';
+import 'package:miru/utils/m3u8_ad_filter.dart';
+import 'package:miru/utils/format.dart' as fmt;
+import 'package:miru/utils/file_system.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/platform/secure_bookmark_service.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:path/path.dart' as path;
 
 class _NotM3u8Exception implements Exception {
@@ -150,7 +150,7 @@ class DownloadManager implements IDownloadManager {
   ProgressCallback? onProgress;
 
   static const _minRequiredSpace = 100 * 1024 * 1024; // 100MB minimum
-  static const _storageChannel = MethodChannel('com.predidit.kazumi/storage');
+  static const _storageChannel = MethodChannel('io.github.disenthrallclaude.miru/storage');
 
   void _loadSettings() {
     maxParallelEpisodes =
@@ -170,7 +170,7 @@ class DownloadManager implements IDownloadManager {
     } on MissingPluginException {
       return -1;
     } catch (e) {
-      KazumiLogger().w('DownloadManager: failed to get storage info', error: e);
+      MiruLogger().w('DownloadManager: failed to get storage info', error: e);
       return -1;
     }
   }
@@ -224,7 +224,7 @@ class DownloadManager implements IDownloadManager {
         // elsewhere it returns the path unchanged.
         final usable = await SecureBookmarkService.restore(customDir);
         if (usable != null) return usable;
-        KazumiLogger().w(
+        MiruLogger().w(
             'DownloadManager: custom download directory unavailable, falling back to default');
       }
     }
@@ -426,7 +426,7 @@ class DownloadManager implements IDownloadManager {
       try {
         m3u8Content = await _fetchM3u8(m3u8Url, httpHeaders, task.cancelToken);
       } on _NotM3u8Exception {
-        KazumiLogger().i(
+        MiruLogger().i(
           'DownloadManager: URL is not M3U8, falling back to direct file download '
           'for episode ${task.episodeNumber}',
         );
@@ -630,7 +630,7 @@ class DownloadManager implements IDownloadManager {
           finalVideoBytes > 0 ? finalVideoBytes : existingBytes + sessionBytes;
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
 
-      KazumiLogger().i(
+      MiruLogger().i(
         'DownloadManager: episode ${task.episodeNumber} completed. '
         '${segments.length} segments, ${(episode.totalBytes / 1024 / 1024).toStringAsFixed(1)} MB',
       );
@@ -639,12 +639,12 @@ class DownloadManager implements IDownloadManager {
       episode.errorMessage =
           '存储空间不足 (可用: ${fmt.formatBytes(e.availableBytes)})';
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger().w('DownloadManager: insufficient storage space', error: e);
+      MiruLogger().w('DownloadManager: insufficient storage space', error: e);
     } on FileSystemException catch (e) {
       episode.status = DownloadStatus.failed;
       episode.errorMessage = _getStorageErrorMessage(e);
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger().e('DownloadManager: file system error', error: e);
+      MiruLogger().e('DownloadManager: file system error', error: e);
     } on NetworkException catch (e) {
       if (e.type == NetworkExceptionType.cancel) {
         if (task.isPaused) {
@@ -659,7 +659,7 @@ class DownloadManager implements IDownloadManager {
       episode.status = DownloadStatus.failed;
       episode.errorMessage = e.toString();
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger().e('DownloadManager: episode download failed', error: e);
+      MiruLogger().e('DownloadManager: episode download failed', error: e);
     } finally {
       _onTaskComplete(key);
     }
@@ -707,7 +707,7 @@ class DownloadManager implements IDownloadManager {
         );
       } on NetworkException catch (e) {
         if (e.statusCode == 416 && useRange) {
-          KazumiLogger().w(
+          MiruLogger().w(
             'DownloadManager: 416 Range Not Satisfiable, deleting tmp file and retrying',
           );
           await tmpFile.delete();
@@ -775,7 +775,7 @@ class DownloadManager implements IDownloadManager {
       episode.totalBytes = await File(filePath).length();
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
 
-      KazumiLogger().i(
+      MiruLogger().i(
         'DownloadManager: episode ${task.episodeNumber} completed (direct download). '
         '${(episode.totalBytes / 1024 / 1024).toStringAsFixed(1)} MB',
       );
@@ -784,12 +784,12 @@ class DownloadManager implements IDownloadManager {
       episode.errorMessage =
           '存储空间不足 (可用: ${fmt.formatBytes(e.availableBytes)})';
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger().w('DownloadManager: insufficient storage space', error: e);
+      MiruLogger().w('DownloadManager: insufficient storage space', error: e);
     } on FileSystemException catch (e) {
       episode.status = DownloadStatus.failed;
       episode.errorMessage = _getStorageErrorMessage(e);
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger().e('DownloadManager: file system error', error: e);
+      MiruLogger().e('DownloadManager: file system error', error: e);
     } on NetworkException catch (e) {
       if (e.type == NetworkExceptionType.cancel) {
         if (task.isPaused) {
@@ -804,7 +804,7 @@ class DownloadManager implements IDownloadManager {
       episode.status = DownloadStatus.failed;
       episode.errorMessage = e.toString();
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
-      KazumiLogger()
+      MiruLogger()
           .e('DownloadManager: direct file download failed', error: e);
     }
   }

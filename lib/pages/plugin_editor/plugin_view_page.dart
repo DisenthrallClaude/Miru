@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/card/rule_card.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/utils/encoding.dart';
+import 'package:miru/bean/card/rule_card.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/pages/plugin_editor/plugin_update_actions.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/encoding.dart';
 
 class PluginViewPage extends StatefulWidget {
   const PluginViewPage({
@@ -48,12 +48,12 @@ class _PluginViewPageState extends State<PluginViewPage> {
     try {
       await pluginsController.onReorder(oldIndex, newIndex);
     } catch (_) {
-      KazumiDialog.showToast(message: '保存规则顺序失败');
+      MiruDialog.showToast(message: '保存规则顺序失败');
     }
   }
 
   void _handleAdd() {
-    KazumiDialog.show(builder: (context) {
+    MiruDialog.show(builder: (context) {
       return AlertDialog(
         content: SingleChildScrollView(
           // 使用可滚动的SingleChildScrollView包装Column
@@ -63,7 +63,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
               ListTile(
                 title: const Text('新建规则'),
                 onTap: () {
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                   context.pushNamed('/settings/plugin/editor',
                       arguments: Plugin.fromTemplate());
                 },
@@ -72,7 +72,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
               ListTile(
                 title: const Text('从规则仓库导入'),
                 onTap: () {
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                   context.pushNamed('/settings/plugin/shop',
                       arguments: Plugin.fromTemplate());
                 },
@@ -81,7 +81,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
               ListTile(
                 title: const Text('从剪贴板导入'),
                 onTap: () {
-                  KazumiDialog.dismiss();
+                  MiruDialog.dismiss();
                   _showInputDialog();
                 },
               ),
@@ -94,7 +94,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
 
   void _showInputDialog() {
     String pluginText = '';
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('导入规则'),
@@ -106,7 +106,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
           }),
           actions: [
             TextButton(
-              onPressed: () => KazumiDialog.dismiss(),
+              onPressed: () => MiruDialog.dismiss(),
               child: Text(
                 '取消',
                 style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -118,26 +118,26 @@ class _PluginViewPageState extends State<PluginViewPage> {
                 onPressed: () async {
                   try {
                     final plugin = Plugin.fromJson(
-                      json.decode(kazumiBase64ToJson(pluginText)),
+                      json.decode(miruBase64ToJson(pluginText)),
                     );
                     if (plugin.requiresNewerClient) {
-                      KazumiDialog.dismiss();
-                      KazumiDialog.showToast(
+                      MiruDialog.dismiss();
+                      MiruDialog.showToast(
                         message: '规则需要更高版本客户端',
                       );
                       return;
                     }
                     await pluginsController.updatePlugin(plugin);
-                    KazumiDialog.dismiss();
-                    KazumiDialog.showToast(message: '导入成功');
+                    MiruDialog.dismiss();
+                    MiruDialog.showToast(message: '导入成功');
                   } catch (e, stackTrace) {
-                    KazumiLogger().e(
+                    MiruLogger().e(
                       'Plugin: failed to import rule link',
                       error: e,
                       stackTrace: stackTrace,
                     );
-                    KazumiDialog.dismiss();
-                    KazumiDialog.showToast(message: '导入失败 ${e.toString()}');
+                    MiruDialog.dismiss();
+                    MiruDialog.showToast(message: '导入失败 ${e.toString()}');
                   }
                 },
                 child: const Text('导入'),
@@ -150,8 +150,8 @@ class _PluginViewPageState extends State<PluginViewPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
@@ -169,7 +169,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
         setState(() {});
       }
     } catch (_) {
-      KazumiDialog.showToast(message: '检查规则更新失败');
+      MiruDialog.showToast(message: '检查规则更新失败');
     }
   }
 
@@ -211,14 +211,14 @@ class _PluginViewPageState extends State<PluginViewPage> {
               onPressed: selectedNames.isEmpty
                   ? null
                   : () {
-                      KazumiDialog.show(
+                      MiruDialog.show(
                         builder: (context) => AlertDialog(
                           title: const Text('删除规则'),
                           content:
                               Text('确定要删除选中的 ${selectedNames.length} 条规则吗？'),
                           actions: [
                             TextButton(
-                              onPressed: () => KazumiDialog.dismiss(),
+                              onPressed: () => MiruDialog.dismiss(),
                               child: Text(
                                 '取消',
                                 style: TextStyle(
@@ -232,7 +232,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
                                   await pluginsController
                                       .removePlugins(selectedNames);
                                 } catch (_) {
-                                  KazumiDialog.showToast(message: '删除规则失败');
+                                  MiruDialog.showToast(message: '删除规则失败');
                                   return;
                                 }
                                 if (!mounted) return;
@@ -240,7 +240,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
                                   isMultiSelectMode = false;
                                   selectedNames.clear();
                                 });
-                                KazumiDialog.dismiss();
+                                MiruDialog.dismiss();
                               },
                               child: const Text('删除'),
                             ),
@@ -402,17 +402,17 @@ class _PluginViewPageState extends State<PluginViewPage> {
                 setState(() {});
               }
             } catch (_) {
-              KazumiDialog.showToast(message: '检查规则更新失败');
+              MiruDialog.showToast(message: '检查规则更新失败');
               return;
             }
             final state = pluginsController.pluginUpdateStatus(plugin);
             switch (state) {
               case PluginUpdateAvailability.unknown:
-                KazumiDialog.showToast(message: '尚未获取规则更新状态');
+                MiruDialog.showToast(message: '尚未获取规则更新状态');
               case PluginUpdateAvailability.notInCatalog:
-                KazumiDialog.showToast(message: '规则仓库中没有当前规则');
+                MiruDialog.showToast(message: '规则仓库中没有当前规则');
               case PluginUpdateAvailability.latest:
-                KazumiDialog.showToast(message: '规则已是最新');
+                MiruDialog.showToast(message: '规则已是最新');
               case PluginUpdateAvailability.updatable:
                 await updatePluginWithFeedback(
                   pluginsController,
@@ -479,18 +479,18 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () {
-            KazumiDialog.show(builder: (context) {
+            MiruDialog.show(builder: (context) {
               return AlertDialog(
                 title: const Text('规则链接'),
                 content: SelectableText(
-                  jsonToKazumiBase64(json
+                  jsonToMiruBase64(json
                       .encode(pluginsController.pluginList[index].toJson())),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => KazumiDialog.dismiss(),
+                    onPressed: () => MiruDialog.dismiss(),
                     child: Text(
                       '取消',
                       style: TextStyle(
@@ -500,13 +500,13 @@ class _PluginViewPageState extends State<PluginViewPage> {
                   TextButton(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(
-                        text: jsonToKazumiBase64(
+                        text: jsonToMiruBase64(
                           json.encode(
                             pluginsController.pluginList[index].toJson(),
                           ),
                         ),
                       ));
-                      KazumiDialog.dismiss();
+                      MiruDialog.dismiss();
                     },
                     child: const Text('复制到剪贴板'),
                   ),
@@ -535,7 +535,7 @@ class _PluginViewPageState extends State<PluginViewPage> {
             try {
               await pluginsController.removePlugin(plugin);
             } catch (_) {
-              KazumiDialog.showToast(message: '删除规则失败');
+              MiruDialog.showToast(message: '删除规则失败');
             }
           },
           child: Container(

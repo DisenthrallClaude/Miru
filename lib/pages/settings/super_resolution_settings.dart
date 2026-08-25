@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 
 class SuperResolutionSettings extends StatefulWidget {
   const SuperResolutionSettings({super.key});

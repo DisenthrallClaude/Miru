@@ -3,12 +3,12 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/modules/history/history_sync.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/history_storage_coordinator.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/async_serial_queue.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/modules/history/history_sync.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/history_storage_coordinator.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/async_serial_queue.dart';
 import 'package:path_provider/path_provider.dart';
 
 class HistorySyncService {
@@ -290,7 +290,7 @@ class HistorySyncService {
       );
       final malformedLines = result['malformedLines']!;
       if (malformedLines > 0) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'HistorySync: dropped $malformedLines malformed line(s) '
           'from local event log upload',
         );
@@ -311,11 +311,11 @@ class HistorySyncService {
       final tempFile = File('${activeFile.path}.repair');
       await sanitizedFile.copy(tempFile.path);
       await tempFile.rename(activeFile.path);
-      KazumiLogger().w(
+      MiruLogger().w(
         'HistorySync: rewrote local event log without malformed lines',
       );
     } catch (e, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'HistorySync: failed to repair local event log',
         error: e,
         stackTrace: stackTrace,
@@ -364,7 +364,7 @@ class HistorySyncService {
     final response = await Isolate.run(() => _mergeHistoryEventFiles(request));
     final skippedLines = Map<String, int>.from(response['skippedLines'] as Map);
     for (final entry in skippedLines.entries) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'HistorySync: skipped ${entry.value} malformed line(s) '
         'in local event log ${entry.key}',
       );
@@ -441,7 +441,7 @@ class HistorySyncService {
     try {
       await append();
     } catch (e, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'HistorySync: failed to append local change',
         error: e,
         stackTrace: stackTrace,

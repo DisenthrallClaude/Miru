@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/services/storage/storage.dart';
+// 与其他设置详情页保持一致：顶栏统一走 SysAppBar 的液态玻璃材质。
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 
 class SetDisplayMode extends StatefulWidget {
   const SetDisplayMode({super.key});
@@ -36,6 +38,8 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
     preferred = await FlutterDisplayMode.preferred;
     active = await FlutterDisplayMode.active;
     await GStorage.putSetting(SettingsKeys.displayMode, preferred.toString());
+    // await 之后页面可能已退出，避免对已卸载的 State 调用 setState。
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -68,7 +72,9 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('屏幕帧率设置')),
+      // 玻璃顶栏：SysAppBar 内部为 FrostedSurface 材质，
+      // 返回键行为与原先裸 AppBar 的自动 leading 一致。
+      appBar: const SysAppBar(title: Text('屏幕帧率设置')),
       body: (modes.isEmpty)
           ? const CircularProgressIndicator()
           : SettingsList(

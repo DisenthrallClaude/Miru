@@ -1,27 +1,28 @@
-import 'package:kazumi/bean/widget/glass.dart';
+import 'package:miru/bean/widget/glass.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/info/rating_review_dialog.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/info/rating_review_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/widget/collect_button.dart';
-import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/pages/info/info_controller.dart';
-import 'package:kazumi/bean/card/bangumi_info_card.dart';
-import 'package:kazumi/pages/info/source_sheet.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/pages/info/info_tabview.dart';
+import 'package:miru/bean/widget/collect_button.dart';
+import 'package:miru/bean/widget/embedded_native_control_area.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/pages/info/info_controller.dart';
+import 'package:miru/bean/card/bangumi_info_card.dart';
+import 'package:miru/pages/info/source_sheet.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/pages/info/info_tabview.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:miru/utils/device.dart';
 
 class InfoPage extends StatefulWidget {
   const InfoPage({
@@ -99,7 +100,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      KazumiLogger().e('InfoPage: failed to load characters', error: e);
+      MiruLogger().e('InfoPage: failed to load characters', error: e);
       if (mounted) {
         setState(() {
           charactersIsLoading = false;
@@ -128,7 +129,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      KazumiLogger().e('InfoPage: failed to load staff', error: e);
+      MiruLogger().e('InfoPage: failed to load staff', error: e);
       if (mounted) {
         setState(() {
           staffIsLoading = false;
@@ -143,7 +144,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
       await infoController
           .queryBangumiRelationsByID(infoController.bangumiItem.id);
     } catch (e) {
-      KazumiLogger().e('InfoPage: failed to load relations', error: e);
+      MiruLogger().e('InfoPage: failed to load relations', error: e);
     }
   }
 
@@ -169,7 +170,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      KazumiLogger().e('InfoPage: failed to load comments', error: e);
+      MiruLogger().e('InfoPage: failed to load comments', error: e);
       if (mounted) {
         setState(() {
           commentsIsLoading = false;
@@ -183,16 +184,16 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     final token =
         GStorage.getSetting(SettingsKeys.bangumiAccessToken).toString().trim();
     if (token.isEmpty) {
-      KazumiDialog.showToast(message: '请先在同步设置中绑定你的 Bangumi 配置以发表吐槽');
+      MiruDialog.showToast(message: '请先在同步设置中绑定你的 Bangumi 配置以发表吐槽');
       return;
     }
     final localType = infoController.collectController
         .getCollectType(infoController.bangumiItem);
     if (localType == 0) {
-      KazumiDialog.showToast(message: '请先追番后再发表评价');
+      MiruDialog.showToast(message: '请先追番后再发表评价');
       return;
     }
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) => RatingReviewDialog(
         bangumiItem: infoController.bangumiItem,
         onSubmit: (data) async {
@@ -211,6 +212,8 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     infoController.bangumiItem = inputBangumiIten;
+    // 先失效在途请求再清列表：上一条目的迟到响应不允许写回本条目。
+    infoController.invalidateAncillaryRequests();
     infoController.characterList.clear();
     infoController.clearComments();
     infoController.staffList.clear();
@@ -232,6 +235,14 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     infoTabController.addListener(onInfoTabChanged);
     infoTabController.addListener(_syncFabTabIndex);
     infoTabController.animation?.addListener(_syncFabTabIndex);
+    // 并行预热吐槽/角色/制作人员：进入详情页即拉取，切 Tab 时数据已就绪。
+    // 各加载函数自带 isLoading 门闸，后续 Tab 切换不会重复请求。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(onCommentsTabSelected());
+      unawaited(loadCharacters());
+      unawaited(loadStaff());
+    });
   }
 
   void onInfoTabChanged() {
@@ -297,6 +308,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     infoTabController.removeListener(onInfoTabChanged);
     infoTabController.removeListener(_syncFabTabIndex);
     infoTabController.animation?.removeListener(_syncFabTabIndex);
+    infoController.invalidateAncillaryRequests();
     infoController.characterList.clear();
     infoController.clearComments();
     infoController.staffList.clear();
@@ -315,7 +327,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     try {
       await infoController.queryBangumiInfoByID(id, type: type);
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('InfoPage: failed to query bangumi info by ID', error: e);
     } finally {
       if (enforceMinimumLoadingDuration && mounted) {
@@ -516,9 +528,10 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
               : GlassActionButton(
                   tooltip: '开始观看',
                   onPressed: () {
+                    // 不传 backgroundColor：让玻璃用中性默认色调。
+                    // 之前传 scaffoldBackgroundColor 会在玻璃上再叠一层
+                    // 灰色覆盖 —— 就是「背景发灰」的来源。
                     showAdaptiveBottomSheet<void>(
-                      backgroundColor:
-                          Theme.of(context).scaffoldBackgroundColor,
                       context: context,
                       builder: (context) {
                         return SourceSheet(infoController: infoController);

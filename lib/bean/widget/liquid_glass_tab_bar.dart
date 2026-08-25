@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/widget/liquid_glass_indicator.dart';
+import 'package:miru/bean/widget/liquid_glass_indicator.dart';
 
 /// 带液态玻璃选中罩的 TabBar。
 ///

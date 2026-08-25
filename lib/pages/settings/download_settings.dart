@@ -1,12 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/services/platform/secure_bookmark_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/file_system.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/platform/secure_bookmark_service.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/file_system.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:file_picker/file_picker.dart';
 
 class DownloadSettingsPage extends StatefulWidget {
@@ -55,7 +55,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
 
   Future<void> _selectDownloadDirectory() async {
     if (!_canPickDirectory) {
-      KazumiDialog.showToast(message: '当前平台不支持手动选择目录');
+      MiruDialog.showToast(message: '当前平台不支持手动选择目录');
       return;
     }
     if (isSelectingDirectory) return;
@@ -75,7 +75,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
 
       await ensureDirectoryWritable(selectedPath);
       if (!await SecureBookmarkService.persist(selectedPath)) {
-        KazumiDialog.showToast(message: '无法获得该目录的持久访问权限，请更换目录');
+        MiruDialog.showToast(message: '无法获得该目录的持久访问权限，请更换目录');
         return;
       }
       await GStorage.putSetting(
@@ -85,11 +85,11 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
       if (mounted) {
         setState(() => downloadDirectory = selectedPath);
       }
-      KazumiDialog.showToast(message: '下载位置已更新，仅对新下载生效');
+      MiruDialog.showToast(message: '下载位置已更新，仅对新下载生效');
     } on FileSystemException catch (e) {
-      KazumiDialog.showToast(message: '无法写入该目录: ${e.message}');
+      MiruDialog.showToast(message: '无法写入该目录: ${e.message}');
     } catch (e) {
-      KazumiDialog.showToast(message: '选择下载位置失败: $e');
+      MiruDialog.showToast(message: '选择下载位置失败: $e');
     } finally {
       if (mounted) {
         setState(() => isSelectingDirectory = false);
@@ -103,7 +103,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
     if (mounted) {
       setState(() => downloadDirectory = '');
     }
-    KazumiDialog.showToast(message: '已恢复默认下载位置，仅对新下载生效');
+    MiruDialog.showToast(message: '已恢复默认下载位置，仅对新下载生效');
   }
 
   @override

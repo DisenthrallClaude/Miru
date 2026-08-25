@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/utils/theme.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/modules/my/watch_stats.dart';
-import 'package:kazumi/pages/menu/route_visibility.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/pages/my/recent_watch_card.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/date_time.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/glass.dart';
+import 'package:miru/bean/widget/pressable_glass.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/modules/collect/collect_type.dart';
+import 'package:miru/modules/my/watch_stats.dart';
+import 'package:miru/pages/menu/route_visibility.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/my/recent_watch_card.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/date_time.dart';
 
-/// Shared by every block on this page, entry group included, so they read as
-/// one set of cards.
+/// 本页所有卡片统一使用的圆角令牌，保证玻璃面板之间读作同一套卡片。
 const double _cardRadius = Radii.lg;
 
+// 同屏 BackdropFilter 预算：追番卡 + 统计面板 + 入口分组 = 3 块玻璃，
+// 不超过 4 块的建议上限；其余小元素保持朴素或只用半透明底色。
 class MyPage extends StatefulWidget {
   const MyPage({super.key, required this.controller});
 
@@ -183,6 +186,8 @@ class _MyPageState extends State<MyPage> {
   }
 
   Widget _statTiles(WatchStats stats) {
+    // 三个数据格合并到同一块玻璃面板：整行只花一次 BackdropFilter 的开销，
+    // 格与格之间用发丝竖线分隔，避免同屏模糊元素超预算。
     final tiles = <Widget>[
       _StatTile(
         value: '${stats.watchedBangumiCount}',
@@ -201,46 +206,107 @@ class _MyPageState extends State<MyPage> {
       ),
     ];
     // Tiles hold different amounts of text; stretch keeps them level.
-    return IntrinsicHeight(
-      child: Row(
+    return FrostedSurface(
+      borderRadius: BorderRadius.circular(_cardRadius),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: Space.lg),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < tiles.length; i++) ...[
+                if (i > 0) const _PanelDivider(),
+                Expanded(child: tiles[i]),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 功能入口分组：整组一块玻璃面板，行间用发丝线分隔。
+  /// 每行包一层 PressableGlass 获得弹簧按压反馈；
+  /// onTap 仍走原先的 pushNamed 路由，业务逻辑零改动。
+  Widget _entryGroup(WatchStats stats) {
+    return FrostedSurface(
+      borderRadius: BorderRadius.circular(_cardRadius),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < tiles.length; i++) ...[
-            if (i > 0) const SizedBox(width: 12),
-            Expanded(child: tiles[i]),
-          ],
+          _entryTile(
+            icon: Icons.history_rounded,
+            title: '历史记录',
+            description: stats.lastWatchName != null
+                ? '最近看到 ${stats.lastWatchName}'
+                : '还没有观看记录',
+            onTap: () => context.pushNamed('/settings/history/'),
+          ),
+          const _EntryDivider(),
+          _entryTile(
+            icon: Icons.download_rounded,
+            title: '离线下载',
+            description: '缓存任务与本地文件',
+            onTap: () => context.pushNamed('/settings/download/'),
+          ),
+          const _EntryDivider(),
+          _entryTile(
+            icon: Icons.settings_rounded,
+            title: '设置',
+            description: '播放、弹幕、外观与规则',
+            onTap: () => context.pushNamed('/settings/'),
+          ),
         ],
       ),
     );
   }
 
-  /// The same split list the settings page uses, at this page's card radius so
-  /// the group sits level with the hero beside it.
-  Widget _entryGroup(WatchStats stats) {
-    return SettingsSplitGroup(
-      outerRadius: _cardRadius,
-      children: [
-        SettingsCategoryTile(
-          icon: Icons.history_rounded,
-          title: '历史记录',
-          description: stats.lastWatchName != null
-              ? '最近看到 ${stats.lastWatchName}'
-              : '还没有观看记录',
-          onTap: () => context.pushNamed('/settings/history/'),
+  /// 单行入口：图标圆盘 + 标题/描述 + 雪佛龙，排版对齐原 SettingsCategoryTile。
+  Widget _entryTile({
+    required IconData icon,
+    required String title,
+    required String description,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    return PressableGlass(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(_cardRadius),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.md,
         ),
-        SettingsCategoryTile(
-          icon: Icons.download_rounded,
-          title: '离线下载',
-          description: '缓存任务与本地文件',
-          onTap: () => context.pushNamed('/settings/download/'),
+        child: Row(
+          children: [
+            GlassIconDisc(icon: icon, tinted: true),
+            const SizedBox(width: Space.lg),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: textTheme.bodyLarge),
+                  const SizedBox(height: Space.xxs),
+                  Text(
+                    description,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
         ),
-        SettingsCategoryTile(
-          icon: Icons.settings_rounded,
-          title: '设置',
-          description: '播放、弹幕、外观与规则',
-          onTap: () => context.pushNamed('/settings/'),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -267,81 +333,82 @@ class _CollectHero extends StatelessWidget {
         ? '收藏番剧后会在这里汇总'
         : '最近观看 ${formatTimestampToRelativeTime(lastWatchTime.millisecondsSinceEpoch ~/ 1000)}';
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(_cardRadius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.favorite_rounded,
-                  size: 18,
-                  color: colorScheme.onPrimaryContainer,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                '我的追番',
-                style: textTheme.titleMedium?.copyWith(
-                  color: colorScheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text.rich(
-            TextSpan(
+    // 头部用户信息卡片：换成液态玻璃材质，去掉生硬的不透明底色。
+    // 圆角走 Radii 令牌；内容排版与数据展示保持原样。
+    return FrostedSurface(
+      borderRadius: BorderRadius.circular(_cardRadius),
+      child: Padding(
+        padding: const EdgeInsets.all(Space.xl),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                TextSpan(
-                  text: '${stats.collectedCount}',
-                  style: textTheme.displaySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w500,
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.favorite_rounded,
+                    size: 18,
+                    color: colorScheme.onPrimaryContainer,
                   ),
                 ),
-                TextSpan(
-                  text: ' 部',
+                const SizedBox(width: 12),
+                Text(
+                  '我的追番',
                   style: textTheme.titleMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 12),
-          if (stats.collectedCount > 0)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final type in _order)
-                  if ((stats.collectCounts[type] ?? 0) > 0)
-                    _CollectChip(
-                      label: type.label,
-                      count: stats.collectCounts[type]!,
+            const SizedBox(height: 16),
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: '${stats.collectedCount}',
+                    style: textTheme.displaySmall?.copyWith(
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.w500,
                     ),
-              ],
+                  ),
+                  TextSpan(
+                    text: ' 部',
+                    style: textTheme.titleMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          if (stats.collectedCount > 0) const SizedBox(height: 12),
-          Text(
-            caption,
-            style: textTheme.bodyMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+            const SizedBox(height: 12),
+            if (stats.collectedCount > 0)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final type in _order)
+                    if ((stats.collectCounts[type] ?? 0) > 0)
+                      _CollectChip(
+                        label: type.label,
+                        count: stats.collectCounts[type]!,
+                      ),
+                ],
+              ),
+            if (stats.collectedCount > 0) const SizedBox(height: 12),
+            Text(
+              caption,
+              style: textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -388,12 +455,10 @@ class _StatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(_cardRadius),
-      ),
+    // 只负责排版：底色与圆角由整块统计玻璃面板统一提供，
+    // 避免每个数据格各自挂一个 BackdropFilter。
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Space.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -429,6 +494,34 @@ class _StatTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 统计玻璃面板内部的竖向发丝分隔线（纯绘制，无模糊开销）。
+class _PanelDivider extends StatelessWidget {
+  const _PanelDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 0.5,
+      color: Theme.of(context).colorScheme.outlineVariant,
+    );
+  }
+}
+
+/// 入口玻璃分组内部的横向发丝分隔线，
+/// 左侧让开「16 边距 + 36 图标圆盘 + 16 间距」的缩进，对齐 iOS 分组列表。
+class _EntryDivider extends StatelessWidget {
+  const _EntryDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.outlineVariant;
+    return Padding(
+      padding: const EdgeInsets.only(left: 68),
+      child: Container(height: 0.5, color: color),
     );
   }
 }

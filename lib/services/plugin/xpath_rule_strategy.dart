@@ -1,10 +1,10 @@
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
-import 'package:kazumi/modules/roads/road_module.dart';
-import 'package:kazumi/modules/search/plugin_search_module.dart';
-import 'package:kazumi/plugins/anti_crawler_config.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart';
-import 'package:kazumi/utils/episode_url.dart';
+import 'package:miru/modules/roads/road_module.dart';
+import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/plugins/anti_crawler_config.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart';
+import 'package:miru/utils/episode_url.dart';
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 
 enum XPathRuleFormatKind {
@@ -155,6 +155,15 @@ class XPathRuleStrategy {
     RuleExecutionConfig config,
   ) {
     final root = _documentElement(raw);
+    // 章节页同样可能被验证码拦截：不检测的话用户只会看到
+    // 「解析不到选集」，而真实原因是需要先过人机验证。
+    if (detectsCaptchaChallenge(
+      raw,
+      config.antiCrawlerConfig,
+      htmlElement: root,
+    )) {
+      throw CaptchaRequiredException(config.pluginName);
+    }
     final roads = <Road>[];
     final diagnostics = <String>[];
     final roadNodes = _runSelector(

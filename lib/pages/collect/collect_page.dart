@@ -1,17 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/collect/collect_module.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/bean/card/bangumi_card.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/widget/collect_button.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart';
-import 'package:kazumi/modules/collect/collect_sync_plan.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/bean/card/bangumi_card.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/liquid_glass_tab_bar.dart';
+import 'package:miru/bean/widget/collect_button.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
+import 'package:miru/modules/collect/collect_sync_plan.dart';
+import 'package:miru/services/storage/storage.dart';
 
 class CollectPage extends StatefulWidget {
   const CollectPage({
@@ -53,7 +54,7 @@ class _CollectPageState extends State<CollectPage>
   void _showFullSyncProgressDialog({
     required GlobalKey<_FullSyncProgressDialogState> progressDialogKey,
   }) {
-    unawaited(KazumiDialog.show(
+    unawaited(MiruDialog.show(
       clickMaskDismiss: false,
       builder: (context) => _FullSyncProgressDialog(key: progressDialogKey),
     ));
@@ -119,12 +120,12 @@ class _CollectPageState extends State<CollectPage>
         );
       }
     } finally {
-      if (KazumiDialog.observer.hasKazumiDialog) {
-        KazumiDialog.dismiss();
+      if (MiruDialog.observer.hasMiruDialog) {
+        MiruDialog.dismiss();
       }
     }
 
-    KazumiDialog.showToast(
+    MiruDialog.showToast(
       message: _buildFullSyncSummary(
         plan: plan,
         webDavSynced: webDavSynced,
@@ -161,10 +162,10 @@ class _CollectPageState extends State<CollectPage>
       appBar: SysAppBar(
         needTopOffset: false,
         toolbarHeight: 104,
-        bottom: TabBar(
-          controller: tabController,
+        // 与时间表页一致的弹簧玻璃滑块：跟手移动 + 过冲回弹。
+        bottom: LiquidGlassTabBar(
+          controller: tabController!,
           tabs: tabs,
-          indicatorColor: Theme.of(context).colorScheme.primary,
         ),
         title: const Text('追番'),
         actions: [
@@ -184,11 +185,11 @@ class _CollectPageState extends State<CollectPage>
                 bangumiEnabled: bgmSyncEnable,
               );
               if (!syncPlan.canSync) {
-                KazumiDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');
+                MiruDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');
                 return;
               }
               if (showDelete) {
-                KazumiDialog.showToast(message: '编辑模式无法执行同步');
+                MiruDialog.showToast(message: '编辑模式无法执行同步');
                 return;
               }
               if (syncCollectiblesing) {

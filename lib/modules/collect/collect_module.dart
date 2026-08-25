@@ -1,6 +1,6 @@
 import 'package:hive_ce/hive.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/collect/collect_type.dart';
 
 part 'collect_module.g.dart';
 

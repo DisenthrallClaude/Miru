@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:ui';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/webview/video/video_webview_controller.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
 import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
     as android_webview;
-import 'package:kazumi/utils/media.dart';
-import 'package:kazumi/utils/http_headers.dart';
+import 'package:miru/utils/media.dart';
+import 'package:miru/utils/http_headers.dart';
 
 class VideoWebviewImpl
     extends VideoWebviewController<PlatformInAppWebViewController> {
@@ -24,13 +24,14 @@ class VideoWebviewImpl
       PlatformHeadlessInAppWebViewCreationParams(
         initialSize: const Size(360, 640),
         initialSettings: InAppWebViewSettings(
-          userAgent: getRandomUA(),
+          // 与 mpv 播放共用会话 UA：解析与播放必须同源，否则防盗链 CDN 拒播
+          userAgent: getSessionUA(),
           mediaPlaybackRequiresUserGesture: true,
           upgradeKnownHostsToHTTPS: false,
           mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
         ),
         onWebViewCreated: (controller) {
-          print('[WebView] Created (legacy fallback)');
+          MiruLogger().i('[WebView] Created (legacy fallback)');
           webviewController = controller;
           initEventController.add(true);
         },
@@ -491,7 +492,7 @@ class VideoWebviewImpl
           await android_webview.AndroidWebViewFeature.instance()
               .isFeatureSupported(WebViewFeature.PROXY_OVERRIDE);
       if (!proxyAvailable) {
-        KazumiLogger().w('WebView: 当前 Android 版本不支持代理');
+        MiruLogger().w('WebView: 当前 Android 版本不支持代理');
         return;
       }
 
@@ -504,9 +505,9 @@ class VideoWebviewImpl
           ],
         ),
       );
-      KazumiLogger().i('WebView: 代理设置成功 $formattedProxy');
+      MiruLogger().i('WebView: 代理设置成功 $formattedProxy');
     } catch (e) {
-      KazumiLogger().e('WebView: 设置代理失败 $e');
+      MiruLogger().e('WebView: 设置代理失败 $e');
     }
   }
 }

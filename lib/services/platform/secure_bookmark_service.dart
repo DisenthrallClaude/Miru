@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:macos_secure_bookmarks/macos_secure_bookmarks.dart';
 
 /// Keeps the user-picked download directory writable across app restarts on
@@ -24,7 +24,7 @@ class SecureBookmarkService {
       _accessedPath = path;
       return true;
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('SecureBookmarkService: failed to bookmark $path', error: e);
       return false;
     }
@@ -45,7 +45,7 @@ class SecureBookmarkService {
       _accessedPath = entity.path;
       return entity.path;
     } catch (e) {
-      KazumiLogger().e(
+      MiruLogger().e(
           'SecureBookmarkService: failed to restore access to $path',
           error: e);
       return null;

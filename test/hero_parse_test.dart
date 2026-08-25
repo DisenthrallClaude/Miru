@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/request/config/hero_banners.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/request/config/hero_banners.dart';
 
 void main() {
   test('所有轮播条目的 p1 响应都能解析（否则点击会报「加载失败」）', () {

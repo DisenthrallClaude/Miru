@@ -1,7 +1,7 @@
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/services/storage/storage.dart';
 
 class InterfaceSettingsPage extends StatefulWidget {
   const InterfaceSettingsPage({super.key});

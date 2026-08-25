@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/collect/collect_sync_merger.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/modules/bangumi/sync_priority.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/collect/collect_sync_merger.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/modules/bangumi/sync_priority.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
 
 /// Bangumi 同步服务工具类
 class BangumiSyncService {
@@ -48,7 +48,7 @@ class BangumiSyncService {
       await ping();
       initialized = true;
     } catch (e) {
-      KazumiLogger().e('Bangumi: Bangumi ping failed', error: e);
+      MiruLogger().e('Bangumi: Bangumi ping failed', error: e);
       rethrow;
     }
   }
@@ -66,7 +66,7 @@ class BangumiSyncService {
           username = name;
         }
       } catch (e) {
-        KazumiLogger().e('Bangumi: Bangumi ping failed', error: e);
+        MiruLogger().e('Bangumi: Bangumi ping failed', error: e);
         rethrow;
       }
     });
@@ -128,12 +128,12 @@ class BangumiSyncService {
   }) async {
     final syncEnable = GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (!syncEnable) {
-      KazumiDialog.showToast(message: '同步已关闭');
-      KazumiLogger().i('Bangumi: sync disabled');
+      MiruDialog.showToast(message: '同步已关闭');
+      MiruLogger().i('Bangumi: sync disabled');
       return false;
     }
     if (isUsing) {
-      KazumiLogger().w('Bangumi is currently syncing');
+      MiruLogger().w('Bangumi is currently syncing');
       throw Exception('Bangumi 正在同步');
     }
     return _runExclusive(() async {
@@ -228,7 +228,7 @@ class BangumiSyncService {
         onProgress?.call('Bangumi 状态同步完成', 1, 1);
         return true;
       } catch (e) {
-        KazumiLogger().e('Bangumi sync failed', error: e);
+        MiruLogger().e('Bangumi sync failed', error: e);
         rethrow;
       }
     });

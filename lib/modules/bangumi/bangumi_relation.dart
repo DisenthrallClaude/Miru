@@ -1,4 +1,4 @@
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
 
 typedef BangumiRelationFetcher = Future<List<BangumiRelation>> Function(int id);
 

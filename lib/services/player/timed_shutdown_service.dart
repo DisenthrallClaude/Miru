@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class TimedShutdownService {
   static final TimedShutdownService _instance =
@@ -84,7 +84,7 @@ class TimedShutdownService {
 
     // If dialog is showing, dismiss it
     if (_isDialogShowing) {
-      KazumiDialog.dismiss();
+      MiruDialog.dismiss();
       _isDialogShowing = false;
     }
   }
@@ -98,7 +98,7 @@ class TimedShutdownService {
     try {
       _onExpiredCallback?.call();
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('TimedShutdownService: onExpired callback failed', error: e);
     }
 
@@ -110,7 +110,7 @@ class TimedShutdownService {
     if (_isDialogShowing) return;
     _isDialogShowing = true;
 
-    KazumiDialog.show(
+    MiruDialog.show(
       clickMaskDismiss: false,
       onDismiss: () {
         _isDialogShowing = false;
@@ -123,16 +123,16 @@ class TimedShutdownService {
             TextButton(
               onPressed: () {
                 _isDialogShowing = false;
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
                 repeat();
-                KazumiDialog.showToast(message: '已重新开始 $_lastSetMinutes 分钟定时');
+                MiruDialog.showToast(message: '已重新开始 $_lastSetMinutes 分钟定时');
               },
               child: const Text('重复'),
             ),
             TextButton(
               onPressed: () {
                 _isDialogShowing = false;
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: Text(
                 '关闭',
@@ -168,7 +168,7 @@ class TimedShutdownService {
   }
 
   /// Show custom timer picker dialog and start timer if user confirms
-  /// Uses KazumiDialog to avoid context-related resource leaks
+  /// Uses MiruDialog to avoid context-related resource leaks
   /// [onExpired] callback is invoked when timer expires (before showing dialog)
   static void showCustomTimerDialog({
     String title = '自定义定时',
@@ -176,7 +176,7 @@ class TimedShutdownService {
     VoidCallback? onExpired,
     void Function(int)? onResult,
   }) {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) => _CustomTimerDialog(
         title: title,
         autoStart: autoStart,
@@ -228,13 +228,13 @@ class _CustomTimerDialogState extends State<_CustomTimerDialog> {
   void _confirm() {
     final totalMinutes = _selectedHours * 60 + _selectedMinutes;
     if (totalMinutes <= 0) {
-      KazumiDialog.showToast(message: '请选择有效的时间');
+      MiruDialog.showToast(message: '请选择有效的时间');
       return;
     }
-    KazumiDialog.dismiss();
+    MiruDialog.dismiss();
     if (widget.autoStart) {
       TimedShutdownService().start(totalMinutes, onExpired: widget.onExpired);
-      KazumiDialog.showToast(
+      MiruDialog.showToast(
         message:
             '已设置 ${TimedShutdownService().formatMinutesToDisplay(totalMinutes)} 后定时关闭',
       );
@@ -311,7 +311,7 @@ class _CustomTimerDialogState extends State<_CustomTimerDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => KazumiDialog.dismiss(),
+          onPressed: () => MiruDialog.dismiss(),
           child: Text(
             '取消',
             style: TextStyle(color: Theme.of(context).colorScheme.outline),

@@ -3,11 +3,11 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/modules/history/history_sync.dart';
-import 'package:kazumi/services/sync/history_sync_service.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/modules/history/history_sync.dart';
+import 'package:miru/services/sync/history_sync_service.dart';
 
 void main() {
   group('HistorySyncDevice', () {
@@ -784,7 +784,7 @@ void main() {
 
     test('streams a large event file into bounded history state', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_stream_');
+          await Directory.systemTemp.createTemp('miru_history_stream_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);
@@ -824,7 +824,7 @@ void main() {
 
     test('fails closed and preserves malformed event files', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_invalid_');
+          await Directory.systemTemp.createTemp('miru_history_invalid_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);
@@ -847,7 +847,7 @@ void main() {
 
     test('salvages valid lines from a corrupted local event log', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_salvage_');
+          await Directory.systemTemp.createTemp('miru_history_salvage_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);
@@ -891,7 +891,7 @@ void main() {
 
     test('upload copy drops malformed lines but keeps valid events', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_upload_');
+          await Directory.systemTemp.createTemp('miru_history_upload_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);
@@ -943,7 +943,7 @@ void main() {
 
     test('upload copy returns null when log has no valid events', () async {
       final directory = await Directory.systemTemp.createTemp(
-        'kazumi_history_upload_invalid_',
+        'miru_history_upload_invalid_',
       );
       addTearDown(() async {
         if (await directory.exists()) {
@@ -965,7 +965,7 @@ void main() {
 
     test('skips malformed remote files transactionally', () async {
       final directory = await Directory.systemTemp.createTemp(
-        'kazumi_history_remote_invalid_',
+        'miru_history_remote_invalid_',
       );
       addTearDown(() async {
         if (await directory.exists()) {
@@ -1018,7 +1018,7 @@ void main() {
 
     test('checkpoint keeps events appended during an active sync', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_checkpoint_');
+          await Directory.systemTemp.createTemp('miru_history_checkpoint_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);
@@ -1062,7 +1062,7 @@ void main() {
 
     test('recovers pending logs left by an interrupted checkpoint', () async {
       final directory =
-          await Directory.systemTemp.createTemp('kazumi_history_recovery_');
+          await Directory.systemTemp.createTemp('miru_history_recovery_');
       addTearDown(() async {
         if (await directory.exists()) {
           await directory.delete(recursive: true);

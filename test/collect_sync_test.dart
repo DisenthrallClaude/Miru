@@ -1,14 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/modules/bangumi/bangumi_collection.dart';
-import 'package:kazumi/modules/bangumi/bangumi_collection_type.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/bangumi/sync_priority.dart';
-import 'package:kazumi/modules/bangumi/bangumi_tag.dart';
-import 'package:kazumi/modules/collect/collect_change_module.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
-import 'package:kazumi/modules/collect/collect_sync_merger.dart';
-import 'package:kazumi/modules/collect/collect_sync_plan.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
+import 'package:miru/modules/bangumi/bangumi_collection.dart';
+import 'package:miru/modules/bangumi/bangumi_collection_type.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/bangumi/sync_priority.dart';
+import 'package:miru/modules/bangumi/bangumi_tag.dart';
+import 'package:miru/modules/collect/collect_change_module.dart';
+import 'package:miru/modules/collect/collect_module.dart';
+import 'package:miru/modules/collect/collect_sync_merger.dart';
+import 'package:miru/modules/collect/collect_sync_plan.dart';
+import 'package:miru/modules/collect/collect_type.dart';
 
 void main() {
   group('CollectSyncPlan', () {

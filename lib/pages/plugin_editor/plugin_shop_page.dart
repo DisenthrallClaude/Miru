@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_catalog_view.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/pages/plugin_editor/plugin_catalog_view.dart';
+import 'package:miru/plugins/plugins_controller.dart';
 
 class PluginShopPage extends StatefulWidget {
   const PluginShopPage({

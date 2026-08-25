@@ -1,9 +1,9 @@
 import 'package:dio/dio.dart';
-import 'package:kazumi/request/core/dio_factory.dart';
-import 'package:kazumi/request/core/network_error_mapper.dart';
-import 'package:kazumi/utils/dandan_credentials.dart';
-import 'package:kazumi/utils/http_headers.dart';
-import 'package:kazumi/utils/crypto.dart';
+import 'package:miru/request/core/dio_factory.dart';
+import 'package:miru/request/core/network_error_mapper.dart';
+import 'package:miru/utils/dandan_credentials.dart';
+import 'package:miru/utils/http_headers.dart';
+import 'package:miru/utils/crypto.dart';
 
 class DanmakuClient {
   DanmakuClient._();
@@ -19,7 +19,7 @@ class DanmakuClient {
     final timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final uri = Uri.parse(url);
     final requestHeaders = <String, dynamic>{
-      'user-agent': getRandomUA(),
+      'user-agent': getSessionUA(),
       'referer': '',
       'X-Auth': 1,
       'X-AppId': dandanCredentials['id'],

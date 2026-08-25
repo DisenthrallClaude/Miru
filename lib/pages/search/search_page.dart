@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/card/bangumi_card.dart';
-import 'package:kazumi/bean/widget/error_widget.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/pages/search/search_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/date_time.dart';
-import 'package:kazumi/utils/search_parser.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/card/bangumi_card.dart';
+import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/search/search_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/date_time.dart';
+import 'package:miru/utils/search_parser.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
@@ -99,7 +99,7 @@ class _SearchPageState extends State<SearchPage> {
         (searchController.text.trim().isNotEmpty ||
             filterState.hasAdvancedFilters) &&
         searchPageController.hasMoreSearchResults) {
-      KazumiLogger().i('SearchController: search results is loading more');
+      MiruLogger().i('SearchController: search results is loading more');
       searchPageController.searchBangumi(searchController.text, type: 'add');
     }
   }

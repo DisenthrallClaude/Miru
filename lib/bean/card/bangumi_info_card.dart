@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
-import 'package:kazumi/bean/widget/collect_button.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
+import 'package:miru/bean/widget/collect_button.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 

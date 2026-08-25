@@ -1,6 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class BangumiAvatar extends StatelessWidget {
   const BangumiAvatar({
@@ -24,7 +24,7 @@ class BangumiAvatar extends StatelessWidget {
       placeholder: (context, url) => _fallback(),
       errorWidget: (context, url, error) => _fallback(),
       errorListener: (error) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'BangumiAvatar: image load failed',
           error: error,
         );

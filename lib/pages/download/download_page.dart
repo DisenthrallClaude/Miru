@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/empty_state_widget.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/pages/download/download_widgets.dart';
-import 'package:kazumi/pages/video/video_playback_args.dart';
-import 'package:kazumi/utils/format.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/pages/download/download_widgets.dart';
+import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/utils/format.dart';
 
 class DownloadPage extends StatefulWidget {
   const DownloadPage({
@@ -107,7 +107,7 @@ class _DownloadPageState extends State<DownloadPage> {
             record.bangumiId,
             record.pluginName,
           );
-          KazumiDialog.showToast(message: '已开始恢复下载');
+          MiruDialog.showToast(message: '已开始恢复下载');
         },
         onDeleteAll: () => _confirmDeleteRecord(record),
         totalSpeed: totalSpeed,
@@ -218,7 +218,7 @@ class _DownloadPageState extends State<DownloadPage> {
               pluginName: record.pluginName,
               episodeNumber: episode.episodeNumber,
             );
-            KazumiDialog.showToast(message: '已插队优先下载');
+            MiruDialog.showToast(message: '已插队优先下载');
           },
           tooltip: '优先下载',
           visualDensity: VisualDensity.compact,
@@ -246,7 +246,7 @@ class _DownloadPageState extends State<DownloadPage> {
       episode.episodeNumber,
     );
     if (localPath == null) {
-      KazumiDialog.showToast(message: '本地文件不存在');
+      MiruDialog.showToast(message: '本地文件不存在');
       return;
     }
 
@@ -286,14 +286,14 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   void _confirmDeleteEpisode(DownloadRecord record, DownloadEpisode episode) {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) => AlertDialog(
         title: const Text('删除下载'),
         content: Text(
             '确定要删除「${episode.episodeName.isNotEmpty ? episode.episodeName : '第${episode.episodeNumber}集'}」的下载文件吗？'),
         actions: [
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -306,7 +306,7 @@ class _DownloadPageState extends State<DownloadPage> {
                 record.pluginName,
                 episode.episodeNumber,
               );
-              KazumiDialog.dismiss();
+              MiruDialog.dismiss();
             },
             child: Text(
               '删除',
@@ -319,13 +319,13 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   void _confirmDeleteRecord(DownloadRecord record) {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) => AlertDialog(
         title: const Text('删除全部下载'),
         content: Text('确定要删除「${record.bangumiName}」的所有下载文件吗？'),
         actions: [
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -337,7 +337,7 @@ class _DownloadPageState extends State<DownloadPage> {
                 record.bangumiId,
                 record.pluginName,
               );
-              KazumiDialog.dismiss();
+              MiruDialog.dismiss();
             },
             child: Text(
               '删除',

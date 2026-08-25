@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 
 class DecoderSettings extends StatefulWidget {
   const DecoderSettings({super.key});

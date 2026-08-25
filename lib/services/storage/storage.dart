@@ -1,20 +1,20 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:hive_ce/hive.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/hive_registrar.g.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
-import 'package:kazumi/modules/collect/collect_change_module.dart';
-import 'package:kazumi/modules/collect/collect_sync_merger.dart';
-import 'package:kazumi/modules/search/search_history_module.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/services/storage/history_storage_coordinator.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/hive_registrar.g.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/modules/collect/collect_module.dart';
+import 'package:miru/modules/collect/collect_change_module.dart';
+import 'package:miru/modules/collect/collect_sync_merger.dart';
+import 'package:miru/modules/search/search_history_module.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/services/storage/history_storage_coordinator.dart';
 
-import 'package:kazumi/services/storage/settings_keys.dart';
-export 'package:kazumi/services/storage/settings_keys.dart';
+import 'package:miru/services/storage/settings_keys.dart';
+export 'package:miru/services/storage/settings_keys.dart';
 
 class GStorage {
   /// Don't use favorites box, it's replaced by collectibles.
@@ -169,34 +169,35 @@ class GStorage {
   }
 
   /// Open a Hive box with automatic recovery on corruption.
-  /// If the box is corrupted, delete it and create a new empty one.
+  /// The corrupted files are preserved as `<box>.corrupt.hive` before being
+  /// removed, so a broken write never silently destroys user data.
   static Future<Box<T>> _openBoxSafe<T>(String boxName) async {
     try {
       return await Hive.openBox<T>(boxName);
     } catch (e) {
-      KazumiLogger().e(
+      MiruLogger().e(
           'GStorage: Box "$boxName" corrupted, attempting recovery',
           error: e);
 
-      // Delete the corrupted box files
-      await _deleteBoxFiles(boxName);
+      // Back up the corrupted box files instead of destroying them.
+      await _backupAndDeleteBoxFiles(boxName);
 
       // Try to open again (will create a new empty box)
       try {
         final box = await Hive.openBox<T>(boxName);
-        KazumiLogger()
-            .i('GStorage: Box "$boxName" recovered successfully (data lost)');
+        MiruLogger().i(
+            'GStorage: Box "$boxName" recovered successfully (corrupted copy kept as .corrupt.hive)');
         return box;
       } catch (e2) {
-        KazumiLogger()
+        MiruLogger()
             .e('GStorage: Failed to recover box "$boxName"', error: e2);
         rethrow;
       }
     }
   }
 
-  /// Delete Hive box files for a given box name
-  static Future<void> _deleteBoxFiles(String boxName) async {
+  /// Back up then delete Hive box files for a given box name.
+  static Future<void> _backupAndDeleteBoxFiles(String boxName) async {
     if (_hivePath == null) return;
 
     final boxFile = File('$_hivePath/$boxName.hive');
@@ -204,15 +205,27 @@ class GStorage {
 
     try {
       if (await boxFile.exists()) {
+        final backupFile = File('$_hivePath/$boxName.corrupt.hive');
+        try {
+          await boxFile.copy(backupFile.path);
+          MiruLogger()
+              .i('GStorage: Corrupted box backed up to ${backupFile.path}');
+        } catch (backupError) {
+          // 备份失败也不能放弃恢复流程，只记录告警继续删除重建。
+          MiruLogger().w(
+              'GStorage: Failed to back up corrupted box "$boxName"',
+              error: backupError);
+        }
         await boxFile.delete();
-        KazumiLogger().i('GStorage: Deleted corrupted box file: $boxName.hive');
+        MiruLogger()
+            .i('GStorage: Deleted corrupted box file: $boxName.hive');
       }
       if (await lockFile.exists()) {
         await lockFile.delete();
-        KazumiLogger().i('GStorage: Deleted lock file: $boxName.lock');
+        MiruLogger().i('GStorage: Deleted lock file: $boxName.lock');
       }
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('GStorage: Failed to delete box files for "$boxName"', error: e);
     }
   }
@@ -222,9 +235,9 @@ class GStorage {
     final hiveBoxFile = File('${appDocumentDir.path}/hive/$boxName.hive');
     if (await hiveBoxFile.exists()) {
       await hiveBoxFile.copy(backupFilePath);
-      KazumiLogger().i('GStorage: backup success: $backupFilePath');
+      MiruLogger().i('GStorage: backup success: $backupFilePath');
     } else {
-      KazumiLogger().w('GStorage: Hive box does not exist: $boxName');
+      MiruLogger().w('GStorage: Hive box does not exist: $boxName');
     }
   }
 
@@ -255,17 +268,42 @@ class GStorage {
   static Future<void> restoreCollectibles(String backupFilePath) async {
     final backupFile = File(backupFilePath);
     final backupContent = await backupFile.readAsBytes();
+    // 使用独立盒名，避免与 getCollectiblesFromFile 的预览盒冲突。
     final tempBox =
-        await Hive.openBox('tempCollectiblesBox', bytes: backupContent);
-    final tempBoxItems = tempBox.toMap().entries;
-    KazumiLogger().i(
-        'WebDav: restoring collectibles. tempCollectiblesBox length ${tempBoxItems.length}');
+        await Hive.openBox('tempRestoreCollectiblesBox', bytes: backupContent);
+    try {
+      final tempBoxItems = tempBox.toMap().entries;
+      MiruLogger().i(
+          'WebDav: restoring collectibles. tempCollectiblesBox length ${tempBoxItems.length}');
 
-    await collectibles.clear();
-    for (var tempBoxItem in tempBoxItems) {
-      await collectibles.put(tempBoxItem.key, tempBoxItem.value);
+      // 与 putCollectible/deleteCollectible 共享同一把写锁，
+      // 否则恢复期间的用户操作会互相覆盖。
+      await _runCollectChangesWriteExclusive(() async {
+        // clear+put 不是事务：中途失败必须回滚旧数据，
+        // 不能让一次失败的恢复把收藏清空。
+        // Box<T> 的 toMap 值类型会被擦除，回滚时需显式 cast 回元素类型。
+        final previousEntries =
+            Map<dynamic, dynamic>.of(collectibles.toMap());
+        try {
+          await collectibles.clear();
+          for (var tempBoxItem in tempBoxItems) {
+            await collectibles.put(tempBoxItem.key, tempBoxItem.value);
+          }
+          await collectibles.flush();
+        } catch (e) {
+          await collectibles.clear();
+          for (final entry in previousEntries.entries) {
+            await collectibles.put(entry.key, entry.value);
+          }
+          await collectibles.flush();
+          MiruLogger()
+              .e('WebDav: restore collectibles failed, rolled back', error: e);
+          rethrow;
+        }
+      });
+    } finally {
+      await tempBox.close();
     }
-    await tempBox.close();
   }
 
   static Future<List<CollectedBangumi>> getCollectiblesFromFile(
@@ -275,7 +313,7 @@ class GStorage {
     final tempBox =
         await Hive.openBox('tempCollectiblesBox', bytes: backupContent);
     final tempBoxItems = tempBox.toMap().entries;
-    KazumiLogger().i(
+    MiruLogger().i(
         'WebDav: get collectibles from file. tempCollectiblesBox length ${tempBoxItems.length}');
 
     final List<CollectedBangumi> collectibles = [];
@@ -293,7 +331,7 @@ class GStorage {
     final tempBox =
         await Hive.openBox('tempCollectChangesBox', bytes: backupContent);
     final tempBoxItems = tempBox.toMap().entries;
-    KazumiLogger().i(
+    MiruLogger().i(
         'WebDav: get collectChanges from file. tempCollectChangesBox length ${tempBoxItems.length}');
 
     final List<CollectedBangumiChange> collectChanges = [];
@@ -315,18 +353,40 @@ class GStorage {
         remoteChanges: remoteChanges,
       );
 
-      // Update local storage
-      await collectibles.clear();
-      for (var collect in mergeResult.collectibles) {
-        await collectibles.put(collect.bangumiItem.id, collect);
-      }
-      await collectibles.flush();
+      // clear+put 不是事务，合并中途失败时回滚到旧数据，
+      // 避免同步半途而废造成收藏/变更记录丢失。
+      // Box<T> 的 toMap 值类型会被擦除，回滚时需显式 cast 回元素类型。
+      final previousCollectibles =
+          Map<dynamic, dynamic>.of(collectibles.toMap());
+      final previousChanges = Map<dynamic, dynamic>.of(collectChanges.toMap());
+      try {
+        // Update local storage
+        await collectibles.clear();
+        for (var collect in mergeResult.collectibles) {
+          await collectibles.put(collect.bangumiItem.id, collect);
+        }
+        await collectibles.flush();
 
-      await collectChanges.clear();
-      for (var change in mergeResult.changes) {
-        await collectChanges.put(change.id, change);
+        await collectChanges.clear();
+        for (var change in mergeResult.changes) {
+          await collectChanges.put(change.id, change);
+        }
+        await collectChanges.flush();
+      } catch (e) {
+        await collectibles.clear();
+        for (final entry in previousCollectibles.entries) {
+          await collectibles.put(entry.key, entry.value);
+        }
+        await collectibles.flush();
+        await collectChanges.clear();
+        for (final entry in previousChanges.entries) {
+          await collectChanges.put(entry.key, entry.value);
+        }
+        await collectChanges.flush();
+        MiruLogger()
+            .e('GStorage: patch collectibles failed, rolled back', error: e);
+        rethrow;
       }
-      await collectChanges.flush();
 
       _collectChangeIdInitialized = false;
       _initializeNextCollectChangeIdLocked();

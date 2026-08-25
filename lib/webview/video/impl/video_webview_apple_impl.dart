@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:collection';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/webview/video/video_webview_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
-import 'package:kazumi/utils/http_headers.dart';
-import 'package:kazumi/utils/media.dart';
+import 'package:miru/utils/http_headers.dart';
+import 'package:miru/utils/media.dart';
 
 class VideoWebviewAppleImpl
     extends VideoWebviewController<PlatformInAppWebViewController> {
@@ -34,7 +34,8 @@ class VideoWebviewAppleImpl
           ),
         ]),
         initialSettings: InAppWebViewSettings(
-          userAgent: getRandomUA(),
+          // 与 mpv 播放共用会话 UA：解析与播放必须同源，否则防盗链 CDN 拒播
+          userAgent: getSessionUA(),
           mediaPlaybackRequiresUserGesture: true,
           useOnLoadResource: false,
           cacheEnabled: false,
@@ -104,7 +105,7 @@ class VideoWebviewAppleImpl
           ],
         ),
         onWebViewCreated: (controller) {
-          KazumiLogger().i('WebView: created');
+          MiruLogger().i('WebView: created');
           webviewController = controller;
           initEventController.add(true);
         },
@@ -115,7 +116,7 @@ class VideoWebviewAppleImpl
           logEventController.add('loading completed: $url');
         },
         onReceivedError: (controller, request, error) {
-          KazumiLogger().e(
+          MiruLogger().e(
               'WebView: error: ${error.toString()} - Request: ${request.url}');
         },
       ),

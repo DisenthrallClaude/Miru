@@ -1,4 +1,4 @@
-import 'package:kazumi/modules/staff/staff_item.dart';
+import 'package:miru/modules/staff/staff_item.dart';
 
 class StaffResponse {
   final List<StaffFullItem> data;

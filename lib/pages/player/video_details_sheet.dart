@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/bean/settings/settings_list.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/bean/settings/settings_list.dart';
+import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/utils/device.dart';
 
 void showVideoDetailsSheet(
   BuildContext context, {
@@ -16,7 +16,9 @@ void showVideoDetailsSheet(
     context: context,
     maxHeightFactor: 0.86,
     compactLandscapeMaxHeightFactor: 0.95,
+    // 播放器上方关闭玻璃：避免 BackdropFilter 逐帧采样视频纹理
     builder: (context) => VideoDetailsSheet(playerController: playerController),
+    glass: false,
   );
 }
 
@@ -99,7 +101,7 @@ class _VideoDetailsSheetState extends State<VideoDetailsSheet>
   /// [context] must sit below this sheet's ScaffoldMessenger.
   void _copyToClipboard(BuildContext context, String value) {
     Clipboard.setData(ClipboardData(text: value));
-    KazumiDialog.showToast(message: '已复制到剪贴板', context: context);
+    MiruDialog.showToast(message: '已复制到剪贴板', context: context);
   }
 
   @override

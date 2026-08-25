@@ -1,11 +1,11 @@
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/history/history_module.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/pages/video/video_playback_args.dart';
-import 'package:kazumi/plugins/plugins.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/plugin/rule_engine_models.dart'
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/history/history_module.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/plugin/rule_engine_models.dart'
     show RuleCancelToken;
 
 sealed class HistoryPlaybackResult {
@@ -89,7 +89,7 @@ class HistoryPlaybackService {
         roads: roads,
       );
     } catch (_) {
-      KazumiLogger().w("QueryManager: failed to query roads");
+      MiruLogger().w("QueryManager: failed to query roads");
       return null;
     }
   }

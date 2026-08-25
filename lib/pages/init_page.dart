@@ -1,23 +1,25 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/services/sync/bangumi_sync_service.dart';
-import 'package:kazumi/services/sync/webdav.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/plugins/plugins_controller.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/plugin/community_rules_sync.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/services/sync/bangumi_sync_service.dart';
+import 'package:miru/services/sync/webdav.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/plugins/plugins_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/shaders/shader_asset_service.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/pages/plugin_editor/plugin_update_actions.dart';
-import 'package:kazumi/services/download/background_download_service.dart';
-import 'package:kazumi/services/platform/windows_shortcut.dart';
-import 'package:kazumi/services/platform/platform_environment_service.dart';
-import 'package:kazumi/services/update/startup_update_check.dart';
-import 'package:kazumi/navigation.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/metered_network_service.dart';
+import 'package:miru/services/shaders/shader_asset_service.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/pages/plugin_editor/plugin_update_actions.dart';
+import 'package:miru/services/download/background_download_service.dart';
+import 'package:miru/services/platform/windows_shortcut.dart';
+import 'package:miru/services/platform/platform_environment_service.dart';
+import 'package:miru/services/update/startup_update_check.dart';
+import 'package:miru/navigation.dart';
 
 class InitPage extends StatefulWidget {
   const InitPage({
@@ -62,7 +64,7 @@ class _InitPageState extends State<InitPage> {
       await downloadController.init();
       _setupBackgroundDownloadNavigation();
     } catch (e) {
-      KazumiLogger().e('InitPage: downloadController.init() failed', error: e);
+      MiruLogger().e('InitPage: downloadController.init() failed', error: e);
     }
 
     await _checkRunningOnX11();
@@ -105,14 +107,14 @@ class _InitPageState extends State<InitPage> {
           if (path.contains('/download')) return;
           navigationContext.pushNamed('/settings/download/');
         } catch (e) {
-          KazumiLogger()
+          MiruLogger()
               .w('InitPage: failed to navigate to download page', error: e);
         }
       });
     };
 
     backgroundService.onNotificationPermissionRequired = () async {
-      final result = await KazumiDialog.show<bool>(
+      final result = await MiruDialog.show<bool>(
         clickMaskDismiss: false,
         builder: (context) {
           return AlertDialog(
@@ -123,7 +125,7 @@ class _InitPageState extends State<InitPage> {
             ),
             actions: [
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: false),
+                onPressed: () => MiruDialog.dismiss(popWith: false),
                 child: Text(
                   '稍后再说',
                   style:
@@ -131,7 +133,7 @@ class _InitPageState extends State<InitPage> {
                 ),
               ),
               TextButton(
-                onPressed: () => KazumiDialog.dismiss(popWith: true),
+                onPressed: () => MiruDialog.dismiss(popWith: true),
                 child: const Text('允许'),
               ),
             ],
@@ -168,21 +170,21 @@ class _InitPageState extends State<InitPage> {
     bool webDavEnable = await GStorage.getSetting(SettingsKeys.webDavEnable);
     if (webDavEnable) {
       var webDav = WebDav();
-      KazumiLogger().i('WebDav: Starting WebDav initialization');
+      MiruLogger().i('WebDav: Starting WebDav initialization');
       try {
         await webDav.init();
         try {
           await webDav.syncHistory();
-          KazumiLogger().i('WebDav: Completed syncing watch history');
+          MiruLogger().i('WebDav: Completed syncing watch history');
         } catch (e, stackTrace) {
-          KazumiLogger().w(
+          MiruLogger().w(
             'WebDav: automatic watch history sync failed',
             error: e,
             stackTrace: stackTrace,
           );
         }
       } catch (e, stackTrace) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'WebDav: automatic initialization failed',
           error: e,
           stackTrace: stackTrace,
@@ -196,17 +198,17 @@ class _InitPageState extends State<InitPage> {
         await GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (bangumiEnable) {
       var bangumi = BangumiSyncService();
-      KazumiLogger().i('Bangumi: Starting Bangumi initialization');
+      MiruLogger().i('Bangumi: Starting Bangumi initialization');
       try {
         await bangumi.init();
       } catch (e) {
         bangumi.reset();
         await GStorage.putSetting(SettingsKeys.bangumiSyncEnable, false);
-        KazumiLogger().w(
+        MiruLogger().w(
           'Bangumi: initialization failed, disabling Bangumi sync until user re-enables it',
           error: e,
         );
-        KazumiDialog.showToast(
+        MiruDialog.showToast(
           message: '初始化Bangumi失败，已关闭 Bangumi 同步: ${e.toString()}',
         );
       }
@@ -219,7 +221,7 @@ class _InitPageState extends State<InitPage> {
     }
     bool isRunningOnX11 = await PlatformEnvironmentService.isRunningOnX11();
     if (isRunningOnX11) {
-      await KazumiDialog.show(
+      await MiruDialog.show(
         clickMaskDismiss: false,
         builder: (context) {
           return PopScope(
@@ -227,7 +229,7 @@ class _InitPageState extends State<InitPage> {
             child: AlertDialog(
               title: const Text('X11环境检测'),
               content: const Text(
-                  '检测到您当前运行在X11环境下，Kazumi在X11环境下可能出现性能问题或界面异常，建议切换到Wayland以获得更好的体验。您是否希望在X11下继续使用Kazumi？'),
+                  '检测到您当前运行在X11环境下，Miru在X11环境下可能出现性能问题或界面异常，建议切换到Wayland以获得更好的体验。您是否希望在X11下继续使用Miru？'),
               actions: [
                 TextButton(
                   onPressed: () {
@@ -241,7 +243,7 @@ class _InitPageState extends State<InitPage> {
                 ),
                 TextButton(
                   onPressed: () {
-                    KazumiDialog.dismiss();
+                    MiruDialog.dismiss();
                   },
                   child: const Text('继续'),
                 ),
@@ -259,19 +261,19 @@ class _InitPageState extends State<InitPage> {
       return;
     }
 
-    final create = await KazumiDialog.show<bool>(
+    final create = await MiruDialog.show<bool>(
       clickMaskDismiss: false,
       builder: (context) => AlertDialog(
         title: const Text('创建桌面快捷方式'),
-        content: const Text('是否在桌面创建 Kazumi 的快捷方式？'),
+        content: const Text('是否在桌面创建 Miru 的快捷方式？'),
         actions: [
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(popWith: false),
+            onPressed: () => MiruDialog.dismiss(popWith: false),
             child: Text('暂不创建',
                 style: TextStyle(color: Theme.of(context).colorScheme.outline)),
           ),
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(popWith: true),
+            onPressed: () => MiruDialog.dismiss(popWith: true),
             child: const Text('创建'),
           ),
         ],
@@ -281,7 +283,7 @@ class _InitPageState extends State<InitPage> {
     await GStorage.putSetting(SettingsKeys.shortcutDialogShown, true);
     if (create ?? false) {
       final success = await WindowsShortcut.createDesktopShortcut();
-      KazumiDialog.showToast(message: success ? '桌面快捷方式已创建' : '桌面快捷方式创建失败');
+      MiruDialog.showToast(message: success ? '桌面快捷方式已创建' : '桌面快捷方式创建失败');
     }
   }
 
@@ -290,7 +292,7 @@ class _InitPageState extends State<InitPage> {
       await pluginsController.init();
       unawaited(_pluginUpdate());
     } catch (error, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'Plugin: failed to initialize rules',
         error: error,
         stackTrace: stackTrace,
@@ -301,6 +303,12 @@ class _InitPageState extends State<InitPage> {
   Future<void> _pluginUpdate() async {
     final checkOnStartup =
         GStorage.getSetting(SettingsKeys.checkPluginUpdateOnStartup);
+    // 移动数据下跳过启动检查：规则目录与批量更新都会产生流量，
+    // 用户没有主动操作时不该消耗套餐；回到 WiFi 后下次启动照常。
+    if (checkOnStartup && MeteredNetworkService.isMetered) {
+      MiruLogger().i('Plugin: skip startup update check on metered network');
+      return;
+    }
     late final int count;
     try {
       count = await pluginsController.checkPluginUpdatesOnStartup(
@@ -310,7 +318,7 @@ class _InitPageState extends State<InitPage> {
       return;
     }
     if (count != 0) {
-      KazumiDialog.showToast(
+      MiruDialog.showToast(
         message: '检测到 $count 条规则可以更新',
         showActionButton: true,
         actionLabel: '全部更新',
@@ -321,6 +329,9 @@ class _InitPageState extends State<InitPage> {
         duration: const Duration(seconds: 5),
       );
     }
+    // 社区规则仓库静默同步：与规则商店目录互补，站点改版后
+    // 由社区贡献者当天跟进的修复直接落到本地，无需用户操作。
+    unawaited(CommunityRulesSync.sync());
   }
 
   @override

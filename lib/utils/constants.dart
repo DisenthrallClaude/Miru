@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
+import 'package:miru/request/config/api_endpoints.dart';
 
 /// 版面基础常量。数值与 `lib/utils/theme.dart` 中的 `Space` / `Radii`
 /// 令牌保持一致（此处不 import theme.dart 以避免库循环依赖）。
@@ -84,7 +84,7 @@ const List<String> acceptLanguageList = [
 /// Bangumi API 文档要求的UA格式
 Map<String, String> bangumiHTTPHeader = {
   'user-agent':
-      'Predidit/Kazumi/${ApiEndpoints.version} (Android) (https://github.com/Predidit/Kazumi)',
+      'DisenthrallClaude/Miru/${ApiEndpoints.version} (Android) (https://github.com/DisenthrallClaude/Miru)',
   'referer': '',
   'content-type': 'application/json'
 };

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/services/sync/webdav.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/storage/secure_field_codec.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/services/sync/webdav.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class WebDavEditorPage extends StatefulWidget {
   const WebDavEditorPage({
@@ -27,8 +29,26 @@ class _WebDavEditorPageState extends State<WebDavEditorPage> {
     webDavURLController.text = GStorage.getSetting(SettingsKeys.webDavURL);
     webDavUsernameController.text =
         GStorage.getSetting(SettingsKeys.webDavUsername);
-    webDavPasswordController.text =
-        GStorage.getSetting(SettingsKeys.webDavPassword);
+    _loadStoredPassword();
+  }
+
+  /// 存储中的密码是 Keystore 密文，进入页面时解密回显明文；
+  /// 解密失败说明密钥已丢失，清空输入框让用户重新输入。
+  Future<void> _loadStoredPassword() async {
+    final storedPassword = GStorage.getSetting(SettingsKeys.webDavPassword);
+    if (storedPassword.isEmpty) {
+      return;
+    }
+    final password = await SecureFieldCodec.decrypt(storedPassword);
+    if (!mounted) {
+      return;
+    }
+    if (password == null) {
+      MiruLogger().e('WebDavEditor: stored password cannot be decrypted');
+      MiruDialog.showToast(message: '密码无法解密，请重新输入');
+      return;
+    }
+    webDavPasswordController.text = password;
   }
 
   @override
@@ -98,22 +118,26 @@ class _WebDavEditorPageState extends State<WebDavEditorPage> {
           GStorage.putSetting(SettingsKeys.webDavURL, webDavURLController.text);
           GStorage.putSetting(
               SettingsKeys.webDavUsername, webDavUsernameController.text);
-          GStorage.putSetting(
-              SettingsKeys.webDavPassword, webDavPasswordController.text);
+          // 密码先经 Android Keystore 加密再落盘，避免明文存储；
+          // 平台不支持时 SecureFieldCodec 会降级为明文，保存不会失败。
+          final encryptedPassword = await SecureFieldCodec.encrypt(
+              webDavPasswordController.text);
+          await GStorage.putSetting(
+              SettingsKeys.webDavPassword, encryptedPassword);
           var webDav = WebDav();
           try {
             await webDav.init();
           } catch (e) {
-            KazumiDialog.showToast(message: '配置失败 ${e.toString()}');
+            MiruDialog.showToast(message: '配置失败 ${e.toString()}');
             await GStorage.putSetting(SettingsKeys.webDavEnable, false);
             return;
           }
-          KazumiDialog.showToast(message: '配置成功, 开始测试');
+          MiruDialog.showToast(message: '配置成功, 开始测试');
           try {
             await webDav.ping();
-            KazumiDialog.showToast(message: '测试成功');
+            MiruDialog.showToast(message: '测试成功');
           } catch (e) {
-            KazumiDialog.showToast(message: '测试失败 ${e.toString()}');
+            MiruDialog.showToast(message: '测试失败 ${e.toString()}');
             await GStorage.putSetting(SettingsKeys.webDavEnable, false);
           }
         },

@@ -1,17 +1,17 @@
 import 'dart:io';
 
-import 'package:kazumi/bean/settings/settings_list.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/my/my_controller.dart';
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/utils/dandan_credentials.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/utils/dandan_credentials.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/utils/device.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({
@@ -47,8 +47,8 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   void onBackPressed(BuildContext context) {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
   }
@@ -102,10 +102,10 @@ class _AboutPageState extends State<AboutPage> {
     _getCacheSize();
   }
 
-  /// 反馈弹窗。风格与项目一致：走 KazumiDialog（自带玻璃背景模糊），
+  /// 反馈弹窗。风格与项目一致：走 MiruDialog（自带玻璃背景模糊），
   /// 主动作用强调色、次要动作用次级灰。
   void _showFeedbackDialog() {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         final scheme = Theme.of(context).colorScheme;
         return AlertDialog(
@@ -128,7 +128,7 @@ class _AboutPageState extends State<AboutPage> {
           ),
           actions: [
             TextButton(
-              onPressed: KazumiDialog.dismiss,
+              onPressed: MiruDialog.dismiss,
               child: Text(
                 '关闭',
                 style: TextStyle(color: scheme.onSurfaceVariant),
@@ -141,11 +141,11 @@ class _AboutPageState extends State<AboutPage> {
                   path: ApiEndpoints.feedbackEmail,
                   queryParameters: const {'subject': 'Miru 反馈'},
                 );
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
                 try {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
                 } catch (_) {
-                  KazumiDialog.showToast(message: '未找到邮件应用，可手动复制邮箱地址');
+                  MiruDialog.showToast(message: '未找到邮件应用，可手动复制邮箱地址');
                 }
               },
               child: Text(
@@ -161,7 +161,7 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   void _showCacheDialog() {
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return AlertDialog(
           title: const Text('缓存管理'),
@@ -169,7 +169,7 @@ class _AboutPageState extends State<AboutPage> {
           actions: [
             TextButton(
               onPressed: () {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: Text(
                 '取消',
@@ -181,7 +181,7 @@ class _AboutPageState extends State<AboutPage> {
                 try {
                   _clearCache();
                 } catch (_) {}
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               },
               child: const Text('确认'),
             ),
@@ -291,15 +291,6 @@ class _AboutPageState extends State<AboutPage> {
                   value: Text('Github'),
                 ),
                 SettingsTile(
-                  leading: Icons.brush_rounded,
-                  onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.iconUrl),
-                        mode: LaunchMode.externalApplication);
-                  },
-                  title: Text('图标创作'),
-                  value: Text('Pixiv'),
-                ),
-                SettingsTile(
                   leading: Icons.menu_book_rounded,
                   onPressed: (_) {
                     launchUrl(Uri.parse(ApiEndpoints.bangumiIndex),
@@ -333,13 +324,13 @@ class _AboutPageState extends State<AboutPage> {
               title: Text('社区'),
               tiles: [
                 SettingsTile(
-                  leading: Icons.send_rounded,
+                  leading: Icons.forum_rounded,
                   onPressed: (_) {
                     launchUrl(Uri.parse(ApiEndpoints.telegramGroup),
                         mode: LaunchMode.externalApplication);
                   },
-                  title: Text('Telegram'),
-                  value: Text('点击加入'),
+                  title: Text('讨论区'),
+                  value: Text('GitHub Discussions'),
                 ),
               ],
             ),

@@ -1,7 +1,8 @@
-import 'package:kazumi/services/storage/feed_cache.dart';
-import 'package:kazumi/request/config/featured_bangumi.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
+import 'package:miru/services/storage/feed_cache.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/request/config/featured_bangumi.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:mobx/mobx.dart';
 
 part 'popular_controller.g.dart';
@@ -92,10 +93,20 @@ abstract class _PopularController with Store {
     }
 
     // 置顶之后再接算法推荐（按热度的国漫），域名由拦截器重写到公共反代。
-    final result = await BangumiApi.getBangumiList(
-      limit: _trendPageSize,
-      offset: _trendOffset,
-    );
+    final List<BangumiItem> result;
+    try {
+      result = await BangumiApi.getBangumiList(
+        limit: _trendPageSize,
+        offset: _trendOffset,
+      );
+    } catch (e) {
+      isLoadingMore = false;
+      isTimeOut = trendList.isEmpty;
+      if (isTimeOut) {
+        MiruDialog.showToast(message: '推荐加载失败，请检查网络后重试');
+      }
+      return;
+    }
     // 必须按**实际返回条数**推进 offset。
     // 之前固定 += _trendPageSize，而接口返回数可能小于请求的 limit，
     // 会导致每翻一页跳过若干条目（内容凭空消失）。
@@ -118,10 +129,20 @@ abstract class _PopularController with Store {
     isLoadingMore = true;
     var tag = currentTag;
     // 分类浏览同样限定产地，并用 offset 翻页
-    var result = await BangumiApi.getBangumiList(
-      tag: tag,
-      offset: bangumiList.length,
-    );
+    final List<BangumiItem> result;
+    try {
+      result = await BangumiApi.getBangumiList(
+        tag: tag,
+        offset: bangumiList.length,
+      );
+    } catch (e) {
+      isLoadingMore = false;
+      isTimeOut = bangumiList.isEmpty;
+      if (isTimeOut) {
+        MiruDialog.showToast(message: '分类加载失败，请检查网络后重试');
+      }
+      return;
+    }
     final existingIds = bangumiList.map((item) => item.id).toSet();
     bangumiList.addAll(result.where((item) => existingIds.add(item.id)));
     isLoadingMore = false;

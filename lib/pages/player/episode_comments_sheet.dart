@@ -1,12 +1,12 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/card/user_comments_card.dart';
-import 'package:kazumi/bean/widget/error_widget.dart';
-import 'package:kazumi/modules/bangumi/episode_item.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/card/user_comments_card.dart';
+import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/modules/bangumi/episode_item.dart';
+import 'package:miru/pages/video/video_controller.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
 
 class EpisodeCommentsSheet extends StatefulWidget {
   const EpisodeCommentsSheet({
@@ -227,19 +227,29 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet> {
 
   void showEpisodeSelection() async {
     final int selectedEpisode = ep == 0 ? widget.episode : ep;
-    KazumiDialog.showLoading(msg: '分集列表加载中');
-    final List<EpisodeInfo> episodeList =
-        await BangumiApi.getBangumiEpisodesByID(
-            videoPageController.bangumiItem.id);
-    KazumiDialog.dismiss();
+    MiruDialog.showLoading(msg: '分集列表加载中', glass: false);
+    final List<EpisodeInfo> episodeList;
+    try {
+      episodeList = await BangumiApi.getBangumiEpisodesByID(
+          videoPageController.bangumiItem.id);
+    } catch (e) {
+      MiruDialog.dismiss();
+      if (!mounted) {
+        return;
+      }
+      // 区分「请求失败」与「确实没有分集」，前者应提示重试而不是误导用户。
+      MiruDialog.showToast(message: '分集列表加载失败，请检查网络后重试');
+      return;
+    }
+    MiruDialog.dismiss();
     if (!mounted) {
       return;
     }
     if (episodeList.isEmpty) {
-      KazumiDialog.showToast(message: '未找到分集列表');
+      MiruDialog.showToast(message: '未找到分集列表');
       return;
     }
-    KazumiDialog.show(
+    MiruDialog.show(
       builder: (context) {
         return Dialog(
           child: ConstrainedBox(
@@ -275,7 +285,7 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet> {
                         onTap: () {
                           ep = index + 1;
                           _refreshIndicatorKey.currentState?.show();
-                          KazumiDialog.dismiss();
+                          MiruDialog.dismiss();
                         },
                       );
                     },
@@ -286,7 +296,7 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                     child: TextButton(
-                      onPressed: () => KazumiDialog.dismiss(),
+                      onPressed: () => MiruDialog.dismiss(),
                       child: Text(
                         '取消',
                         style: TextStyle(

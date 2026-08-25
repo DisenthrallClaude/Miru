@@ -1,6 +1,6 @@
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/timeline/timeline_page.dart';
-import 'package:kazumi/pages/timeline/timeline_controller.dart';
+import 'package:miru/pages/timeline/timeline_page.dart';
+import 'package:miru/pages/timeline/timeline_controller.dart';
 
 final timelineModule = createModule(
   path: '/timeline',

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 
 /// Android 后台下载服务
 ///
@@ -32,7 +32,7 @@ class BackgroundDownloadService {
 
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'kazumi_download_channel',
+        channelId: 'miru_download_channel',
         channelName: '下载服务',
         channelDescription: '视频下载后台服务',
         channelImportance: NotificationChannelImportance.LOW,
@@ -54,7 +54,7 @@ class BackgroundDownloadService {
     FlutterForegroundTask.initCommunicationPort();
 
     _isInitialized = true;
-    KazumiLogger().i('BackgroundDownloadService: initialized');
+    MiruLogger().i('BackgroundDownloadService: initialized');
   }
 
   Future<bool> needsNotificationPermission() async {
@@ -85,18 +85,18 @@ class BackgroundDownloadService {
         if (userAgreed) {
           final granted = await requestNotificationPermission();
           if (!granted) {
-            KazumiLogger().w(
+            MiruLogger().w(
                 'BackgroundDownloadService: notification permission denied by user');
           }
         } else {
-          KazumiLogger()
+          MiruLogger()
               .i('BackgroundDownloadService: user declined permission dialog');
         }
       } else {
         // 没有设置回调，直接请求权限（兼容旧行为）
         final granted = await requestNotificationPermission();
         if (!granted) {
-          KazumiLogger()
+          MiruLogger()
               .w('BackgroundDownloadService: notification permission denied');
         }
       }
@@ -115,14 +115,14 @@ class BackgroundDownloadService {
       _isRunning = result is ServiceRequestSuccess;
 
       if (_isRunning) {
-        KazumiLogger().i('BackgroundDownloadService: service started');
+        MiruLogger().i('BackgroundDownloadService: service started');
       } else {
-        KazumiLogger().w(
+        MiruLogger().w(
             'BackgroundDownloadService: service start returned non-success: $result');
       }
       return _isRunning;
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('BackgroundDownloadService: failed to start service', error: e);
       return false;
     }
@@ -134,9 +134,9 @@ class BackgroundDownloadService {
     try {
       await FlutterForegroundTask.stopService();
       _isRunning = false;
-      KazumiLogger().i('BackgroundDownloadService: service stopped');
+      MiruLogger().i('BackgroundDownloadService: service stopped');
     } catch (e) {
-      KazumiLogger()
+      MiruLogger()
           .e('BackgroundDownloadService: failed to stop service', error: e);
     }
   }

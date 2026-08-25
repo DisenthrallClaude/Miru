@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:kazumi/pages/onboarding/onboarding_step_layout.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/pages/onboarding/onboarding_step_layout.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class DisclaimerStep extends StatefulWidget {
   const DisclaimerStep({super.key});
@@ -24,7 +24,7 @@ class _DisclaimerStepState extends State<DisclaimerStep> {
     try {
       text = await rootBundle.loadString('assets/statements/statements.txt');
     } catch (error, stackTrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'Onboarding: failed to load statements',
         error: error,
         stackTrace: stackTrace,

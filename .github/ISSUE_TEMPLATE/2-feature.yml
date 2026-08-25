@@ -1,5 +1,5 @@
 name: 期待新功能
-description: 希望 Kazumi 能添加一个新功能。
+description: 希望 Miru 能添加一个新功能。
 title: '[feat]: '
 labels: ['enhancement']
 body:
@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         请填写以下内容，以方便我们讨论该功能的用途。
-        填写前，请先查看 [Issues 列表](https://github.com/Predidit/Kazumi/issues) 查看是否已经有和你主题重复的 Issue。重复 Issue 会被关闭。
-        如果你的 Kazumi 版本不为最新版，请先更新再查看该功能是否已被添加。旧版本的 Issue 可能不会被处理，因为新版可能已经添加了功能。 
+        填写前，请先查看 [Issues 列表](https://github.com/Predidit/Miru/issues) 查看是否已经有和你主题重复的 Issue。重复 Issue 会被关闭。
+        如果你的 Miru 版本不为最新版，请先更新再查看该功能是否已被添加。旧版本的 Issue 可能不会被处理，因为新版可能已经添加了功能。 
 
   - type: textarea
     id: reason
@@ -39,9 +39,9 @@ body:
     attributes:
       label: 提交前确认
       options:
-        - label: 我已经查看了 [Issues 列表](https://github.com/Predidit/Kazumi/issues) ，没有发现重复问题。
+        - label: 我已经查看了 [Issues 列表](https://github.com/Predidit/Miru/issues) ，没有发现重复问题。
           required: true
         - label: 我知道一个新功能需要进行讨论并考虑是否添加，并不是一定会被接受。
           required: true
-        - label: 我正在使用最新版本的 Kazumi 应用，功能还没有添加。
+        - label: 我正在使用最新版本的 Miru 应用，功能还没有添加。
           required: true

@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/utils/device.dart';
 
 class PipUtils {
   static bool androidPIPInited = false;
@@ -21,13 +21,13 @@ class PipUtils {
     if (!Platform.isAndroid) {
       return false;
     }
-    const pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     try {
       final bool? supported =
           await pipChannel.invokeMethod('isPictureInPictureSupported');
       return supported ?? false;
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to check Android PIP support: '${e.message}'.");
+      MiruLogger().e("Failed to check Android PIP support: '${e.message}'.");
       return false;
     }
   }
@@ -38,7 +38,7 @@ class PipUtils {
       return false;
     }
     final Size aspectSize = getPIPAspectSize(width: width, height: height);
-    const pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     try {
       final bool? entered =
           await pipChannel.invokeMethod('enterPictureInPictureMode', {
@@ -47,7 +47,7 @@ class PipUtils {
       });
       return entered ?? false;
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to enter Android PIP mode: '${e.message}'.");
+      MiruLogger().e("Failed to enter Android PIP mode: '${e.message}'.");
       return false;
     }
   }
@@ -62,7 +62,7 @@ class PipUtils {
       return;
     }
     final Size aspectSize = getPIPAspectSize(width: width, height: height);
-    const pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     try {
       await pipChannel.invokeMethod('updatePictureInPictureActions', {
         'playing': playing,
@@ -71,7 +71,7 @@ class PipUtils {
         'height': aspectSize.height.toInt(),
       });
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to update Android PIP actions: '${e.message}'.");
+      MiruLogger().e("Failed to update Android PIP actions: '${e.message}'.");
     }
   }
 
@@ -79,13 +79,13 @@ class PipUtils {
     if (!Platform.isAndroid) {
       return;
     }
-    const pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     try {
       await pipChannel.invokeMethod('setAndroidAutoEnterPIPEnabled', {
         'enabled': enabled,
       });
     } on PlatformException catch (e) {
-      KazumiLogger().e(
+      MiruLogger().e(
           "Failed to set Android auto-enter PIP enabled state: '${e.message}'.");
     }
   }
@@ -94,13 +94,13 @@ class PipUtils {
     if (!Platform.isAndroid) {
       return;
     }
-    const pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     try {
       await pipChannel.invokeMethod('setAndroidPIPInPlayerPage', {
         'inPlayerPage': inPlayerPage,
       });
     } on PlatformException catch (e) {
-      KazumiLogger().e("Failed to set Android PIP page state: '${e.message}'.");
+      MiruLogger().e("Failed to set Android PIP page state: '${e.message}'.");
     }
   }
 
@@ -128,7 +128,7 @@ class PipUtils {
   static void initPipHandler({
     required Future<void> Function(String action) onAction,
   }) {
-    const MethodChannel pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const MethodChannel pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     if (androidPIPInited) return;
     androidPIPInited = true;
 
@@ -147,7 +147,7 @@ class PipUtils {
   }
 
   static void disposePipHandler() {
-    const MethodChannel pipChannel = MethodChannel('com.predidit.kazumi/pip');
+    const MethodChannel pipChannel = MethodChannel('io.github.disenthrallclaude.miru/pip');
     pipChannel.setMethodCallHandler(null);
     androidPIPInited = false;
   }

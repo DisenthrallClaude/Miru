@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/utils/async_single_flight.dart';
+import 'package:miru/utils/async_single_flight.dart';
 
 void main() {
   group('AsyncSingleFlight', () {

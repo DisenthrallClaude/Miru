@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:dio/io.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/network/system_proxy_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/network/system_proxy_service.dart';
+import 'package:miru/services/storage/storage.dart';
 
 class NetworkConfig {
   const NetworkConfig({
@@ -83,7 +83,7 @@ class NetworkConfig {
     final proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
     final parsed = ProxyUtils.parseProxyUrl(proxyUrl);
     if (parsed == null) {
-      KazumiLogger().w('Proxy: 代理地址格式错误或为空');
+      MiruLogger().w('Proxy: 代理地址格式错误或为空');
       return NetworkConfig(
         connectTimeout: connectTimeout,
         receiveTimeout: receiveTimeout,

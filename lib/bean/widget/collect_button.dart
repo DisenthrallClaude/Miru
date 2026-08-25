@@ -1,8 +1,9 @@
-import 'package:kazumi/bean/widget/glass.dart';
-import 'package:kazumi/utils/theme.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/pages/collect/collect_controller.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/glass.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/collect/collect_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 
 class CollectButton extends StatefulWidget {
@@ -94,16 +95,48 @@ class _CollectButtonState extends State<CollectButton> {
       crossAxisUnconstrained: false,
       builder: (_, MenuController controller, __) {
         if (widget.isExtended) {
-          return FilledButton.icon(
-            onPressed: () {
-              if (controller.isOpen) {
-                controller.close();
-              } else {
-                controller.open();
-              }
-            },
-            icon: Icon(getIconByInt(collectType)),
-            label: Text(getTypeStringByInt(collectType)),
+          // 液态玻璃药丸：替代原先的实心 FilledButton，
+          // 与全应用玻璃语言统一（悬浮在海报上时尤其通透）。
+          return FrostedSurface(
+            borderRadius: BorderRadius.circular(Radii.pill),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(Radii.pill),
+                onTap: () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Space.lg,
+                    vertical: Space.sm,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        getIconByInt(collectType),
+                        size: 20,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: Space.sm),
+                      Text(
+                        getTypeStringByInt(collectType),
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           );
         } else {
           return IconButton(

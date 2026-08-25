@@ -2,25 +2,25 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:kazumi/bean/widget/play_pause_icon.dart';
-import 'package:kazumi/pages/player/player_adjustment_hud.dart';
-import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/pages/player/player_panel_hold.dart';
-import 'package:kazumi/services/player/pip_utils.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:miru/bean/widget/play_pause_icon.dart';
+import 'package:miru/pages/player/player_adjustment_hud.dart';
+import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/pages/player/player_panel_hold.dart';
+import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/pages/video/video_controller.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/player/player_controller.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/player/remote.dart';
-import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:miru/services/player/remote.dart';
+import 'package:miru/pages/settings/danmaku/danmaku_settings_sheet.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
-import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/services/player/timed_shutdown_service.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/format.dart';
+import 'package:miru/bean/widget/embedded_native_control_area.dart';
+import 'package:miru/services/player/timed_shutdown_service.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/format.dart';
 
 class SmallestPlayerItemPanel extends StatefulWidget {
   const SmallestPlayerItemPanel({
@@ -85,7 +85,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
   static const double _loadingIndicatorStrokeWidth = 2.0;
 
   void showForwardChange() {
-    KazumiDialog.show(builder: (context) {
+    MiruDialog.show(builder: (context) {
       String input = "";
       return AlertDialog(
         title: const Text('跳过秒数'),
@@ -106,7 +106,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
         }),
         actions: <Widget>[
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -116,9 +116,9 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
             onPressed: () async {
               if (input != "") {
                 playerController.setButtonForwardTime(int.parse(input));
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               } else {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               }
             },
             child: const Text('确定'),
@@ -498,7 +498,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                   }
                   final bool supported = await PipUtils.isAndroidPIPSupported();
                   if (!supported) {
-                    KazumiDialog.showToast(message: '当前设备不支持画中画');
+                    MiruDialog.showToast(message: '当前设备不支持画中画');
                     return;
                   }
                   await PipUtils.updateAndroidPIPActions(
@@ -512,7 +512,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                     height: playerController.debug.playerHeight,
                   );
                   if (!entered) {
-                    KazumiDialog.showToast(message: '进入画中画失败');
+                    MiruDialog.showToast(message: '进入画中画失败');
                   }
                 },
                 tooltip: '画中画',
@@ -766,7 +766,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                       onPressed: () {
                         TimedShutdownService().start(minutes,
                             onExpired: widget.pauseForTimedShutdown);
-                        KazumiDialog.showToast(
+                        MiruDialog.showToast(
                             message:
                                 '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭');
                       },

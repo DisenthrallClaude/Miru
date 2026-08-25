@@ -1,7 +1,7 @@
 // ignore_for_file: library_private_types_in_public_api
 
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
+import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 
 part 'player_panel_controller.g.dart';
 

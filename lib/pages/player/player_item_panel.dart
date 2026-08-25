@@ -4,26 +4,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:kazumi/bean/widget/play_pause_icon.dart';
-import 'package:kazumi/pages/player/player_adjustment_hud.dart';
-import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
-import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
-import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/pages/player/player_panel_hold.dart';
-import 'package:kazumi/services/player/pip_utils.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
+import 'package:miru/bean/widget/play_pause_icon.dart';
+import 'package:miru/pages/player/player_adjustment_hud.dart';
+import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
+import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/bean/widget/embedded_native_control_area.dart';
+import 'package:miru/pages/player/player_panel_hold.dart';
+import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/pages/video/video_controller.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/pages/player/player_controller.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/player/remote.dart';
-import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
-import 'package:kazumi/pages/settings/danmaku/danmaku_settings_sheet.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/services/player/remote.dart';
+import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:miru/pages/settings/danmaku/danmaku_settings_sheet.dart';
+import 'package:miru/utils/constants.dart';
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
-import 'package:kazumi/services/player/timed_shutdown_service.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/format.dart';
+import 'package:miru/services/player/timed_shutdown_service.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/format.dart';
 
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
@@ -212,7 +212,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
   void showSetSpeedSheet() {
     final double currentSpeed = playerController.playback.playerSpeed;
-    KazumiDialog.show(builder: (context) {
+    MiruDialog.show(builder: (context) {
       return AlertDialog(
         title: const Text('播放速度'),
         content: StatefulBuilder(
@@ -226,7 +226,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                   FilledButton(
                     onPressed: () async {
                       await widget.setPlaybackSpeed(i);
-                      KazumiDialog.dismiss();
+                      MiruDialog.dismiss();
                     },
                     child: Text(i.toString()),
                   )
@@ -234,7 +234,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                   FilledButton.tonal(
                     onPressed: () async {
                       await widget.setPlaybackSpeed(i);
-                      KazumiDialog.dismiss();
+                      MiruDialog.dismiss();
                     },
                     child: Text(i.toString()),
                   ),
@@ -244,7 +244,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         }),
         actions: <Widget>[
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -253,7 +253,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           TextButton(
             onPressed: () async {
               await widget.setPlaybackSpeed(1.0);
-              KazumiDialog.dismiss();
+              MiruDialog.dismiss();
             },
             child: const Text('默认速度'),
           ),
@@ -263,7 +263,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   }
 
   void showForwardChange() {
-    KazumiDialog.show(builder: (context) {
+    MiruDialog.show(builder: (context) {
       String input = "";
       return AlertDialog(
         title: const Text('跳过秒数'),
@@ -284,7 +284,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         }),
         actions: <Widget>[
           TextButton(
-            onPressed: () => KazumiDialog.dismiss(),
+            onPressed: () => MiruDialog.dismiss(),
             child: Text(
               '取消',
               style: TextStyle(color: Theme.of(context).colorScheme.outline),
@@ -294,9 +294,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             onPressed: () async {
               if (input != "") {
                 playerController.setButtonForwardTime(int.parse(input));
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               } else {
-                KazumiDialog.dismiss();
+                MiruDialog.dismiss();
               }
             },
             child: const Text('确定'),
@@ -433,34 +433,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       ? playerController.panel.showVideoController
                       : true),
               child: widget.disableAnimations
-                  ? Container(
-                      height: 50,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black45,
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    )
+                  ? _topControlScrim()
                   : SlideTransition(
                       position: topOffsetAnimation,
-                      child: Container(
-                        height: 50,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.black45,
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
+                      child: _topControlScrim(),
                     ),
             );
           }),
@@ -477,34 +453,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       ? playerController.panel.showVideoController
                       : true),
               child: widget.disableAnimations
-                  ? Container(
-                      height: 100,
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black45,
-                          ],
-                        ),
-                      ),
-                    )
+                  ? _bottomControlScrim()
                   : SlideTransition(
                       position: bottomOffsetAnimation,
-                      child: Container(
-                        height: 100,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black45,
-                            ],
-                          ),
-                        ),
-                      ),
+                      child: _bottomControlScrim(),
                     ),
             );
           }),
@@ -1013,7 +965,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     final bool supported =
                         await PipUtils.isAndroidPIPSupported();
                     if (!supported) {
-                      KazumiDialog.showToast(message: '当前设备不支持画中画');
+                      MiruDialog.showToast(message: '当前设备不支持画中画');
                       return;
                     }
                     await PipUtils.updateAndroidPIPActions(
@@ -1027,7 +979,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       height: playerController.debug.playerHeight,
                     );
                     if (!entered) {
-                      KazumiDialog.showToast(message: '进入画中画失败');
+                      MiruDialog.showToast(message: '进入画中画失败');
                     }
                   },
                   tooltip: '画中画',
@@ -1150,7 +1102,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                           onPressed: () {
                             TimedShutdownService().start(minutes,
                                 onExpired: widget.pauseForTimedShutdown);
-                            KazumiDialog.showToast(
+                            MiruDialog.showToast(
                                 message:
                                     '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭');
                           },
@@ -1264,6 +1216,60 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           ),
           const Spacer(),
         ],
+      ),
+    );
+  }
+
+  /// 顶部控制条衬底：暗色玻璃渐变 + 底缘发丝高光。
+  ///
+  /// 播放器 HUD 禁用 BackdropFilter —— Impeller 下每帧都要对整幅
+  /// 视频纹理做高斯采样，低端机直接掉帧。这里用「多段透明度衰减 +
+  /// 细描边」模拟毛玻璃的化开感与立体层次，零采样开销。
+  Widget _topControlScrim() {
+    return Container(
+      height: 50,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: const [
+            Color(0xCC000000),
+            Color(0x55000000),
+            Colors.transparent,
+          ],
+          stops: const [0.0, 0.55, 1.0],
+        ),
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.white.withValues(alpha: 0.08),
+            width: 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 底部控制条衬底：与顶部对称，顶缘发丝高光。
+  Widget _bottomControlScrim() {
+    return Container(
+      height: 100,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: const [
+            Colors.transparent,
+            Color(0x55000000),
+            Color(0xCC000000),
+          ],
+          stops: const [0.0, 0.45, 1.0],
+        ),
+        border: Border(
+          top: BorderSide(
+            color: Colors.white.withValues(alpha: 0.08),
+            width: 0.5,
+          ),
+        ),
       ),
     );
   }

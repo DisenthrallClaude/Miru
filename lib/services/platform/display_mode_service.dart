@@ -2,15 +2,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/platform/platform_environment_service.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/platform/platform_environment_service.dart';
+import 'package:miru/utils/device.dart';
 import 'package:window_manager/window_manager.dart';
 
 class DisplayModeService {
   DisplayModeService._();
 
-  static const _intentChannel = MethodChannel('com.predidit.kazumi/intent');
+  static const _intentChannel = MethodChannel('io.github.disenthrallclaude.miru/intent');
 
   static Future<void> enterFullScreen({bool lockOrientation = true}) async {
     if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
@@ -52,7 +52,7 @@ class DisplayModeService {
         }
       }
     } catch (exception, stacktrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'Display: failed to exit full screen',
         error: exception,
         stackTrace: stacktrace,
@@ -74,7 +74,7 @@ class DisplayModeService {
         );
       }
     } catch (exception, stacktrace) {
-      KazumiLogger().e(
+      MiruLogger().e(
         'Display: failed to enter landscape mode',
         error: exception,
         stackTrace: stacktrace,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/utils/theme.dart';
 
 /// 玻璃强度。
 ///

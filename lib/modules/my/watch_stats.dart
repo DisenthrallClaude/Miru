@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart' show mapEquals;
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/modules/history/history_module.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/modules/collect/collect_module.dart';
+import 'package:miru/modules/collect/collect_type.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/modules/history/history_module.dart';
 
 /// Device-local viewing stats, derived from history, collect and download data.
 class WatchStats {

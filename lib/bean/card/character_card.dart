@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/widget/bangumi_avatar.dart';
-import 'package:kazumi/modules/characters/character_item.dart';
-import 'package:kazumi/pages/info/character_page.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/widget/bangumi_avatar.dart';
+import 'package:miru/modules/characters/character_item.dart';
+import 'package:miru/pages/info/character_page.dart';
 
 class CharacterCard extends StatelessWidget {
   const CharacterCard({

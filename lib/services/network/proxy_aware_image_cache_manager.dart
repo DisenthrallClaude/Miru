@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/services/network/bangumi_image_url_rewriter.dart';
-import 'package:kazumi/services/network/proxy_utils.dart';
-import 'package:kazumi/services/network/system_proxy_service.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/bangumi_image_url_rewriter.dart';
+import 'package:miru/services/network/proxy_utils.dart';
+import 'package:miru/services/network/system_proxy_service.dart';
+import 'package:miru/services/storage/storage.dart';
 
 class ProxyAwareImageCacheManager extends CacheManager with ImageCacheManager {
   static final ProxyAwareImageCacheManager instance =
@@ -71,7 +71,7 @@ class _ProxyAwareImageFileService extends FileService {
     final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
     final parsed = ProxyUtils.parseProxyUrl(proxyUrl);
     if (parsed == null) {
-      KazumiLogger().w('Proxy: 图片缓存代理地址格式错误或为空');
+      MiruLogger().w('Proxy: 图片缓存代理地址格式错误或为空');
     }
     return parsed;
   }

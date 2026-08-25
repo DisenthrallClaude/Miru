@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/request/config/featured_bangumi.dart';
+import 'package:miru/request/config/featured_bangumi.dart';
 
 void main() {
   group('置顶国漫清单', () {

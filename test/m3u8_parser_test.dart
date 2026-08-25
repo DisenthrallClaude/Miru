@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kazumi/utils/m3u8_parser.dart';
+import 'package:miru/utils/m3u8_parser.dart';
 
 void main() {
   group('M3U8 Parser', () {

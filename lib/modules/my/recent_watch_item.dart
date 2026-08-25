@@ -1,4 +1,4 @@
-import 'package:kazumi/modules/history/history_module.dart';
+import 'package:miru/modules/history/history_module.dart';
 
 /// Display snapshot for a continue-watching card.
 ///

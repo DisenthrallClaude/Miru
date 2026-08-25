@@ -2,31 +2,31 @@ import 'dart:async';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:kazumi/pages/player/player_controller.dart';
-import 'package:kazumi/pages/video/video_controller.dart';
-import 'package:kazumi/pages/video/danmaku_send_sheet.dart';
-import 'package:kazumi/pages/video/video_playback_args.dart';
-import 'package:kazumi/pages/history/history_controller.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/pages/player/player_item.dart';
+import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/pages/video/video_controller.dart';
+import 'package:miru/pages/video/danmaku_send_sheet.dart';
+import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/pages/player/player_item.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/player/pip_utils.dart';
-import 'package:kazumi/bean/appbar/drag_to_move_bar.dart' as dtb;
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
 import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
-import 'package:kazumi/pages/player/episode_comments_sheet.dart';
+import 'package:miru/pages/player/episode_comments_sheet.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
-import 'package:kazumi/pages/download/download_controller.dart';
-import 'package:kazumi/pages/download/download_episode_sheet.dart';
-import 'package:kazumi/modules/download/download_module.dart';
-import 'package:kazumi/services/player/timed_shutdown_service.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/services/platform/display_mode_service.dart';
+import 'package:miru/bean/widget/embedded_native_control_area.dart';
+import 'package:miru/pages/download/download_controller.dart';
+import 'package:miru/pages/download/download_episode_sheet.dart';
+import 'package:miru/modules/download/download_module.dart';
+import 'package:miru/services/player/timed_shutdown_service.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/services/platform/display_mode_service.dart';
 
 class VideoPage extends StatefulWidget {
   const VideoPage({
@@ -403,8 +403,8 @@ class _VideoPageState extends State<VideoPage>
   }
 
   void onBackPressed(BuildContext context) async {
-    if (KazumiDialog.observer.hasKazumiDialog) {
-      KazumiDialog.dismiss();
+    if (MiruDialog.observer.hasMiruDialog) {
+      MiruDialog.dismiss();
       return;
     }
     if (videoPageController.isPip && isDesktop()) {
@@ -443,16 +443,16 @@ class _VideoPageState extends State<VideoPage>
   bool sendDanmaku(String msg) {
     keyboardFocus.requestFocus();
     if (playerController.danmaku.danDanmakus.isEmpty) {
-      KazumiDialog.showToast(
+      MiruDialog.showToast(
         message: '当前剧集不支持弹幕发送的说',
       );
       return false;
     }
     if (msg.isEmpty) {
-      KazumiDialog.showToast(message: '弹幕内容为空');
+      MiruDialog.showToast(message: '弹幕内容为空');
       return false;
     } else if (msg.length > 100) {
-      KazumiDialog.showToast(message: '弹幕内容过长');
+      MiruDialog.showToast(message: '弹幕内容过长');
       return false;
     }
 
@@ -460,7 +460,7 @@ class _VideoPageState extends State<VideoPage>
 
     if (destination == DanmakuDestination.chatRoom) {
       if (playerController.syncplay.syncplayRoom.isEmpty) {
-        KazumiDialog.showToast(message: '你还没有加入一起看，无法发送聊天室弹幕');
+        MiruDialog.showToast(message: '你还没有加入一起看，无法发送聊天室弹幕');
         return false;
       }
 
@@ -500,7 +500,7 @@ class _VideoPageState extends State<VideoPage>
 
   Future<bool> showDanmakuDestinationPickerAndSend(String msg) async {
     if (msg.trim().isEmpty) {
-      KazumiDialog.showToast(message: '弹幕内容为空');
+      MiruDialog.showToast(message: '弹幕内容为空');
       return false;
     }
 
@@ -1007,7 +1007,7 @@ class _VideoPageState extends State<VideoPage>
                             visibleRoad) {
                       return;
                     }
-                    KazumiLogger()
+                    MiruLogger()
                         .i('VideoPageController: video URL is $urlItem');
                     _closeTabBodyAnimated();
                     changeEpisode(count0, currentRoad: visibleRoad);
@@ -1139,9 +1139,9 @@ class _VideoPageState extends State<VideoPage>
                         if (danmakuOn && !videoPageController.loading) {
                           showMobileDanmakuInput();
                         } else if (videoPageController.loading) {
-                          KazumiDialog.showToast(message: '请等待视频加载完成');
+                          MiruDialog.showToast(message: '请等待视频加载完成');
                         } else {
-                          KazumiDialog.showToast(message: '请先打开弹幕');
+                          MiruDialog.showToast(message: '请先打开弹幕');
                         }
                       },
                       child: Row(

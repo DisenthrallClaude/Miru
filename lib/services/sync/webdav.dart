@@ -1,18 +1,22 @@
 import 'dart:io';
 import 'package:webdav_client/webdav_client.dart' as webdav;
 import 'package:path_provider/path_provider.dart';
-import 'package:kazumi/modules/history/history_sync.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/modules/collect/collect_module.dart';
-import 'package:kazumi/modules/collect/collect_change_module.dart';
-import 'package:kazumi/services/sync/history_sync_service.dart';
-import 'package:kazumi/services/sync/webdav_remote_file_commit.dart';
-import 'package:kazumi/utils/async_serial_queue.dart';
-import 'package:kazumi/utils/async_single_flight.dart';
+import 'package:miru/modules/history/history_sync.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/storage/secure_field_codec.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/modules/collect/collect_module.dart';
+import 'package:miru/modules/collect/collect_change_module.dart';
+import 'package:miru/services/sync/history_sync_service.dart';
+import 'package:miru/services/sync/webdav_remote_file_commit.dart';
+import 'package:miru/utils/async_serial_queue.dart';
+import 'package:miru/utils/async_single_flight.dart';
 
 class WebDav {
-  static const String _syncRootPath = '/kazumiSync';
+  static const String _syncRootPath = '/miruSync';
+  /// 旧上游时代的同步根目录。仅用于一次性迁移：
+  /// 老用户网盘里的历史数据不能因为改名而「丢失」。
+  static const String _legacySyncRootPath = '/kazumiSync';
   static const String _historyRootPath = '$_syncRootPath/history';
   static const String _historyChangesPath = '$_historyRootPath/changes';
   static const String _historySnapshotPath = '$_historyRootPath/snapshot.json';
@@ -43,7 +47,14 @@ class WebDav {
     webDavLocalTempDirectory = Directory('${directory.path}/webdavTemp');
     webDavURL = GStorage.getSetting(SettingsKeys.webDavURL);
     webDavUsername = GStorage.getSetting(SettingsKeys.webDavUsername);
-    webDavPassword = GStorage.getSetting(SettingsKeys.webDavPassword);
+    // 密码以 Keystore 密文落盘，这里先解密再交给客户端；
+    // 解密失败说明密钥已丢失，必须让用户重新配置而不是拿密文去认证。
+    final storedPassword = GStorage.getSetting(SettingsKeys.webDavPassword);
+    final password = await SecureFieldCodec.decrypt(storedPassword);
+    if (password == null) {
+      throw Exception('WebDAV 密码无法解密（密钥可能已被系统清除），请重新保存 WebDAV 配置');
+    }
+    webDavPassword = password;
     if (webDavURL.isEmpty) {
       throw Exception('请先填写WebDAV URL');
     }
@@ -58,12 +69,57 @@ class WebDav {
     try {
       await client.ping();
       await _ensureRemoteDirectory(_syncRootPath);
+      await _migrateLegacySyncDirectory();
       await _ensureLocalTempDirectory();
       initialized = true;
-      KazumiLogger().i('WebDav: webDav backup directory ready');
+      MiruLogger().i('WebDav: webDav backup directory ready');
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDAV ping failed', error: e);
+      MiruLogger().e('WebDav: WebDAV ping failed', error: e);
       rethrow;
+    }
+  }
+
+  /// 旧上游目录的一次性迁移：/kazumiSync → /miruSync。
+  ///
+  /// 仅当旧目录存在且新目录还没有历史数据时执行；
+  /// 迁移失败不阻塞同步（用户仍可从零开始），只记录日志。
+  Future<void> _migrateLegacySyncDirectory() async {
+    try {
+      if (!await _remoteEntryExists('$_legacySyncRootPath/history')) {
+        return;
+      }
+      if (await _remoteEntryExists(_historyRootPath)) {
+        // 新目录已有数据：以新目录为准，避免覆盖用户在 Miru 里的新进度。
+        return;
+      }
+      final legacyHistory =
+          '$_legacySyncRootPath/history'.replaceAll('//', '/');
+      final entries = await client.readDir(legacyHistory);
+      for (final entry in entries) {
+        final srcPath = entry.path ?? '';
+        if (srcPath.isEmpty) continue;
+        final name = srcPath.split('/').where((s) => s.isNotEmpty).last;
+        final target = '$_historyRootPath/$name';
+        if (entry.isDir ?? false) {
+          await _ensureRemoteDirectory(target);
+          final subEntries = await client.readDir(srcPath);
+          for (final sub in subEntries) {
+            final subPath = sub.path ?? '';
+            if (subPath.isEmpty) continue;
+            final subName =
+                subPath.split('/').where((s) => s.isNotEmpty).last;
+            await client.copy(subPath, '$target/$subName', true);
+          }
+        } else {
+          await client.copy(srcPath, target, true);
+        }
+      }
+      MiruLogger().i(
+          'WebDav: migrated legacy sync data from $_legacySyncRootPath to $_syncRootPath');
+    } catch (e) {
+      // 迁移是尽力而为：网盘不支持 copy 等情况不应挡住正常同步。
+      MiruLogger().w('WebDav: legacy sync directory migration skipped',
+          error: e);
     }
   }
 
@@ -92,7 +148,7 @@ class WebDav {
       try {
         await _runWebDavExclusive(_syncHistory);
       } catch (e) {
-        KazumiLogger().e('WebDav: history sync failed', error: e);
+        MiruLogger().e('WebDav: history sync failed', error: e);
         rethrow;
       }
     });
@@ -107,7 +163,7 @@ class WebDav {
         }
       });
     } catch (e) {
-      KazumiLogger().e('WebDav: update collectibles failed', error: e);
+      MiruLogger().e('WebDav: update collectibles failed', error: e);
       rethrow;
     }
   }
@@ -145,13 +201,13 @@ class WebDav {
     List<Future<void>> downloadFutures = [];
     if (collectiblesExists) {
       downloadFutures.add(_downloadBox('collectibles').catchError((e) {
-        KazumiLogger().e('WebDav: download collectibles failed', error: e);
+        MiruLogger().e('WebDav: download collectibles failed', error: e);
         throw Exception('WebDav: download collectibles failed');
       }));
     }
     if (changesExists) {
       downloadFutures.add(_downloadBox('collectchanges').catchError((e) {
-        KazumiLogger().e('WebDav: download collectchanges failed', error: e);
+        MiruLogger().e('WebDav: download collectchanges failed', error: e);
         throw Exception('WebDav: download collectchanges failed');
       }));
     }
@@ -168,7 +224,7 @@ class WebDav {
             '${webDavLocalTempDirectory.path}/collectchanges.tmp');
       }
     } catch (e) {
-      KazumiLogger().e('WebDav: get collectibles failed', error: e);
+      MiruLogger().e('WebDav: get collectibles failed', error: e);
       throw Exception('WebDav: get collectibles from file failed');
     }
     if (remoteChanges.isNotEmpty || remoteCollectibles.isNotEmpty) {
@@ -266,7 +322,7 @@ class WebDav {
           await runDirectory.delete(recursive: true);
         }
       } catch (e) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'WebDav: failed to clean history sync temp directory',
           error: e,
         );
@@ -299,7 +355,7 @@ class WebDav {
         needsRepair: false,
       );
     } catch (e, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: invalid history snapshot, rebuilding from event logs',
         error: e,
         stackTrace: stackTrace,
@@ -325,7 +381,7 @@ class WebDav {
       eventFiles: eventFiles.map((eventFile) => eventFile.localFile),
       onInvalidFile: (file, error, stackTrace) async {
         final remoteName = eventFilesByPath[file.path]!;
-        KazumiLogger().w(
+        MiruLogger().w(
           'WebDav: invalid remote history event log $remoteName, skipping',
           error: error,
           stackTrace: stackTrace,
@@ -354,13 +410,13 @@ class WebDav {
       }
       try {
         final stat = await entity.stat();
-        // A recent directory may belong to another running Kazumi process.
+        // A recent directory may belong to another running Miru process.
         if (stat.modified.isAfter(staleBefore)) {
           continue;
         }
         await entity.delete(recursive: true);
       } catch (e) {
-        KazumiLogger().w(
+        MiruLogger().w(
           'WebDav: failed to remove stale history sync directory $name',
           error: e,
         );
@@ -467,7 +523,7 @@ class WebDav {
     try {
       await client.remove(remotePath);
     } catch (e) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: failed to remove checkpointed device history log',
         error: e,
       );
@@ -536,7 +592,7 @@ class WebDav {
     try {
       await client.read2File('$_syncRootPath/$fileName', existingFile.path);
     } catch (e, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: failed to download legacy history backup, skipping import',
         error: e,
         stackTrace: stackTrace,
@@ -546,10 +602,10 @@ class WebDav {
 
     try {
       await GStorage.patchHistory(existingFile.path);
-      KazumiLogger().i('WebDav: imported legacy history backup');
+      MiruLogger().i('WebDav: imported legacy history backup');
       return true;
     } catch (e, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: invalid legacy history backup, skipping import',
         error: e,
         stackTrace: stackTrace,
@@ -580,11 +636,11 @@ class WebDav {
         quarantinePath,
         false,
       );
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: moved invalid $description to $quarantinePath',
       );
     } catch (e, stackTrace) {
-      KazumiLogger().w(
+      MiruLogger().w(
         'WebDav: failed to quarantine invalid $description',
         error: e,
         stackTrace: stackTrace,
@@ -596,7 +652,7 @@ class WebDav {
     try {
       await client.ping();
     } catch (e) {
-      KazumiLogger().e('WebDav: WebDav ping failed', error: e);
+      MiruLogger().e('WebDav: WebDav ping failed', error: e);
       rethrow;
     }
   }

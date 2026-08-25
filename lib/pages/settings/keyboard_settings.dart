@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/bean/settings/settings_detail_scaffold.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 
 /// Display group for the shortcut list. Functions missing from every group
 /// fall back to a trailing "其他" group so new shortcuts never disappear.
@@ -129,7 +129,7 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
         if (otherFunc == func && i == index) continue;
         if (otherKeys[i] == rawKey) {
           final name = shortcutsChineseName[otherFunc] ?? otherFunc;
-          KazumiDialog.showToast(message: "按键已被【$name】占用，请重新输入");
+          MiruDialog.showToast(message: "按键已被【$name】占用，请重新输入");
           return true;
         }
       }
@@ -191,7 +191,7 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
         GStorage.putStringListSettingByName('shortcut_$func', shortcuts[func]!);
       }
     });
-    KazumiDialog.showToast(message: '已恢复默认快捷键');
+    MiruDialog.showToast(message: '已恢复默认快捷键');
   }
 
   List<_ShortcutGroup> get displayGroups {

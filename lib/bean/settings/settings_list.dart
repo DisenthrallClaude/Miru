@@ -1,5 +1,5 @@
-import 'package:kazumi/bean/widget/glass.dart';
-import 'package:kazumi/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/glass.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
 import 'package:flutter/material.dart';
 
 enum _TileKind { plain, toggle, radio }
@@ -150,6 +150,8 @@ class _SplitRowState extends State<_SplitRow> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isLight = theme.brightness == Brightness.light;
     final outer = widget.outerRadius;
     final top = widget.first || _pressed ? outer : _innerRadius;
     final bottom = widget.last || _pressed ? outer : _innerRadius;
@@ -159,11 +161,7 @@ class _SplitRowState extends State<_SplitRow> {
     );
 
     final row = Material(
-      // Material animates its own shape, so the morph needs no controller.
-      // 按下时底色让位给上方的玻璃罩
-      color: _pressed
-          ? Colors.transparent
-          : Theme.of(context).colorScheme.surfaceContainerLow,
+      color: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: radius),
       clipBehavior: Clip.antiAlias,
       child: _SplitRowScope(
@@ -172,13 +170,39 @@ class _SplitRowState extends State<_SplitRow> {
       ),
     );
 
-    if (!_pressed) return row;
-
-    // 选中/按下的行盖一层液态玻璃罩。
-    // 只在这一行、只在按下时创建 BackdropFilter——
-    // 若给每一行常驻玻璃，长设置列表会有几十个 BackdropFilter，GPU 扛不住。
-    return FrostedSurface(
-      borderRadius: radius,
+    // 静态行用「轻玻璃」：半透明底 + 斜向高光 + 发丝描边，
+    // 玻璃质感常驻可见且零 GPU 开销；按下时才升级为真实液态玻璃罩
+    // （BackdropFilter）提供纵深反馈——常驻重玻璃会让长列表帧率崩掉。
+    if (_pressed) {
+      return FrostedSurface(
+        borderRadius: radius,
+        child: row,
+      );
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        // 白度刻意压低：源卡片列表会在同一块玻璃底上叠十几张卡，
+        // 白度一高整片就糊成白色，玻璃的通透感反而没了。
+        color: isLight
+            ? Colors.white.withValues(alpha: 0.30)
+            : Colors.white.withValues(alpha: 0.05),
+        border: Border.all(
+          color: isLight
+              ? Colors.black.withValues(alpha: 0.07)
+              : Colors.white.withValues(alpha: 0.18),
+          width: 0.6,
+        ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: isLight ? 0.32 : 0.10),
+            Colors.white.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.72],
+        ),
+      ),
       child: row,
     );
   }

@@ -4,15 +4,15 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
-import 'package:kazumi/services/storage/storage.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:tray_manager/tray_manager.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/settings/theme_provider.dart';
-import 'package:kazumi/navigation.dart';
-import 'package:kazumi/utils/device.dart';
-import 'package:kazumi/utils/theme.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/settings/theme_provider.dart';
+import 'package:miru/navigation.dart';
+import 'package:miru/utils/device.dart';
+import 'package:miru/utils/theme.dart';
 
 class AppWidget extends StatefulWidget {
   const AppWidget({super.key});
@@ -64,7 +64,7 @@ class _AppWidgetState extends State<AppWidget>
       );
       await FlutterDisplayMode.setPreferredMode(preferred);
     } catch (e) {
-      KazumiLogger().e('DisPlay: set preferred mode failed', error: e);
+      MiruLogger().e('DisPlay: set preferred mode failed', error: e);
     }
   }
 
@@ -140,7 +140,7 @@ class _AppWidgetState extends State<AppWidget>
     Color? color,
     ColorScheme? colorScheme,
   }) {
-    return buildKazumiTheme(
+    return buildMiruTheme(
       brightness: brightness,
       fontFamily: fontFamily,
       seedColor: color,
@@ -157,7 +157,7 @@ class _AppWidgetState extends State<AppWidget>
 
     _lastTitleBarBrightness = brightness;
     windowManager.setBrightness(brightness).catchError((e) {
-      KazumiLogger().w('Window: set title bar brightness failed', error: e);
+      MiruLogger().w('Window: set title bar brightness failed', error: e);
     });
   }
 
@@ -191,13 +191,13 @@ class _AppWidgetState extends State<AppWidget>
       case 0:
         exit(0);
       case 1:
-        KazumiDialog.dismiss();
+        MiruDialog.dismiss();
         windowManager.hide();
         break;
       default:
         if (showingExitDialog) return;
         showingExitDialog = true;
-        KazumiDialog.show(onDismiss: () {
+        MiruDialog.show(onDismiss: () {
           showingExitDialog = false;
         }, builder: (context) {
           bool saveExitBehavior = false; // 下次不再询问？
@@ -241,12 +241,12 @@ class _AppWidgetState extends State<AppWidget>
                     if (saveExitBehavior) {
                       await GStorage.putSetting(SettingsKeys.exitBehavior, 1);
                     }
-                    KazumiDialog.dismiss();
+                    MiruDialog.dismiss();
                     windowManager.hide();
                   },
                   child: const Text('最小化至托盘')),
               const TextButton(
-                  onPressed: KazumiDialog.dismiss, child: Text('取消')),
+                  onPressed: MiruDialog.dismiss, child: Text('取消')),
             ],
           );
         });
@@ -260,13 +260,13 @@ class _AppWidgetState extends State<AppWidget>
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused) {
-      KazumiLogger()
+      MiruLogger()
           .i("AppLifecycleState.paused: Application moved to background");
     } else if (state == AppLifecycleState.resumed) {
-      KazumiLogger()
+      MiruLogger()
           .i("AppLifecycleState.resumed: Application moved to foreground");
     } else if (state == AppLifecycleState.inactive) {
-      KazumiLogger().i("AppLifecycleState.inactive: Application is inactive");
+      MiruLogger().i("AppLifecycleState.inactive: Application is inactive");
     }
   }
 
@@ -274,7 +274,7 @@ class _AppWidgetState extends State<AppWidget>
   Future<void> didChangePlatformBrightness() async {
     super.didChangePlatformBrightness();
     final ThemeProvider themeProvider = context.read<ThemeProvider>();
-    KazumiLogger().i(
+    MiruLogger().i(
         "Platform brightness changed, themeMode: ${themeProvider.themeMode}");
 
     _syncWindowsTitleBarBrightness(themeProvider);
@@ -285,7 +285,9 @@ class _AppWidgetState extends State<AppWidget>
       await trayManager.setIcon('assets/images/logo/logo_lanczos.ico');
     } else if (Platform.environment.containsKey('FLATPAK_ID') ||
         Platform.environment.containsKey('SNAP')) {
-      await trayManager.setIcon('io.github.Predidit.Kazumi');
+      // Linux 打包环境使用桌面文件名定位图标，与 linux/ 目录下的
+      // .desktop 条目保持一致（Miru 独立命名空间）。
+      await trayManager.setIcon('io.github.disenthrallclaude.miru');
     } else {
       await trayManager.setIcon('assets/images/logo/logo_rounded.png');
     }

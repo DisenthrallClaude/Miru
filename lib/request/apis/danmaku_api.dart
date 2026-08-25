@@ -1,10 +1,10 @@
-import 'package:kazumi/request/config/api_endpoints.dart';
-import 'package:kazumi/request/clients/danmaku_client.dart';
-import 'package:kazumi/services/logging/logger.dart';
-import 'package:kazumi/modules/danmaku/danmaku_module.dart';
-import 'package:kazumi/modules/danmaku/danmaku_search_response.dart';
-import 'package:kazumi/modules/danmaku/danmaku_episode_response.dart';
-import 'package:kazumi/utils/string_similarity.dart';
+import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/request/clients/danmaku_client.dart';
+import 'package:miru/services/logging/logger.dart';
+import 'package:miru/modules/danmaku/danmaku_module.dart';
+import 'package:miru/modules/danmaku/danmaku_search_response.dart';
+import 'package:miru/modules/danmaku/danmaku_episode_response.dart';
+import 'package:miru/utils/string_similarity.dart';
 
 class DanmakuApi {
   static final DanmakuClient _client = DanmakuClient.instance;
@@ -37,14 +37,14 @@ class DanmakuApi {
       String animeTitle = anime.animeTitle;
       double similarity = calculateSimilarity(animeTitle, title);
       if (similarity == 1) {
-        KazumiLogger().i('Danmaku: total match $title');
+        MiruLogger().i('Danmaku: total match $title');
         return animeId;
       }
 
       if (similarity > maxSimilarity) {
         maxSimilarity = similarity;
         bestAnimeId = animeId;
-        KazumiLogger().i(
+        MiruLogger().i(
             'Danmaku: match anime danmaku $title --- $animeTitle similarity: $similarity');
       }
     }
@@ -104,7 +104,7 @@ class DanmakuApi {
     Map<String, String> withRelated = {
       'withRelated': 'true',
     };
-    KazumiLogger().i("Danmaku: final request URL $endPoint");
+    MiruLogger().i("Danmaku: final request URL $endPoint");
     final jsonData = await _client.get(endPoint, queryParameters: withRelated);
     List<dynamic> comments = jsonData['comments'];
 

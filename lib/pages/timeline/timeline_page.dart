@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/pages/timeline/timeline_controller.dart';
-import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/bean/card/bangumi_timeline_card.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/theme.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/bean/appbar/sys_app_bar.dart';
-import 'package:kazumi/bean/widget/liquid_glass_tab_bar.dart';
-import 'package:kazumi/utils/anime_season.dart';
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/bean/widget/bangumi_mirror_error_widget.dart';
-import 'package:kazumi/utils/device.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/timeline/timeline_controller.dart';
+import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/bean/card/bangumi_timeline_card.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/theme.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/liquid_glass_tab_bar.dart';
+import 'package:miru/utils/anime_season.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/bangumi_mirror_error_widget.dart';
+import 'package:miru/utils/device.dart';
 
 class TimelinePage extends StatefulWidget {
   const TimelinePage({
@@ -156,7 +156,7 @@ class _TimelinePageState extends State<TimelinePage>
       }
     }
 
-    KazumiDialog.showBottomSheet(
+    MiruDialog.showBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
@@ -206,7 +206,7 @@ class _TimelinePageState extends State<TimelinePage>
     return MaterialBottomSheetHeader(
       title: '时间机器',
       description: '按季度回到任意放送季，时间线会立即切换。',
-      onClose: KazumiDialog.dismiss,
+      onClose: MiruDialog.dismiss,
       footer: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
@@ -300,7 +300,7 @@ class _TimelinePageState extends State<TimelinePage>
             if (!selected) {
               return;
             }
-            KazumiDialog.dismiss();
+            MiruDialog.dismiss();
             onSeasonSelected(date);
           },
           showCheckmark: false,
@@ -423,7 +423,7 @@ class _TimelinePageState extends State<TimelinePage>
     return MaterialBottomSheetHeader(
       title: '时间线选项',
       description: '调整排序和过滤条件，结果会立即应用到当前时间线。',
-      onClose: KazumiDialog.dismiss,
+      onClose: MiruDialog.dismiss,
       footer: Observer(
         builder: (context) {
           final enabledFilterCount = getEnabledTimelineFilterCount();
@@ -508,7 +508,7 @@ class _TimelinePageState extends State<TimelinePage>
               : colorScheme.onSurfaceVariant,
         ),
         onTap: () {
-          KazumiDialog.dismiss();
+          MiruDialog.dismiss();
           timelineController.changeSortType(sortType);
         },
       ),
@@ -687,7 +687,7 @@ class _TimelinePageState extends State<TimelinePage>
             tooltip: '排序与筛选',
             icon: const Icon(Icons.tune_rounded),
             onPressed: () {
-              KazumiDialog.showBottomSheet(
+              MiruDialog.showBottomSheet(
                 isScrollControlled: true,
                 constraints: buildTimelineBottomSheetConstraints(
                   context,

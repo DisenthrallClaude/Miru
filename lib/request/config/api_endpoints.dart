@@ -8,34 +8,29 @@ class ApiEndpoints {
   static const int apiLevel = 8;
 
   /// 项目主页
-  static const String projectUrl = "https://kazumi.app/";
+  static const String projectUrl = "https://github.com/DisenthrallClaude/Miru";
 
   /// 本项目（Miru）的代码仓库
   static const String sourceUrl = "https://github.com/DisenthrallClaude/Miru";
 
-  /// 上游原项目仓库（Kazumi）
-  static const String upstreamSourceUrl = "https://github.com/Predidit/Kazumi";
+  /// 上游原项目仓库（Miru，仅作许可证归属说明）
+  static const String upstreamSourceUrl = "https://github.com/Predidit/Miru";
 
   /// 反馈邮箱
   static const String feedbackEmail = "zero100610@gmail.com";
 
-  /// 图标作者
-  static const String iconUrl = "https://www.pixiv.net/users/66219277";
-
-  /// 规则仓库
+  /// 规则仓库（MiruRules，与上游 MiruRules 完全独立的托管地址；
+  /// 常用动漫规则已内置进安装包，线上仓库不可达时不影响开箱使用）
   static const String pluginShop =
-      'https://raw.githubusercontent.com/Predidit/KazumiRules/main/';
+      'https://raw.githubusercontent.com/DisenthrallClaude/MiruRules/main/';
 
   /// 规则仓库镜像
   static const String pluginShopMirror =
-      'https://raw.gitcode.com/gh_mirrors/ka/KazumiRules/raw/main/';
+      'https://raw.gitcode.com/gh_mirrors/mi/MiruRules/raw/main/';
 
-  /// 在线升级
+  /// 在线升级（Miru 自己的 GitHub Releases）
   static const String latestApp =
-      'https://api.github.com/repos/Predidit/Kazumi/releases/latest';
-
-  /// Bangumi 镜像测试后端（需 KAZUMI_APPID/KEY 签名，自建包无法使用）
-  static const String bangumiMirrorDomain = 'https://api.kazumi.fyi';
+      'https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
   /// 社区公共反代：api.bgm.tv 的替身，无需鉴权
   static const String bangumiApiProxyDomain = 'https://bgmapi.anibt.net';
@@ -49,9 +44,11 @@ class ApiEndpoints {
   /// 想切回日番或改成其它产地，只改这一个常量即可。
   static const String bangumiRegionTag = '中国';
 
-  /// Kazumi 镜像后端应用更新
-  static const String latestAppMirror =
-      '$bangumiMirrorDomain/kazumi/v1/app/latest';
+  /// 应用更新镜像源。
+  ///
+  /// 上游的 `api.miru.fyi` 需要 KAZUMI_APPID/KEY 签名，自建包无法使用，
+  /// 因此 Miru 的镜像源直接复用 GitHub Releases 作为降级通道。
+  static const String latestAppMirror = latestApp;
 
   /// 弹弹官网
   static const String dandanIndex = 'https://www.dandanplay.com/';
@@ -65,8 +62,9 @@ class ApiEndpoints {
   /// Bangumi 鉴权 API
   static const String bangumiAuthAPIMirrorDomain = 'https://api.bgmapi.com';
 
-  /// Telegram 群组
-  static const String telegramGroup = 'https://t.me/kazumi_app';
+  /// 社区讨论区（GitHub Discussions，与上游 Telegram 群无关）
+  static const String telegramGroup =
+      'https://github.com/DisenthrallClaude/Miru/discussions';
 
   /// 番剧信息
   static const String bangumiInfoByID = '/v0/subjects/{0}';
@@ -105,14 +103,6 @@ class ApiEndpoints {
 
   /// 番剧趋势
   static const String bangumiTrendsNext = '/p1/trending/subjects';
-
-  /// Kazumi Bangumi 镜像缓存榜单
-  static const String bangumiMirrorPopularSubjects =
-      '/kazumi/v1/popular/subjects';
-
-  /// Kazumi Bangumi 镜像季节时间表
-  static const String bangumiMirrorSeasonCalendar =
-      '/kazumi/v1/calendar/season';
 
   /// 番剧信息
   static const String bangumiInfoByIDNext = '/p1/subjects/{0}';

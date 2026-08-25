@@ -1,4 +1,4 @@
-import 'package:kazumi/services/player/syncplay_endpoint.dart';
+import 'package:miru/services/player/syncplay_endpoint.dart';
 
 enum SettingGroup {
   player,
@@ -533,6 +533,12 @@ class SettingsKeys {
     false,
     group: SettingGroup.player,
   );
+  /// 视频源解析超时（秒）。超时后会自动换用另一种解析器重试一次。
+  static const parseTimeout = SettingKey<int>(
+    'parseTimeout',
+    15,
+    group: SettingGroup.player,
+  );
 
   static final List<SettingKey<Object?>> all = [
     hAenable,
@@ -632,6 +638,7 @@ class SettingsKeys {
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,
+    parseTimeout,
   ];
 
   static List<SettingKey<Object?>> byGroup(SettingGroup group) {

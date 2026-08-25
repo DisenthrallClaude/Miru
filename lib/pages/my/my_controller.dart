@@ -1,16 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show listEquals;
-import 'package:kazumi/bean/dialog/dialog_helper.dart';
-import 'package:kazumi/modules/my/recent_watch_item.dart';
-import 'package:kazumi/modules/my/watch_stats.dart';
-import 'package:kazumi/repositories/collect_crud_repository.dart';
-import 'package:kazumi/repositories/download_repository.dart';
-import 'package:kazumi/repositories/history_repository.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/modules/my/recent_watch_item.dart';
+import 'package:miru/modules/my/watch_stats.dart';
+import 'package:miru/repositories/collect_crud_repository.dart';
+import 'package:miru/repositories/download_repository.dart';
+import 'package:miru/repositories/history_repository.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:mobx/mobx.dart';
-import 'package:kazumi/services/storage/storage.dart';
-import 'package:kazumi/services/update/auto_updater.dart';
+import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/update/auto_updater.dart';
 
 part 'my_controller.g.dart';
 
@@ -110,7 +110,7 @@ abstract class _MyController with Store {
         try {
           if (RegExp(pattern).hasMatch(danmaku)) return true;
         } catch (_) {
-          KazumiLogger()
+          MiruLogger()
               .e('Danmaku: invalid danmaku shield regex pattern: $pattern');
           continue;
         }
@@ -128,15 +128,15 @@ abstract class _MyController with Store {
 
   void addShieldList(String item) {
     if (item.isEmpty) {
-      KazumiDialog.showToast(message: '请输入关键词');
+      MiruDialog.showToast(message: '请输入关键词');
       return;
     }
     if (item.length > 64) {
-      KazumiDialog.showToast(message: '关键词过长');
+      MiruDialog.showToast(message: '关键词过长');
       return;
     }
     if (shieldList.contains(item)) {
-      KazumiDialog.showToast(message: '已存在该关键词');
+      MiruDialog.showToast(message: '已存在该关键词');
       return;
     }
     shieldList.add(item);
@@ -162,9 +162,9 @@ abstract class _MyController with Store {
 
       return true;
     } catch (err) {
-      KazumiLogger().e('Update: check update failed', error: err);
+      MiruLogger().e('Update: check update failed', error: err);
       if (type == 'manual') {
-        KazumiDialog.showToast(message: '检查更新失败，请稍后重试');
+        MiruDialog.showToast(message: '检查更新失败，请稍后重试');
       }
       return false;
     }

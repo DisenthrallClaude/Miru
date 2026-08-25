@@ -113,10 +113,10 @@ jobs:
           --dart-define=KAZUMI_KEY=$KAZUMI_KEY
         shell: bash
       - name: Package android build output
-        run: cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk Kazumi_android_canary.apk
+        run: cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk Miru_android_canary.apk
         shell: bash
       - name: Upload android outputs
         uses: actions/upload-artifact@v4
         with:
           name: android_outputs
-          path: Kazumi_android_*.apk
+          path: Miru_android_*.apk

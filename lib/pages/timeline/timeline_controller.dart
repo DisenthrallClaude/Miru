@@ -1,10 +1,11 @@
-import 'package:kazumi/services/storage/feed_cache.dart';
-import 'package:kazumi/request/config/featured_bangumi.dart';
-import 'package:kazumi/modules/bangumi/bangumi_item.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/utils/anime_season.dart';
-import 'package:kazumi/repositories/collect_repository.dart';
-import 'package:kazumi/modules/collect/collect_type.dart';
+import 'package:miru/services/storage/feed_cache.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/request/config/featured_bangumi.dart';
+import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/utils/anime_season.dart';
+import 'package:miru/repositories/collect_repository.dart';
+import 'package:miru/modules/collect/collect_type.dart';
 import 'package:mobx/mobx.dart';
 
 part 'timeline_controller.g.dart';
@@ -69,7 +70,7 @@ abstract class _TimelineController with Store {
   @action
   /// 按季度拉取时间表。
   ///
-  /// 不再走需要签名的 mirror 独有接口（/kazumi/v1/calendar/season），
+  /// 不再走需要签名的 mirror 独有接口（/miru/v1/calendar/season），
   /// 统一使用官方搜索路径 —— 域名已由拦截器重写到公共反代。
   Future<void> getSchedulesBySeason({bool forceRefresh = false}) async {
     final season = AnimeSeason(selectedDate).toString();
@@ -95,15 +96,30 @@ abstract class _TimelineController with Store {
     const maxTime = 4;
     const limit = 20;
     var resBangumiCalendar = List.generate(7, (_) => <BangumiItem>[]);
-    for (time = 0; time < maxTime; time++) {
-      final offset = time * limit;
-      var newList = await BangumiApi.getCalendarBySearch(
-          AnimeSeason(selectedDate).toSeasonStartAndEnd(), limit, offset);
-      for (int i = 0; i < resBangumiCalendar.length; ++i) {
-        resBangumiCalendar[i].addAll(newList[i]);
+    try {
+      for (time = 0; time < maxTime; time++) {
+        final offset = time * limit;
+        var newList = await BangumiApi.getCalendarBySearch(
+            AnimeSeason(selectedDate).toSeasonStartAndEnd(), limit, offset);
+        for (int i = 0; i < resBangumiCalendar.length; ++i) {
+          resBangumiCalendar[i].addAll(newList[i]);
+        }
+        bangumiCalendar.clear();
+        bangumiCalendar.addAll(resBangumiCalendar);
       }
-      bangumiCalendar.clear();
-      bangumiCalendar.addAll(resBangumiCalendar);
+    } catch (e) {
+      isLoading = false;
+      // 联网失败时优先回落到上一季度的本地缓存，而不是渲染成空时间表。
+      if (FeedCache.hasCalendarFor(season)) {
+        bangumiCalendar.addAll(FeedCache.loadCalendar());
+        if (bangumiCalendar.any((innerList) => innerList.isNotEmpty)) {
+          changeSortType(sortType);
+          return;
+        }
+      }
+      isTimeOut = true;
+      MiruDialog.showToast(message: '时间表加载失败，请检查网络后重试');
+      return;
     }
     isLoading = false;
     if (bangumiCalendar.isEmpty) {

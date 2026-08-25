@@ -1,15 +1,15 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:kazumi/modules/character/character_full_item.dart';
-import 'package:kazumi/modules/comments/comment_item.dart';
-import 'package:kazumi/request/apis/bangumi_api.dart';
-import 'package:kazumi/bean/card/network_img_layer.dart';
-import 'package:kazumi/bean/card/user_comments_card.dart';
-import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
-import 'package:kazumi/bean/widget/error_widget.dart';
-import 'package:kazumi/bean/widget/image_preview.dart';
-import 'package:kazumi/utils/constants.dart';
+import 'package:miru/modules/character/character_full_item.dart';
+import 'package:miru/modules/comments/comment_item.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
+import 'package:miru/bean/card/network_img_layer.dart';
+import 'package:miru/bean/card/user_comments_card.dart';
+import 'package:miru/bean/dialog/material_bottom_sheet.dart';
+import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/bean/widget/image_preview.dart';
+import 'package:miru/utils/constants.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
 /// Concentric radii: the panel takes the sheet's 24 and insets by this, so the

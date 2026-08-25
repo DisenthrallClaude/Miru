@@ -1,8 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:kazumi/utils/constants.dart';
-import 'package:kazumi/utils/image_extension.dart';
-import 'package:kazumi/services/logging/logger.dart';
+import 'package:miru/utils/constants.dart';
+import 'package:miru/utils/image_extension.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class NetworkImgLayer extends StatelessWidget {
   const NetworkImgLayer({
@@ -154,7 +154,7 @@ class NetworkImgLayer extends StatelessWidget {
               color: color,
               colorBlendMode: colorBlendMode,
               errorListener: (e) {
-                KazumiLogger()
+                MiruLogger()
                     .w("NetworkImage: network image load error", error: e);
               },
               errorWidget: (BuildContext context, String url, Object error) =>
