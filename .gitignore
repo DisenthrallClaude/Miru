@@ -54,3 +54,7 @@ android/build/reports/problems/
 **/macos/Pods/
 **/ios/Podfile.lock
 **/macos/Podfile.lock
+
+# 构建产物不入库
+*.apk
+*.aab
