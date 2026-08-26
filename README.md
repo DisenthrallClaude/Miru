@@ -10,7 +10,7 @@
 <img src="https://img.shields.io/badge/Flutter-3.47-03A9F4?style=flat-square&logo=flutter&logoColor=white"></img>
 <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square"></img>
 
-[**⬇ 下载最新版本**](https://github.com/DisenthrallClaude/Miru/blob/main/Miru-1.2.0-android-arm64-release.apk)
+[**⬇ 下载最新版本**](https://github.com/DisenthrallClaude/Miru/releases/latest)
 
 </div>
 
@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 从仓库直接下载 APK：[Miru-1.2.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/raw/main/Miru-1.2.0-android-arm64-release.apk)（点击链接后选「Download」；或在本仓库 `main` 分支根目录找到同名文件），同目录附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.2.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.2.0/Miru-1.2.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -69,6 +69,8 @@ Miru 改用无需鉴权的社区公共反代：
 ## 更新记录
 
 ### 1.2.0（本次）
+
+> 安装包：[Releases v1.2.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.2.0)
 
 **播放链路强化（对齐上游 Kazumi 最新实现）：**
 

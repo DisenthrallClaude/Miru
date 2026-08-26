@@ -55,7 +55,6 @@ android/build/reports/problems/
 **/ios/Podfile.lock
 **/macos/Podfile.lock
 
-# 构建产物不入库(仓库根目录随版本分发的发布 APK 除外)
+# 构建产物不入库, 安装包统一走 GitHub Releases 分发
 *.apk
 *.aab
-!Miru-*-android-*-release.apk
