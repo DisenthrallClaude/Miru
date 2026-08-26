@@ -13,7 +13,10 @@ import 'package:path_provider/path_provider.dart';
 /// 注意右侧边界 (?=$|[?#])：路径中间出现同名后缀（如 hls/123.ts/index.m3u8）
 /// 时不能提前截断。
 String decodeVideoSource(String iframeUrl) {
-  final decodedUrl = Uri.decodeFull(iframeUrl);
+  // 实测：输入含非法 % 序列（如裸「100%」）时 Uri.decodeFull 会直接抛
+  // ArgumentError: Illegal percent encoding，把整条解析链路炸断。
+  // 这里容错：decode 失败就按原文继续，提取正则自己会跳过无关文本。
+  final decodedUrl = _safeDecodeFull(iframeUrl);
 
   // 优先：query 参数里携带完整媒体链接（旧版逐参数检查的主路径，必须保留）
   try {
@@ -31,6 +34,15 @@ String decodeVideoSource(String iframeUrl) {
 
   // 兜底：原样返回（由上层决定如何处理）
   return Uri.encodeFull(decodedUrl);
+}
+
+/// 容错版 Uri.decodeFull：非法百分号编码不抛异常，返回原文。
+String _safeDecodeFull(String input) {
+  try {
+    return Uri.decodeFull(input);
+  } catch (_) {
+    return input;
+  }
 }
 
 /// 在 [input] 中查找第一个媒体直链；找不到返回 null。

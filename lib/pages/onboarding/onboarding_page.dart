@@ -10,6 +10,7 @@ import 'package:miru/pages/onboarding/steps/disclaimer_step.dart';
 import 'package:miru/pages/onboarding/steps/mirror_settings_step.dart';
 import 'package:miru/pages/onboarding/steps/update_source_step.dart';
 import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/plugins/rule_policy.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/update/startup_update_check.dart';
@@ -136,6 +137,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
   ///
   /// 原流程需要用户在「更新源」「网络镜像」「规则商店」三页里
   /// 反复点下一步并手动逐条点安装，这里一次性做完。
+  ///
+  /// 日漫为主的规则与已知损坏的规则**不在此处自动安装**（见 rule_policy.dart）：
+  /// 内置规则已覆盖国漫场景；日漫规则留给用户之后在
+  /// 设置 → 规则管理 → 规则仓库 里按需手动安装。
   Future<void> _autoSetupAndFinish() async {
     setState(() {
       autoSetupMessage = '正在启用网络镜像…';
@@ -145,23 +150,33 @@ class _OnboardingPageState extends State<OnboardingPage> {
     await GStorage.putSetting(SettingsKeys.enableGitProxy, true);
 
     var installed = 0;
+    var skipped = 0;
     try {
       if (mounted) {
         setState(() => autoSetupMessage = '正在获取规则列表…');
       }
       final catalog = await pluginsController.refreshPluginCatalog();
-      for (var i = 0; i < catalog.length; i++) {
+      // 预过滤：只统计真正会安装的条目，进度提示才不会虚高
+      final installable = <String>[];
+      for (final item in catalog) {
+        if (shouldSkipAutoInstall(item.name)) {
+          skipped++;
+        } else {
+          installable.add(item.name);
+        }
+      }
+      for (var i = 0; i < installable.length; i++) {
         if (!mounted) return;
         setState(() {
-          autoSetupMessage = '正在安装规则 ${i + 1}/${catalog.length}…';
+          autoSetupMessage = '正在安装规则 ${i + 1}/${installable.length}…';
         });
         try {
-          final result =
-              await pluginsController.tryUpdatePluginByName(catalog[i].name);
+          final result = await pluginsController
+              .tryUpdatePluginByName(installable[i]);
           if (result == PluginUpdateResult.updated) installed++;
         } catch (error) {
           // 单条失败不阻断整体流程
-          MiruLogger().w('Plugin: auto install failed for ${catalog[i].name}',
+          MiruLogger().w('Plugin: auto install failed for ${installable[i]}',
               error: error);
         }
       }
@@ -179,7 +194,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
       autoSetupMessage = null;
     });
     if (installed > 0) {
-      MiruDialog.showToast(message: '已自动安装 $installed 条规则');
+      MiruDialog.showToast(
+          message: skipped > 0
+              ? '已自动安装 $installed 条规则'
+                  '（$skipped 条日漫/失效源可在设置中手动安装）'
+              : '已自动安装 $installed 条规则');
     }
     _finish();
   }

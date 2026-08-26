@@ -161,7 +161,10 @@ class _CollectPageState extends State<CollectPage>
     return Scaffold(
       appBar: SysAppBar(
         needTopOffset: false,
-        toolbarHeight: 104,
+        // 之前 104：标题行被拉得过高，与下方页签之间出现一大块空白。
+        // 回到标准 56，加上页签栏 48 后顶栏总高 104，比例正常。
+        // 与时间表页保持一致，两个页签页的顶栏高度不会在切换时跳变。
+        toolbarHeight: 56,
         // 与时间表页一致的弹簧玻璃滑块：跟手移动 + 过冲回弹。
         bottom: LiquidGlassTabBar(
           controller: tabController!,

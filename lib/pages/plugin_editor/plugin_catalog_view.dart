@@ -7,6 +7,7 @@ import 'package:miru/bean/widget/error_widget.dart';
 import 'package:miru/modules/plugin/plugin_http_module.dart';
 import 'package:miru/pages/plugin_editor/plugin_update_actions.dart';
 import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/plugins/rule_policy.dart';
 import 'package:miru/services/storage/storage.dart';
 
 enum PluginCatalogSort { lastUpdate, name }
@@ -118,6 +119,14 @@ class PluginCatalogViewState extends State<PluginCatalogView> {
                 background: colorScheme.secondaryContainer,
                 foreground: colorScheme.onSecondaryContainer,
               ),
+              // 日漫源打标记：这些规则不再随引导自动安装，
+              // 用户在手动安装前需要知道源的内容倾向。
+              if (isJapaneseRule(item.name))
+                RuleTag(
+                  label: '日漫',
+                  background: colorScheme.errorContainer,
+                  foreground: colorScheme.onErrorContainer,
+                ),
               if (item.antiCrawlerEnabled)
                 RuleTag(
                   label: 'captcha',

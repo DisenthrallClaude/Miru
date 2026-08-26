@@ -19,14 +19,17 @@ class ApiEndpoints {
   /// 反馈邮箱
   static const String feedbackEmail = "zero100610@gmail.com";
 
-  /// 规则仓库（MiruRules，与上游 MiruRules 完全独立的托管地址；
-  /// 常用动漫规则已内置进安装包，线上仓库不可达时不影响开箱使用）
+  /// 规则仓库（上游 KazumiRules；实测可用。
+  /// 原自建 MiruRules 仓库不存在，规则商店一直 404。
+  /// 国漫友好的规则已内置进安装包，日漫规则留在
+  /// 设置 → 规则管理 → 规则仓库 里由用户手动安装）
   static const String pluginShop =
-      'https://raw.githubusercontent.com/DisenthrallClaude/MiruRules/main/';
+      'https://raw.githubusercontent.com/Predidit/KazumiRules/main/';
 
-  /// 规则仓库镜像
+  /// 规则仓库镜像（jsdelivr 的 fastly 节点，国内直连友好，已实测可达；
+  /// 引导默认开启镜像，即默认走这里）
   static const String pluginShopMirror =
-      'https://raw.gitcode.com/gh_mirrors/mi/MiruRules/raw/main/';
+      'https://fastly.jsdelivr.net/gh/Predidit/KazumiRules@main/';
 
   /// 在线升级（Miru 自己的 GitHub Releases）
   static const String latestApp =

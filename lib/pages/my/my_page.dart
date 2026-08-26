@@ -11,6 +11,7 @@ import 'package:miru/modules/my/watch_stats.dart';
 import 'package:miru/pages/menu/route_visibility.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/pages/my/recent_watch_card.dart';
+import 'package:miru/services/storage/storage.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/utils/date_time.dart';
 
@@ -229,6 +230,8 @@ class _MyPageState extends State<MyPage> {
   /// 每行包一层 PressableGlass 获得弹簧按压反馈；
   /// onTap 仍走原先的 pushNamed 路由，业务逻辑零改动。
   Widget _entryGroup(WatchStats stats) {
+    final githubLoggedIn = GStorage.getSetting(SettingsKeys.githubEnable) &&
+        GStorage.getSetting(SettingsKeys.githubLogin).isNotEmpty;
     return FrostedSurface(
       borderRadius: BorderRadius.circular(_cardRadius),
       child: Column(
@@ -248,6 +251,15 @@ class _MyPageState extends State<MyPage> {
             title: '离线下载',
             description: '缓存任务与本地文件',
             onTap: () => context.pushNamed('/settings/download/'),
+          ),
+          const _EntryDivider(),
+          _entryTile(
+            icon: Icons.cloud_sync_rounded,
+            title: '数据同步',
+            description: githubLoggedIn
+                ? 'GitHub · @${GStorage.getSetting(SettingsKeys.githubLogin)}'
+                : '本地模式 · 未登录 GitHub',
+            onTap: () => context.pushNamed('/settings/github/'),
           ),
           const _EntryDivider(),
           _entryTile(

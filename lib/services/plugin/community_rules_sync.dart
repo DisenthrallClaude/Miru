@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_modular/flutter_modular.dart' show inject;
 import 'package:miru/plugins/plugins.dart';
 import 'package:miru/plugins/plugins_controller.dart';
+import 'package:miru/plugins/rule_policy.dart';
 import 'package:miru/request/clients/rules_repo_client.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/version.dart';
@@ -47,6 +48,12 @@ class CommunityRulesSync {
         if (name == null || name.isEmpty || remoteVersion.isEmpty) continue;
 
         final local = localByName[name.toLowerCase()];
+        // 未安装的日漫/失效规则不做静默安装：这些规则只应经由
+        // 设置 → 规则管理 → 规则仓库 由用户主动决定是否安装。
+        // 用户已经手动装上的规则则照常跟进版本更新。
+        if (local == null && shouldSkipAutoInstall(name)) {
+          continue;
+        }
         if (local != null && !_remoteIsNewer(local.version, remoteVersion)) {
           continue;
         }

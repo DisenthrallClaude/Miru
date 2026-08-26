@@ -110,6 +110,7 @@ class _InfoTabViewState extends State<InfoTabView>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               GlassPill(
+                prominent: true,
                 padding: const EdgeInsets.symmetric(
                     horizontal: Space.md, vertical: Space.xs),
                 child:
@@ -165,6 +166,7 @@ class _InfoTabViewState extends State<InfoTabView>
               }),
               const SizedBox(height: 16),
               GlassPill(
+                prominent: true,
                 padding: const EdgeInsets.symmetric(
                     horizontal: Space.md, vertical: Space.xs),
                 child:

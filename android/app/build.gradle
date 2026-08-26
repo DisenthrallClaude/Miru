@@ -25,13 +25,25 @@ if (flutterVersionName == null) {
 android {
     namespace "io.github.disenthrallclaude.miru"
     compileSdk flutter.compileSdkVersion
-    // Use the highest NDK required by the native plugins. Newer NDKs remain
-    // backward compatible with plugins that declare an older version.
-    ndkVersion "28.2.13676358"
+    // 不安装真实 NDK: 本项目所有原生依赖(media_kit 等)均使用预编译 so,
+    // 无任何 CMake/ndk-build 编译任务;NDK 唯一可能的用途(符号剥离)已被
+    // 下方 packaging.keepDebugSymbols 跳过。显式钉住 AGP 默认版本号,
+    // 与 SDK 内的占位标记目录对应,阻断 Gradle/AGP 自动下载 2GB+ 的 NDK
+    // (受限磁盘环境无法容纳)。
+    ndkVersion "27.0.12077973"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 引擎与插件(media_kit 等)发布版 so 均已在上游剥离符号;
+    // 显式跳过剥离任务,构建即完全不依赖 NDK 工具链。
+    // (受限磁盘环境无法安装 2.4GB 的 NDK)
+    packaging {
+        jniLibs {
+            keepDebugSymbols += '**/*.so'
+        }
     }
 
     kotlinOptions {

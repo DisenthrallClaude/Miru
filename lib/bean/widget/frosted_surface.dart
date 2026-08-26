@@ -14,7 +14,22 @@ import 'package:miru/utils/theme.dart';
 /// 与原先的手写实现是同一类渲染开销，不会引入额外的 GPU 负担。
 ///
 /// [liquid] 置 false 时退回朴素模糊，供低端机或出现掉帧时降级使用。
-class FrostedSurface extends StatelessWidget {
+///
+/// ## 为什么是 StatefulWidget
+///
+/// `BackdropFilter` 采样的是「合成时背后图层已画好的像素」。两个已知
+/// 时机问题会让首屏玻璃没有模糊、要点一下才出现：
+///
+/// 1. 玻璃与背后内容同帧首次入场时，backdrop 的采样早于背后内容
+///    进入图层（Skia 合成顺序问题），首帧只画得出 tint；
+/// 2. 路由转场（渐隐 / 渐隐+位移）用 `Opacity` saveLayer 实现，
+///    alpha<1 期间 BackdropFilter 采到的是 saveLayer 内的空白，
+///    转场结束后图层的 backdrop 结果被缓存，不会自动重新采样。
+///
+/// 两种情况靠「事后强制重挂一次玻璃子树」解决：换 key 重建会生成
+/// 全新的 layer，backdrop 从此以正确的背景重采样。为此监听两个
+/// 时机：首帧完成 + 宿主路由转场完成。
+class FrostedSurface extends StatefulWidget {
   const FrostedSurface({
     super.key,
     required this.child,
@@ -47,76 +62,131 @@ class FrostedSurface extends StatelessWidget {
   final bool liquid;
 
   @override
+  State<FrostedSurface> createState() => _FrostedSurfaceState();
+}
+
+class _FrostedSurfaceState extends State<FrostedSurface> {
+  /// 玻璃子树重建纪元。自增即换 key 强制重挂 layer，
+  /// 让 BackdropFilter 以当前真实背景重新采样。
+  int _epoch = 0;
+
+  /// 路由转场动画宿主。TransitionRoute 才有 [TransitionRoute.animation]，
+  /// ModalRoute.of 的返回值可安全向上转型到这里。
+  TransitionRoute<void>? _watchedRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    // 时机一：首帧渲染完成后立刻补一帧。
+    // 覆盖「玻璃与背后内容同帧入场、backdrop 采到空」的情况。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() => _epoch++);
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (identical(route, _watchedRoute)) {
+      return;
+    }
+    _watchedRoute?.animation?.removeStatusListener(_onRouteStatus);
+    _watchedRoute = route;
+    // 时机二：宿主路由转场完成后再补一帧。
+    // 覆盖「转场期间 Opacity saveLayer 导致 backdrop 采到空白」的情况。
+    // 已完成（无动画/直推路由）则无需处理，时机一已覆盖。
+    route?.animation?.addStatusListener(_onRouteStatus);
+  }
+  void _onRouteStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed && mounted) {
+      setState(() => _epoch++);
+    }
+  }
+
+  @override
+  void dispose() {
+    _watchedRoute?.animation?.removeStatusListener(_onRouteStatus);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final brightness = theme.brightness;
 
-    if (!enabled) {
+    if (!widget.enabled) {
       return DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.surface,
-          borderRadius: borderRadius,
-          border: border,
+          borderRadius: widget.borderRadius,
+          border: widget.border,
         ),
-        child: child,
+        child: widget.child,
       );
     }
 
     final double opacity = Frost.tintOpacity(brightness);
     // 局部变量承接可空字段：Dart 的类型提升对实例字段无效。
-    final Color? tintColor = tint;
+    final Color? tintColor = widget.tint;
 
     // cupertino_liquid_glass 内部已插入 RepaintBoundary 隔离合成层，
     // 这里不再重复包裹，避免多一次离屏栅格缓存。
     Widget glass;
-    if (liquid) {
+    if (widget.liquid) {
       glass = CupertinoLiquidGlass(
-        blurSigma: blur,
+        blurSigma: widget.blur,
         tintOpacity: opacity,
-        borderRadius: borderRadius ?? BorderRadius.zero,
+        borderRadius: widget.borderRadius ?? BorderRadius.zero,
         // 显式给足边缘高光与镜面渐变，否则默认参数下几乎看不出玻璃感
         edgeLightColor: Frost.edgeLight(brightness),
         edgeShadowColor: Frost.edgeShadow(brightness),
         specularGradient: Frost.specular(brightness),
         borderWidth: 1.0,
         child: tintColor == null
-            ? child
+            ? widget.child
             // tint 在液态分支以覆盖层形式生效，让调用方可以微调玻璃色调
             : DecoratedBox(
                 decoration: BoxDecoration(
                   color: tintColor.withValues(alpha: 0.35),
-                  borderRadius: borderRadius,
+                  borderRadius: widget.borderRadius,
                 ),
-                child: child,
+                child: widget.child,
               ),
       );
-      // 外层 RepaintBoundary：把玻璃隔离成独立合成层。
-      // Android Impeller 上 BackdropFilter 首次入帧时若与宿主内容同层，
-      // 首帧可能只画 tint 不画模糊 —— 表现为「点一下玻璃才显现」。
-      // 边界强制玻璃单独成层，backdrop 采样从首帧起就稳定。
-      glass = RepaintBoundary(child: glass);
+      // 外层 RepaintBoundary：把玻璃隔离成独立合成层；key 携带重建纪元，
+      // 纪元变化即整棵子树重挂（新 layer + backdrop 重采样）。
+      glass = RepaintBoundary(
+        key: ValueKey('frost-glass-$_epoch'),
+        child: glass,
+      );
     } else {
       // 朴素模糊兜底。BackdropFilter 必须被裁剪到自身边界内，
       // 否则会模糊整个图层（表现为全屏发虚）。
       final Color base =
           tintColor ?? scheme.surface.withValues(alpha: opacity);
       glass = ClipRRect(
-        borderRadius: borderRadius ?? BorderRadius.zero,
+        key: ValueKey('frost-plain-$_epoch'),
+        borderRadius: widget.borderRadius ?? BorderRadius.zero,
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          filter: ImageFilter.blur(
+              sigmaX: widget.blur, sigmaY: widget.blur),
           child: DecoratedBox(
             decoration: BoxDecoration(color: base),
-            child: child,
+            child: widget.child,
           ),
         ),
       );
     }
 
-    if (border == null) return glass;
+    if (widget.border == null) return glass;
     // 描边画在玻璃之外
     return DecoratedBox(
-      decoration: BoxDecoration(border: border, borderRadius: borderRadius),
+      decoration: BoxDecoration(
+          border: widget.border, borderRadius: widget.borderRadius),
       child: glass,
     );
   }

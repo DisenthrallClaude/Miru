@@ -1,0 +1,18 @@
+{
+    "api": "6",
+    "type": "anime",
+    "name": "淘片动漫",
+    "version": "1.0",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "adBlocker": true,
+    "userAgent": "",
+    "baseURL": "https://video.chn.ci/",
+    "searchURL": "https://video.chn.ci/index.php/vod/search.html?wd=@keyword",
+    "searchList": "//div[contains(@class,'module-search-item')]",
+    "searchName": "//h3/a",
+    "searchResult": "//h3/a",
+    "chapterRoads": "//div[@class='module-blocklist']",
+    "chapterResult": "//a"
+}

@@ -7,6 +7,7 @@ enum SettingGroup {
   interface,
   proxy,
   webdav,
+  github,
   download,
   bangumi,
   collect,
@@ -303,6 +304,46 @@ class SettingsKeys {
     '',
     group: SettingGroup.webdav,
   );
+  static const githubEnable = SettingKey<bool>(
+    _SettingBoxKey.githubEnable,
+    false,
+    group: SettingGroup.github,
+  );
+  static const githubToken = SettingKey<String>(
+    _SettingBoxKey.githubToken,
+    '',
+    group: SettingGroup.github,
+  );
+  static const githubRepo = SettingKey<String>(
+    _SettingBoxKey.githubRepo,
+    '',
+    group: SettingGroup.github,
+  );
+  static const githubLogin = SettingKey<String>(
+    _SettingBoxKey.githubLogin,
+    '',
+    group: SettingGroup.github,
+  );
+  static const githubAvatarUrl = SettingKey<String>(
+    _SettingBoxKey.githubAvatarUrl,
+    '',
+    group: SettingGroup.github,
+  );
+  static const githubEnableHistory = SettingKey<bool>(
+    _SettingBoxKey.githubEnableHistory,
+    true,
+    group: SettingGroup.github,
+  );
+  static const githubEnableCollect = SettingKey<bool>(
+    _SettingBoxKey.githubEnableCollect,
+    true,
+    group: SettingGroup.github,
+  );
+  static const githubLastSyncTime = SettingKey<int>(
+    _SettingBoxKey.githubLastSyncTime,
+    0,
+    group: SettingGroup.github,
+  );
   static const lowMemoryMode = SettingKey<bool>(
     _SettingBoxKey.lowMemoryMode,
     false,
@@ -593,6 +634,14 @@ class SettingsKeys {
     webDavURL,
     webDavUsername,
     webDavPassword,
+    githubEnable,
+    githubToken,
+    githubRepo,
+    githubLogin,
+    githubAvatarUrl,
+    githubEnableHistory,
+    githubEnableCollect,
+    githubLastSyncTime,
     lowMemoryMode,
     showWindowButton,
     useDynamicColor,
@@ -709,6 +758,14 @@ class _SettingBoxKey {
       webDavURL = 'webDavURL',
       webDavUsername = 'webDavUsername',
       webDavPassword = 'webDavPasswd',
+      githubEnable = 'githubEnable',
+      githubToken = 'githubToken',
+      githubRepo = 'githubRepo',
+      githubLogin = 'githubLogin',
+      githubAvatarUrl = 'githubAvatarUrl',
+      githubEnableHistory = 'githubEnableHistory',
+      githubEnableCollect = 'githubEnableCollect',
+      githubLastSyncTime = 'githubLastSyncTime',
       lowMemoryMode = 'lowMemoryMode',
       showWindowButton = 'showWindowButton',
       useDynamicColor = 'useDynamicColor',

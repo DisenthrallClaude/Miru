@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+10100
+version: 1.2.0+10200
 
 environment:
   sdk: ">=3.3.4 <4.0.0"
@@ -136,6 +136,9 @@ dependencies:
   cupertino_liquid_glass: ^0.7.0
 
 dependency_overrides:
+  # path_provider_android 2.3.x 引入 jni 原生编译(需要 2GB+ 的 NDK)。
+  # 钉回 2.2.x 纯 Java 实现: 功能一致, 无原生编译, 受限磁盘环境可用。
+  path_provider_android: 2.2.23
   media_kit_libs_linux:
     git:
       url: https://github.com/Predidit/media-kit.git
@@ -184,7 +187,6 @@ dev_dependencies:
   hive_ce_generator: ^1.10.0
   flutter_launcher_icons: ^0.14.3
   flutter_native_splash: ^2.4.3
-  msix: ^3.16.12
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -196,36 +198,18 @@ flutter_launcher_icons:
   image_path: assets/images/logo/logo_android.png
   image_path_android: assets/images/logo/logo_android.png
   image_path_ios: assets/images/logo/logo_ios.png
-  # 自适应图标：前景只放字标（留出 66% 安全区，避免被系统遮罩裁切），
+  # 安卓专用：自适应图标前景只放字标（留出 66% 安全区，避免被系统遮罩裁切），
   # 背景用品牌底色，与 kDefaultSeedColor 同族。
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: assets/images/logo/logo_foreground.png
   adaptive_icon_monochrome: assets/images/logo/logo_monochrome.png
-  macos:
-    generate: true
-    image_path: assets/images/logo/logo_rounded.png
-  windows:
-    generate: true
-    image_path: assets/images/logo/logo_rounded.png
-    icon_size: 256 # min:48, max:256, default: 48
 
 flutter_native_splash:
-  android: false
-  ios: true
-  web: false
-  # 启动图用透明字标 + 品牌底色，避免整块渐变方图贴在白底上的割裂感。
+  # 启动图由 android/ 目录内原生 launch_background.xml 承担。
   color_ios: "#FFFFFF"
   color_dark_ios: "#121214"
   image_ios: assets/images/logo/logo_foreground.png
   image_dark_ios: assets/images/logo/logo_foreground.png
-
-msix_config:
-  display_name: Miru
-  publisher: CN=SignPath Foundation, O=SignPath Foundation, L=Lewes, S=Delaware, C=US
-  logo_path: assets/images/logo/logo_rounded.png
-  sign_msix: false
-  install_certificate: false
-  build_windows: false
 
 # The following section is specific to Flutter packages.
 flutter:

@@ -1,0 +1,17 @@
+{
+    "api": "6",
+    "type": "anime",
+    "name": "欧乐影院",
+    "version": "1.0",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "userAgent": "",
+    "baseURL": "https://olevod.com/",
+    "searchURL": "https://olevod.com/index.php/vod/search.html?wd=@keyword",
+    "searchList": "//ul[contains(@class,'vodlist')]/li",
+    "searchName": "//h4/a",
+    "searchResult": "//h4/a",
+    "chapterRoads": "//div[@id='playlistbox']",
+    "chapterResult": "//a[contains(@href,'/play/')]"
+}

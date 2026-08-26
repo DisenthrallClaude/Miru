@@ -104,6 +104,8 @@ class _LiquidGlassIndicatorState extends State<LiquidGlassIndicator>
   Widget build(BuildContext context) {
     if (widget.count <= 0) return const SizedBox.shrink();
 
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final slot = constraints.maxWidth / widget.count;
@@ -131,7 +133,13 @@ class _LiquidGlassIndicatorState extends State<LiquidGlassIndicator>
                 child: RepaintBoundary(
                   child: CupertinoLiquidGlass(
                     blurSigma: Frost.blur * 0.5,
-                    tintOpacity: 0.16,
+                    // 底色不透明度按主题取值：滑块必须有足够的「实体感」，
+                    // 选中页签的文字才始终落在稳定的底色上——
+                    // 之前 0.16 太透，暗色主题下白色高光/镜面反光
+                    // 直接冲在白色文字上，出现「白字被白底吃掉」。
+                    // 亮色用白 tint、暗色用深 tint（跟随内置主题预设），
+                    // 这里只抬不透明度：亮色 0.42 / 暗色 0.50。
+                    tintOpacity: isLight ? 0.42 : 0.50,
                     borderRadius:
                         BorderRadius.circular(height / 2),
                     edgeLightColor:

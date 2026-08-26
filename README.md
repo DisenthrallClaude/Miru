@@ -10,7 +10,7 @@
 <img src="https://img.shields.io/badge/Flutter-3.47-03A9F4?style=flat-square&logo=flutter&logoColor=white"></img>
 <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square"></img>
 
-[**⬇ 下载最新版本**](https://github.com/DisenthrallClaude/Miru/releases/latest)
+[**⬇ 下载最新版本**](https://github.com/DisenthrallClaude/Miru/blob/Miru-new/Miru-1.2.0-android-arm64-release.apk)
 
 </div>
 
@@ -23,38 +23,6 @@ Miru 基于开源项目 [Kazumi](https://github.com/Predidit/Kazumi) 修改而�
 原项目是一个通用的番剧采集与在线观看程序。Miru 在它的基础上做了两件事：**把内容面向国漫收敛**，以及**把界面整个重做一遍**。
 
 **只提供 Android 版本。** 本仓库已移除 iOS、Web、Windows、Linux、macOS 等其他平台的源码与构建配置，仅保留 Android 相关的内容，不再提供其他平台的构建。
-
-## 截图
-
-<div align="center">
-<b>首页 · 时间表 · 设置</b><br/>
-<img src="docs/screenshots/home.png" width="30%"></img>
-&nbsp;
-<img src="docs/screenshots/timeline.png" width="30%"></img>
-&nbsp;
-<img src="docs/screenshots/settings.png" width="30%"></img>
-</div>
-
-<div align="center">
-<b>实拍 · 推荐页 · 番剧详情 · 播放源规则管理</b><br/>
-<img src="docs/screenshots/miru/recommend.png" width="30%"></img>
-&nbsp;
-<img src="docs/screenshots/miru/detail.png" width="30%"></img>
-&nbsp;
-<img src="docs/screenshots/miru/rules.png" width="30%"></img>
-</div>
-
-<div align="center">
-<b>实拍 · 选集（播放线路）· 播放器菜单</b><br/>
-<img src="docs/screenshots/miru/episodes.png" width="30%"></img>
-&nbsp;
-<img src="docs/screenshots/miru/player_menu.png" width="30%"></img>
-</div>
-
-<div align="center">
-<b>实拍 · 播放器（横屏 / 超分辨率）</b><br/>
-<img src="docs/screenshots/miru/player_superres.png" width="45%"></img>
-</div>
 
 ## 改了什么
 
@@ -92,18 +60,37 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 `Miru-android.apk`
+1. 从仓库直接下载 APK：[Miru-1.2.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/raw/Miru-new/Miru-1.2.0-android-arm64-release.apk)（点击链接后选「Download」；或在本仓库 `Miru-new` 分支根目录找到同名文件），同目录附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
-**要求 Android 10 及以上。** APK 内含 `arm64-v8a` / `armeabi-v7a` / `x86_64` 三种架构，绝大多数机型可直接安装。
+**要求 Android 10 及以上，设备为 arm64 架构（2018 年后的主流机型基本都是）。** APK 只包含 `arm64-v8a` 单架构，体积更小；模拟器 / x86 平板不在支持范围内。
+
+## 更新记录
+
+### 1.2.0（本次）
+
+**播放链路强化（对齐上游 Kazumi 最新实现）：**
+
+- 同步上游 `84043d5`：Android 后台时挂起 demuxer 预取，修复「切后台再回来播放卡死」。
+- 同步上游 `43e0fe8` 思路：嗅探到 `.m3u8` 时强制 HLS demuxer，避开 mpv 内容深测失误导致的打开失败（Android 上与 Windows 同样受益）。
+- 嗅探回调对协议相对地址（`//cdn/...`）补全 `https:`，避免被拒收。
+- `decodeVideoSource` 容错：输入含非法百分号编码时不再抛异常炸断整条解析链路。
+
+**界面修复：**
+
+- 修复玻璃效果「要点击一下才显现」：路由转场（渐隐动画）期间 `BackdropFilter` 采样到空白层，转场结束后图层不会自动重新采样。现在在首帧与转场完成后各强制重挂一次玻璃图层，模糊从进页起就稳定可见。
+
+### 1.1.0
+
+- 玻璃亮度 / 页签对比度 / 顶栏高度等界面批量修复；规则精简为国漫优先；新增欧乐影院、淘片动漫两个源；新增 GitHub 登录与云同步（PAT 方案）。
 
 ## 已知问题
 
 **本项目仍有大量 bug 和待优化之处，不是成熟产品。** 已知的有：
 
 - **弹幕功能失效**。弹幕依赖弹弹play 的签名密钥，自建包同样拿不到，所以弹幕拉不到内容。相关的失败提示已经移除，不再反复打扰。
-- **部分番剧播放失败**。播放依赖第三方站点的采集规则，站点改版规则就会失效，表现为「播放器内部错误」。可以换个数据源试试。
+- **部分番剧播放失败**。播放依赖第三方站点的采集规则，站点改版规则就会失效，表现为「播放器内部错误」。可以换个数据源试试。1.2.0 已对齐上游 Kazumi 的最新播放修复并加固了解析链路，命中率比 1.1.0 高，但站点侧的失效仍无法根治。
 - 只在少数机型上测过，兼容性未知。
 - 界面在横屏与平板上的适配不完整。
 

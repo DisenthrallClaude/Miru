@@ -9,6 +9,24 @@ rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+// compileSdk 统一(六刀裁剪之三): 各插件上游声明的 compileSdk 34/35/36 不一,
+// 会迫使 SDK 下载多套 platform JAR(每套 60M+)。统一钉到 36 后只需
+// platforms;android-36 一套,老插件仅收到 warning,不影响产物。
+// 必须放在 evaluationDependsOn(':app') 之前注册: 该行会把 :app 提前求值,
+// 之后注册的钩子就变成"求值后修改"而报 too late to set compileSdk。
+// plugins.withId 在插件应用瞬间触发,天然避开 afterEvaluate 的顺序问题。
+subprojects {
+    plugins.withId("com.android.application") {
+        project.android {
+            compileSdk 36
+        }
+    }
+    plugins.withId("com.android.library") {
+        project.android {
+            compileSdk 36
+        }
+    }
+}
 subprojects {
     project.evaluationDependsOn(':app')
 }

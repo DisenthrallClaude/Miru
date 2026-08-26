@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:miru/services/video_source/video_source_service.dart';
+import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/services/logging/logger.dart';
 
 /// WebView 视频源解析服务
@@ -95,11 +96,19 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
       request.throwIfNotCurrent(_activeRequest);
 
+      // 统一兜底：嗅探回调未标注 format 时，按 URL 形态判定 HLS。
+      // mpv 侧拿到 hls 会强制 demuxer-lavf-format=hls，
+      // 避开内容探测失误导致的打开失败（上游 43e0fe8 同源思路）。
+      final format = event.format == VideoSourceFormat.auto &&
+              _looksLikeHls(event.url)
+          ? VideoSourceFormat.hls
+          : event.format;
+
       return VideoSource(
         url: event.url,
         offset: event.offset,
         type: VideoSourceType.online,
-        format: event.format,
+        format: format,
       );
     } catch (e) {
       if (e is VideoSourceCancelledException) {
@@ -196,4 +205,10 @@ class _ResolveRequest {
       throw const VideoSourceCancelledException();
     }
   }
+}
+
+/// URL 是否应按 HLS 流处理：以 .m3u8 结尾，或 .m3u8 后跟查询串/锚点。
+bool _looksLikeHls(String url) {
+  final path = url.split('#').first.split('?').first;
+  return path.endsWith('.m3u8');
 }

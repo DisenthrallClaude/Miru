@@ -14,6 +14,7 @@ import 'package:miru/pages/settings/player_settings.dart';
 import 'package:miru/pages/settings/proxy/proxy_settings_page.dart';
 import 'package:miru/pages/settings/theme_settings_page.dart';
 import 'package:miru/pages/webdav_editor/webdav_setting.dart';
+import 'package:miru/pages/settings/github/github_settings_page.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/utils/constants.dart';
 
@@ -109,6 +110,13 @@ final List<_SettingsGroup> _settingsGroups = [
         description: 'WebDav 与 Bangumi 同步',
         icon: Icons.cloud_rounded,
         builder: (_) => const WebDavSettingsPage(),
+      ),
+      _SettingsCategory(
+        id: 'github',
+        label: 'GitHub 云同步',
+        description: '登录 GitHub，历史与收藏同步到私有仓库',
+        icon: Icons.verified_rounded,
+        builder: (_) => const GithubSettingsPage(),
       ),
       _SettingsCategory(
         id: 'proxy',

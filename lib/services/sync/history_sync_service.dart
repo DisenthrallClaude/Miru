@@ -435,7 +435,15 @@ class HistorySyncService {
     final webDavEnable = GStorage.getSetting(SettingsKeys.webDavEnable);
     final historySyncEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableHistory);
-    if (webDavEnable != true || historySyncEnable != true) {
+    final githubEnable = GStorage.getSetting(SettingsKeys.githubEnable);
+    final githubHistoryEnable =
+        GStorage.getSetting(SettingsKeys.githubEnableHistory);
+    // 任一同步通道开启历史同步时都要落本地事件日志；
+    // 否则后开的通道会缺失开启之前的全部增量（只能靠全量快照兜底）。
+    final webDavHistoryOn = webDavEnable == true && historySyncEnable == true;
+    final githubHistoryOn =
+        githubEnable == true && githubHistoryEnable == true;
+    if (!webDavHistoryOn && !githubHistoryOn) {
       return;
     }
     try {

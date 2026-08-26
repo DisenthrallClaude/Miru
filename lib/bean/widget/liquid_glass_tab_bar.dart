@@ -29,10 +29,17 @@ class LiquidGlassTabBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final bar = TabBar(
       controller: controller,
       tabs: tabs,
       isScrollable: isScrollable,
+      // 显式钉死前景色，保证选中页签的文字在任何主题、任何玻璃罩
+      // （包括下方的液态玻璃滑块）之上都清晰可读：
+      // 选中 = onSurface（亮色近黑 / 暗色纯白），未选中 = onSurfaceVariant。
+      // 不给主题留「取错色」的余地——对比度问题必须从源头杜绝。
+      labelColor: scheme.onSurface,
+      unselectedLabelColor: scheme.onSurfaceVariant,
       indicator: const BoxDecoration(),
       indicatorSize: TabBarIndicatorSize.tab,
       dividerColor: Colors.transparent,

@@ -11,6 +11,7 @@ import 'package:miru/pages/settings/download_settings.dart';
 import 'package:miru/pages/settings/interface_settings.dart';
 import 'package:miru/pages/settings/keyboard_settings.dart';
 import 'package:miru/pages/settings/player_settings.dart';
+import 'package:miru/pages/settings/github/github_module.dart';
 import 'package:miru/pages/settings/proxy/proxy_module.dart';
 import 'package:miru/pages/settings/renderer_settings.dart';
 import 'package:miru/pages/settings/settings_page.dart';
@@ -51,6 +52,7 @@ final settingsModule = createModule(
         child: (context, state) => const SuperResolutionSettings(),
       )
       ..module(webDavModule)
+      ..module(githubModule)
       ..module(aboutModule)
       ..module(pluginModule)
       ..module(historyModule)

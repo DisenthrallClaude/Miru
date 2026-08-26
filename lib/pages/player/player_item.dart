@@ -11,6 +11,7 @@ import 'package:miru/pages/player/syncplay_sheet.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/services/sync/github_sync.dart';
 import 'package:miru/services/sync/webdav.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -89,6 +90,8 @@ class _PlayerItemState extends State<PlayerItem>
 
   late bool webDavEnable;
   late bool webDavEnableHistory;
+  late bool githubEnable;
+  late bool githubEnableHistory;
 
   final _danmuKey = GlobalKey();
   late bool _border;
@@ -139,19 +142,27 @@ class _PlayerItemState extends State<PlayerItem>
 
   late mobx.ReactionDisposer _fullscreenListener;
 
-  /// Pauses playback when the app is backgrounded on Android/iOS, unless
-  /// background playback is enabled.
+  /// Pauses playback and suspends demuxer prefetch when the app is
+  /// backgrounded on Android/iOS, unless background playback is enabled.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.paused &&
-        !backgroundPlayback &&
-        playerController.playback.mediaPlayer != null &&
-        playerController.playback.playerPlaying) {
-      try {
-        await playerController.pause(enableSync: false);
-      } catch (_) {}
+    if (state == AppLifecycleState.paused && !backgroundPlayback) {
+      // 挂起意图先于任何 await 记录，保证生命周期分派顺序里
+      // 后到的 resumed 回调最终胜出；暂停态下 demuxer 仍在预取，
+      // 因此无论是否正在播放都挂起。（同步自上游 Kazumi 84043d5）
+      final suspend = playerController.playback.setPrefetchSuspended(true);
+      if (playerController.playback.mediaPlayer != null &&
+          playerController.playback.playerPlaying) {
+        try {
+          await playerController.pause(enableSync: false);
+        } catch (_) {}
+      }
+      await suspend;
       return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      await playerController.playback.setPrefetchSuspended(false);
     }
     try {
       if (playerController.playback.playerPlaying) {
@@ -479,6 +490,17 @@ class _PlayerItemState extends State<PlayerItem>
         await webDav.syncHistory();
       } catch (e) {
         MiruLogger().w('WebDav: auto history sync failed', error: e);
+      }
+    }
+    if (githubEnable && githubEnableHistory) {
+      try {
+        var github = GithubSync();
+        if (!github.initialized) {
+          await github.init();
+        }
+        await github.syncHistory();
+      } catch (e) {
+        MiruLogger().w('GithubSync: auto history sync failed', error: e);
       }
     }
   }
@@ -1289,6 +1311,8 @@ class _PlayerItemState extends State<PlayerItem>
     );
     webDavEnable = GStorage.getSetting(SettingsKeys.webDavEnable);
     webDavEnableHistory = GStorage.getSetting(SettingsKeys.webDavEnableHistory);
+    githubEnable = GStorage.getSetting(SettingsKeys.githubEnable);
+    githubEnableHistory = GStorage.getSetting(SettingsKeys.githubEnableHistory);
     playerController.danmaku.setDanmakuEnabled(
       GStorage.getSetting(SettingsKeys.danmakuEnabledByDefault),
     );

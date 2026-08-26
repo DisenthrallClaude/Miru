@@ -680,7 +680,8 @@ class _TimelinePageState extends State<TimelinePage>
     return Scaffold(
       appBar: SysAppBar(
         needTopOffset: false,
-        toolbarHeight: 104,
+        // 之前 104：标题行过高，与页签之间一大块空白；与追番页统一为 56。
+        toolbarHeight: 56,
         // 筛选原本是右下角 FAB，会被底部玻璃导航条挡住，移到顶栏
         actions: [
           IconButton(

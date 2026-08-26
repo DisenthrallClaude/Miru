@@ -6,6 +6,7 @@ import 'package:miru/modules/collect/collect_module.dart';
 import 'package:miru/modules/collect/collect_type.dart';
 import 'package:miru/services/sync/bangumi_sync_service.dart';
 import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/sync/github_sync.dart';
 import 'package:miru/services/sync/webdav.dart';
 import 'package:miru/repositories/collect_crud_repository.dart';
 import 'package:miru/repositories/collect_repository.dart';
@@ -225,10 +226,25 @@ abstract class _CollectController with Store {
   Future<bool> syncCollectibles({bool showSuccessToast = true}) async {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
-    if (!webDavCollectEnable) {
-      MiruDialog.showToast(message: '未开启WebDav收藏同步');
+    final bool githubCollectEnable =
+        GStorage.getSetting(SettingsKeys.githubEnableCollect) &&
+            GStorage.getSetting(SettingsKeys.githubEnable);
+    if (!webDavCollectEnable && !githubCollectEnable) {
+      MiruDialog.showToast(message: '未开启任何收藏同步通道');
       return false;
     }
+    var succeeded = true;
+    if (webDavCollectEnable) {
+      succeeded = await _syncCollectiblesViaWebDav(showSuccessToast) && succeeded;
+    }
+    if (githubCollectEnable) {
+      succeeded = await _syncCollectiblesViaGithub() && succeeded;
+    }
+    loadCollectibles();
+    return succeeded;
+  }
+
+  Future<bool> _syncCollectiblesViaWebDav(bool showSuccessToast) async {
     if (!WebDav().initialized) {
       MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
       return false;
@@ -253,8 +269,23 @@ abstract class _CollectController with Store {
       MiruDialog.showToast(message: 'WebDav同步失败 $e');
       return false;
     }
-    loadCollectibles();
     return true;
+  }
+
+  Future<bool> _syncCollectiblesViaGithub() async {
+    try {
+      final github = GithubSync();
+      if (!github.initialized) {
+        await github.init();
+      }
+      await github.syncCollectibles();
+      MiruDialog.showToast(message: 'GitHub 同步完成');
+      return true;
+    } catch (e) {
+      MiruLogger().w('GithubSync: collectibles sync failed', error: e);
+      MiruDialog.showToast(message: 'GitHub 同步失败：$e');
+      return false;
+    }
   }
 
   /// Only upload local collectibles and change logs to WebDAV, without downloading and merging.
@@ -290,6 +321,20 @@ abstract class _CollectController with Store {
     } catch (e) {
       MiruDialog.showToast(message: 'WebDav上传失败 $e');
       return false;
+    }
+    // Bangumi 全量同步改动了本地收藏，GitHub 通道也要跟进上传，
+    // 否则两个云端的收藏会就此分叉。
+    if (GStorage.getSetting(SettingsKeys.githubEnable) &&
+        GStorage.getSetting(SettingsKeys.githubEnableCollect)) {
+      try {
+        final github = GithubSync();
+        if (!github.initialized) {
+          await github.init();
+        }
+        await github.updateCollectibles();
+      } catch (e) {
+        MiruLogger().w('GithubSync: upload collectibles failed', error: e);
+      }
     }
     return true;
   }

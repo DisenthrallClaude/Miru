@@ -16,6 +16,7 @@ import 'package:miru/services/player/playback_cache_policy.dart';
 import 'package:miru/services/player/player_screenshot_service.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
+import 'package:miru/utils/async_serial_queue.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mobx/mobx.dart';
@@ -76,6 +77,42 @@ abstract class _PlayerPlaybackController with Store {
   _OwnedPlayer? _ownedPlayer;
   Player? get mediaPlayer => _ownedPlayer?.player;
   VideoController? videoController;
+
+  /// 预取挂起写入串行化：生命周期快速翻转时保证后写胜出。
+  final AsyncSerialQueue _prefetchWrites = AsyncSerialQueue();
+  bool _prefetchSuspendWanted = false;
+
+  /// Android 后台会切断网络访问；预取中的 demuxer 会烧完 ffmpeg 的
+  /// 重连/分片重试并把流标记为 EOF，回前台后播放永久卡住。
+  /// 挂起时把预读窗口归零，不再发起新请求，已缓冲数据仍可用；
+  /// 恢复值是 mpv 默认值（media_kit 不改动它们）。
+  /// （同步自上游 Kazumi 84043d5）
+  Future<void> setPrefetchSuspended(bool suspended) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    _prefetchSuspendWanted = suspended;
+    await _prefetchWrites.run(() async {
+      final wanted = _prefetchSuspendWanted;
+      final player = mediaPlayer;
+      if (player == null) {
+        return;
+      }
+      try {
+        final pp = player.platform as NativePlayer;
+        await pp.setProperty('cache-secs', wanted ? '0' : '36000');
+        if (!isCurrentPlayer(player)) {
+          return;
+        }
+        await pp.setProperty('demuxer-readahead-secs', wanted ? '0' : '1');
+      } catch (e) {
+        MiruLogger().w(
+          'PlayerController: failed to ${wanted ? 'suspend' : 'resume'} demuxer prefetch',
+          error: e,
+        );
+      }
+    });
+  }
 
   bool hAenable = true;
   late String hardwareDecoder;

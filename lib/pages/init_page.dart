@@ -5,6 +5,7 @@ import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/services/plugin/community_rules_sync.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/services/sync/bangumi_sync_service.dart';
+import 'package:miru/services/sync/github_sync.dart';
 import 'package:miru/services/sync/webdav.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/plugins/plugins_controller.dart';
@@ -59,6 +60,7 @@ class _InitPageState extends State<InitPage> {
     _loadShaders();
     _loadDanmakuShield();
     _webDavInit();
+    _githubInit();
     _bangumiInit();
     try {
       await downloadController.init();
@@ -190,6 +192,40 @@ class _InitPageState extends State<InitPage> {
           stackTrace: stackTrace,
         );
       }
+    }
+  }
+
+  Future<void> _githubInit() async {
+    final bool githubEnable = GStorage.getSetting(SettingsKeys.githubEnable);
+    if (!githubEnable) {
+      return;
+    }
+    final github = GithubSync();
+    MiruLogger().i('GithubSync: starting initialization');
+    try {
+      await github.init();
+      try {
+        if (GStorage.getSetting(SettingsKeys.githubEnableHistory)) {
+          await github.syncHistory();
+          MiruLogger().i('GithubSync: completed syncing watch history');
+        }
+        if (GStorage.getSetting(SettingsKeys.githubEnableCollect)) {
+          await github.syncCollectibles();
+          MiruLogger().i('GithubSync: completed syncing collectibles');
+        }
+      } catch (e, stackTrace) {
+        MiruLogger().w(
+          'GithubSync: automatic sync failed',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'GithubSync: automatic initialization failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 

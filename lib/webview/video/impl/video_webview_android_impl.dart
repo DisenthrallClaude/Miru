@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/network/proxy_utils.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
 import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
@@ -115,13 +116,26 @@ class VideoWebviewAndroidImpl
           callback: (args) {
             String message = args[0].toString();
             logEventController.add('Callback received: $message');
+            // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，
+            // 不补全会被下面的 http 检查直接拒收。
+            if (message.startsWith('//')) {
+              message = 'https:$message';
+            }
             if (message.contains('http') && !isVideoSourceLoaded) {
               logEventController.add('Loading video source: $message');
               isIframeLoaded = true;
               isVideoSourceLoaded = true;
               videoLoadingEventController.add(false);
               unloadPage();
-              notifyVideoSourceResolved(message);
+              // 嗅探到的 .m3u8 显式标注 HLS：mpv 侧据此强制
+              // demuxer-lavf-format=hls，避开内容探测失误
+              // （对齐上游 Windows 平台 43e0fe8 的做法）。
+              notifyVideoSourceResolved(
+                message,
+                format: _isHlsUrl(message)
+                    ? VideoSourceFormat.hls
+                    : VideoSourceFormat.auto,
+              );
             }
           });
     }
@@ -335,4 +349,11 @@ class VideoWebviewAndroidImpl
       MiruLogger().e('WebView: 设置代理失败 $e');
     }
   }
+}
+
+/// URL 是否应按 HLS 流处理：以 .m3u8 结尾，或路径段以 .m3u8 结尾
+/// 后跟查询串（如 /index.m3u8?token=x）。
+bool _isHlsUrl(String url) {
+  final path = url.split('#').first.split('?').first;
+  return path.endsWith('.m3u8');
 }

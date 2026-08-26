@@ -25,6 +25,7 @@ class GlassSurface extends StatelessWidget {
     this.borderRadius,
     this.padding,
     this.tinted = false,
+    this.prominent = false,
   });
 
   final Widget child;
@@ -34,6 +35,14 @@ class GlassSurface extends StatelessWidget {
 
   /// 是否带一点强调色（用于选中态）。
   final bool tinted;
+
+  /// 是否为「高光玻璃」——区块标题专用的更强玻璃观感。
+  ///
+  /// 与 [level] 是两个正交维度：level 解决性能分级，prominent 解决视觉层级。
+  /// 区块标题（简介/标签/演职员…）数量少且静态，仍然不需要 BackdropFilter，
+  /// 只是把装饰层（底色/镜面渐变/描边）加浓到明显高于内容块的玻璃，
+  /// 让标题在视觉上「浮」在内容之上，形成液态玻璃的层次感。
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
@@ -51,10 +60,19 @@ class GlassSurface extends StatelessWidget {
 
     // 轻度：无模糊，纯装饰层模拟玻璃
     final bool isLight = brightness == Brightness.light;
-    // 提高底色与描边强度：之前太淡，观感上「看不出有圆盘」
+    // 提高底色与描边强度：之前太淡，观感上「看不出有圆盘」。
+    //
+    // 高光档（区块标题）：底色、镜面渐变、描边全面加浓，
+    // 与内容块的轻度玻璃拉开明显层级差。
+    final (double baseAlpha, double borderAlpha, double sheenAlpha) =
+        prominent
+            ? (isLight ? 0.15 : 0.21, isLight ? 0.26 : 0.38,
+                isLight ? 0.85 : 0.32)
+            : (isLight ? 0.09 : 0.14, isLight ? 0.14 : 0.22,
+                isLight ? 0.55 : 0.14);
     final Color base = tinted
         ? scheme.primary.withValues(alpha: isLight ? 0.16 : 0.26)
-        : scheme.onSurface.withValues(alpha: isLight ? 0.09 : 0.14);
+        : scheme.onSurface.withValues(alpha: baseAlpha);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -65,18 +83,20 @@ class GlassSurface extends StatelessWidget {
               ? scheme.primary.withValues(alpha: isLight ? 0.45 : 0.55)
               : (isLight
                   // 亮色下用「暗描边」才看得见边界，纯白描边在白底上等于没有
-                  ? scheme.onSurface.withValues(alpha: 0.14)
-                  : Colors.white.withValues(alpha: 0.22)),
-          width: 1.0,
+                  ? scheme.onSurface.withValues(alpha: borderAlpha)
+                  : Colors.white.withValues(alpha: borderAlpha)),
+          width: prominent ? 1.2 : 1.0,
         ),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: isLight ? 0.55 : 0.14),
+            Colors.white.withValues(alpha: sheenAlpha),
+            Colors.white.withValues(
+                alpha: prominent ? (isLight ? 0.14 : 0.07) : 0.0),
             Colors.white.withValues(alpha: 0.0),
           ],
-          stops: const [0.0, 0.75],
+          stops: prominent ? const [0.0, 0.55, 1.0] : const [0.0, 0.75, 1.0],
         ),
       ),
       child: content,
@@ -93,12 +113,17 @@ class GlassPill extends StatelessWidget {
     this.onTap,
     this.padding =
         const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.sm),
+    this.prominent = false,
   });
 
   final Widget child;
   final bool selected;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
+
+  /// 高光档：区块标题（简介/标签/角色…）专用，玻璃感明显强于
+  /// 内容标签的普通药丸，形成层级差。见 [GlassSurface.prominent]。
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +132,7 @@ class GlassPill extends StatelessWidget {
       borderRadius: Radii.brSm,
       padding: padding,
       tinted: selected,
+      prominent: prominent,
       child: child,
     );
 
