@@ -116,6 +116,13 @@ abstract class _PlayerPlaybackController with Store {
   /// 最近一次 open 使用的请求头，恢复时原样带上（Referer 等防盗链头缺失会 403）。
   Map<String, String> _lastHttpHeaders = const {};
 
+  /// 最近一次错误 toast 时间：错误风暴下（瞬时错误成串出现）
+  /// 避免同屏连拍多条报错。
+  DateTime? _lastErrorToastAt;
+
+  /// 错误 toast 最小间隔。
+  static const Duration _errorToastCooldown = Duration(seconds: 8);
+
   /// 距离结尾还有 30s 以上却收到 completed，且 10s 内出现过流错误，
   /// 判定为网络中断造成的假 EOF——不应触发自动连播。
   bool get isAbnormalEnd {
@@ -177,6 +184,32 @@ abstract class _PlayerPlaybackController with Store {
         return; // 已自行恢复
       }
       await recoverPlayback();
+    });
+  }
+
+  /// 瞬时错误提示：延迟数秒后复检播放状态。
+  ///
+  /// ffmpeg 自动重连（reconnect_streamed）生效期间，mpv 依旧会把
+  /// 每个 CDN 抖动/分片失败抛到错误流——播放实际毫无影响。立刻弹
+  /// 报错只会让用户以为出了问题。因此等 3 秒再判定：播放仍在正常
+  /// 推进 = 已自愈，静默记日志；真的卡死才提示用户（带冷却去重）。
+  void _showTransientErrorToast(Player player, Object event) {
+    Future<void>.delayed(const Duration(seconds: 3), () {
+      if (!isCurrentPlayer(player)) return;
+      if (playerCompleted) return;
+      if (playerPlaying && !playerBuffering && playerPosition > Duration.zero) {
+        MiruLogger()
+            .i('PlayerController: transient error self-healed ${videoUrl()}');
+        return; // 播放仍在推进，错误已被重连/重试消化掉
+      }
+      final now = DateTime.now();
+      final last = _lastErrorToastAt;
+      if (last != null && now.difference(last) < _errorToastCooldown) return;
+      _lastErrorToastAt = now;
+      MiruDialog.showToast(
+          message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
+          duration: const Duration(seconds: 5),
+          showActionButton: true);
     });
   }
 
@@ -553,22 +586,25 @@ abstract class _PlayerPlaybackController with Store {
         return await _discardIfNotCurrent(candidate);
       }
 
-      bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
       player.stream.error.listen((event) {
         if (!isCurrentPlayer(player)) {
           return;
         }
         // 错误时间戳先行更新：isAbnormalEnd 依赖它区分假 EOF。
         _lastStreamErrorAt = DateTime.now();
+        // 每次读实时值：用户在播放中途开关「错误提示」立即生效。
+        final bool showPlayerError =
+            GStorage.getSetting<bool>(SettingsKeys.showPlayerError);
         if (showPlayerError) {
           if (event.toString().contains('Failed to open') && playerBuffering) {
+            // 初始加载失败：流还没起来，无需延迟判定。
             MiruDialog.showToast(
-                message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
-          } else {
-            MiruDialog.showToast(
-                message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
-                duration: const Duration(seconds: 5),
+                message: '加载失败, 请尝试更换其他视频来源',
                 showActionButton: true);
+          } else {
+            // 瞬时错误：绝大多数会被 ffmpeg 重连自愈，
+            // 延迟复检确认真的影响播放才提示。
+            _showTransientErrorToast(player, event);
           }
         }
         MiruLogger().e('PlayerController: Player intent error ${videoUrl()}',

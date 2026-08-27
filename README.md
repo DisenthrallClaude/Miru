@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.3.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.3.1/Miru-1.3.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.3.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.3.2/Miru-1.3.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,18 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.3.1（本次）
+### 1.3.2（本次）
+
+> 安装包：[Releases v1.3.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.3.2)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**播放体验：**
+
+- 修复「视频还在正常播放却弹出播放器内部错误」的误报：CDN 抖动等瞬时错误大多已被自动重连静默修复，现在错误提示改为延迟数秒复检播放状态，只有真的卡死才提醒用户；真正致命的错误提示不受影响，并新增提示冷却防止错误风暴连拍。
+- 「错误提示」开关在播放中途切换现在立即生效（原先需重启播放）。
+
+### 1.3.1
 
 > 安装包：[Releases v1.3.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.3.1)
 >
