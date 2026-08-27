@@ -5,7 +5,7 @@
       "enabled": true,
       "priority": 10,
       "title": "测试弹窗无需在意",
-      "body": "",
+      "body": "该弹窗为测试，无需在意",
       "coverImage": "",
       "actions": [],
       "minAppVersion": "1.3.0",
