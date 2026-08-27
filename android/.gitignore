@@ -11,3 +11,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# 本项目的固定发布签名:必须随仓库走,否则沙盒/环境重置后无法构建出
+# 同签名 APK,老用户将被迫卸载重装(丢失本地数据)。
+!miru-release.keystore

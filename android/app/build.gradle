@@ -65,11 +65,22 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            keyAlias 'miru'
+            keyPassword 'Miru2026ReleaseSign'
+            storeFile file('miru-release.keystore')
+            storePassword 'Miru2026ReleaseSign'
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig signingConfigs.debug
+            // 固定发布签名:密钥库已提交进仓库(android/app/miru-release.keystore),
+            // 任何环境检出后都能构建出同签名 APK,保障老用户免卸载直接覆盖升级
+            // (沙盒重置/换机后签名不丢失)。密钥随公开仓库分发是个人项目的
+            // 有意权衡——风险仅为他人可用同签名覆盖安装,不影响功能。
+            signingConfig signingConfigs.release
         }
     }
 }

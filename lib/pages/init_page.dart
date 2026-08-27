@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/services/announcement/announcement_service.dart';
 import 'package:miru/services/plugin/community_rules_sync.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/services/sync/bangumi_sync_service.dart';
@@ -95,6 +96,9 @@ class _InitPageState extends State<InitPage> {
       },
     ));
     _startDefaultPage();
+    // 远程公告：主界面就绪后异步检查（内部延迟 2s 错峰 + 会话级去重）。
+    // 首装引导路径不接入——刚装 App 的用户不该被运营内容打扰。
+    unawaited(AnnouncementService.instance.maybeShowAnnouncement());
   }
 
   void _setupBackgroundDownloadNavigation() {

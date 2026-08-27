@@ -69,6 +69,16 @@ class ApiEndpoints {
   static const String telegramGroup =
       'https://github.com/DisenthrallClaude/Miru/discussions';
 
+  /// 远程公告源：仓库 main 分支根目录的 announcement.json。
+  /// 发布方通过管理页改写该文件即可推送弹窗公告，无需发版。
+  /// jsDelivr 主源（国内直连友好，缓存约 12 小时，管理页发布后会主动
+  /// purge）；raw 兜底（即时生效但部分地区不可达）。与规则仓库的
+  /// 双源回退架构完全一致。
+  static const String announcementJsonMirror =
+      'https://fastly.jsdelivr.net/gh/DisenthrallClaude/Miru@main/announcement.json';
+  static const String announcementJson =
+      'https://raw.githubusercontent.com/DisenthrallClaude/Miru/main/announcement.json';
+
   /// 番剧信息
   static const String bangumiInfoByID = '/v0/subjects/{0}';
 

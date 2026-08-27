@@ -15,6 +15,21 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+
+    // Kotlin 版本强统一（六刀裁剪第二刀的根治版）：
+    // 各插件上游声明的 KGP 1.7~2.3 版本不一，会解析/下载十套
+    // kotlin-gradle-plugin + kotlin-compiler-embeddable（约 1GB 磁盘与
+    // 可观的解析时间）。这里把一切 Kotlin 插件请求重定向到 2.2.21，
+    // 全仓库只剩一套工具链。
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "org.jetbrains.kotlin.android" ||
+                requested.id.id == "org.jetbrains.kotlin.kapt" ||
+                requested.id.id == "org.jetbrains.kotlin.multiplatform") {
+                useVersion("2.2.21")
+            }
+        }
+    }
 }
 
 plugins {

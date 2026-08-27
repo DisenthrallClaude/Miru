@@ -1,5 +1,4 @@
 import 'package:miru/bean/widget/glass.dart';
-import 'package:miru/bean/widget/frosted_surface.dart';
 import 'package:flutter/material.dart';
 
 enum _TileKind { plain, toggle, radio }
@@ -170,34 +169,44 @@ class _SplitRowState extends State<_SplitRow> {
       ),
     );
 
-    // 静态行用「轻玻璃」：半透明底 + 斜向高光 + 发丝描边，
-    // 玻璃质感常驻可见且零 GPU 开销；按下时才升级为真实液态玻璃罩
-    // （BackdropFilter）提供纵深反馈——常驻重玻璃会让长列表帧率崩掉。
-    if (_pressed) {
-      return FrostedSurface(
-        borderRadius: radius,
-        child: row,
-      );
-    }
-    return DecoratedBox(
+    // 行用「轻玻璃」：半透明底 + 斜向高光 + 发丝描边，玻璃质感常驻且
+    // 零 GPU 开销（常驻 BackdropFilter 会让长列表帧率崩掉）。
+    //
+    // 按压反馈是纯属性动画（底色/描边/高光提亮）：包裹结构恒定，
+    // InkWell 的 Element 与手势在按压全程保持存活。
+    // 之前的实现按压时切换到 FrostedSurface——它首帧换 key 重挂子树，
+    // 进行中的 tap 手势随 Element 一起被销毁，表现为
+    // 「点一下只出玻璃态、再点一下才进入」。
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOut,
       decoration: BoxDecoration(
         borderRadius: radius,
         // 白度刻意压低：源卡片列表会在同一块玻璃底上叠十几张卡，
         // 白度一高整片就糊成白色，玻璃的通透感反而没了。
-        color: isLight
-            ? Colors.white.withValues(alpha: 0.30)
-            : Colors.white.withValues(alpha: 0.05),
+        color: _pressed
+            ? (isLight
+                ? Colors.white.withValues(alpha: 0.46)
+                : Colors.white.withValues(alpha: 0.12))
+            : (isLight
+                ? Colors.white.withValues(alpha: 0.30)
+                : Colors.white.withValues(alpha: 0.05)),
         border: Border.all(
-          color: isLight
-              ? Colors.black.withValues(alpha: 0.07)
-              : Colors.white.withValues(alpha: 0.18),
+          color: _pressed
+              ? (isLight
+                  ? Colors.black.withValues(alpha: 0.12)
+                  : Colors.white.withValues(alpha: 0.32))
+              : (isLight
+                  ? Colors.black.withValues(alpha: 0.07)
+                  : Colors.white.withValues(alpha: 0.18)),
           width: 0.6,
         ),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: isLight ? 0.32 : 0.10),
+            Colors.white.withValues(
+                alpha: _pressed ? (isLight ? 0.5 : 0.2) : (isLight ? 0.32 : 0.10)),
             Colors.white.withValues(alpha: 0.0),
           ],
           stops: const [0.0, 0.72],

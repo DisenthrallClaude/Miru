@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -6,8 +9,11 @@ import 'package:miru/bean/dialog/material_bottom_sheet.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/card/bangumi_card.dart';
 import 'package:miru/bean/widget/error_widget.dart';
+import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/pressable_glass.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/pages/search/search_controller.dart';
+import 'package:miru/request/apis/bangumi_api.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/utils/date_time.dart';
@@ -233,10 +239,27 @@ class _SearchPageState extends State<SearchPage> {
         backgroundColor: Colors.transparent,
         title: const Text("搜索"),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: showWorkbench,
-        icon: const Icon(Icons.tune),
-        label: const Text("筛选"),
+      floatingActionButton: PressableGlass(
+        onTap: showWorkbench,
+        borderRadius: BorderRadius.circular(28),
+        child: FrostedSurface(
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.18),
+            width: 0.8,
+          ),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.tune_rounded, size: 20),
+                SizedBox(width: 8),
+                Text('筛选'),
+              ],
+            ),
+          ),
+        ),
       ),
       body: Column(
         children: [
@@ -274,40 +297,10 @@ class _SearchPageState extends State<SearchPage> {
                 isFullScreen: MediaQuery.sizeOf(context).width <
                     LayoutBreakpoint.compact['width']!,
                 suggestionsBuilder: (context, controller) => [
-                  Observer(
-                    builder: (context) {
-                      if (controller.text.isNotEmpty) {
-                        return const SizedBox(
-                          height: 400,
-                          child: Center(
-                            child: Text("暂无搜索建议，按回车直接检索"),
-                          ),
-                        );
-                      } else {
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (var history in searchPageController
-                                .searchHistories
-                                .take(10))
-                              ListTile(
-                                title: Text(history.keyword),
-                                onTap: () {
-                                  controller.text = history.keyword;
-                                  _submitSearch(controller.text);
-                                },
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.close),
-                                  onPressed: () {
-                                    searchPageController
-                                        .deleteSearchHistory(history);
-                                  },
-                                ),
-                              ),
-                          ],
-                        );
-                      }
-                    },
+                  _SearchSuggestionView(
+                    controller: controller,
+                    searchPageController: searchPageController,
+                    onPick: (keyword) => _submitSearch(keyword),
                   ),
                 ],
                 onSubmitted: _submitSearch,
@@ -979,5 +972,238 @@ String _seasonLabel(int quarter) {
       return '秋季';
     default:
       return '';
+  }
+}
+
+/// 搜索建议视图：历史记录 + 输入联想。
+///
+/// 输入为空时展示最近 10 条历史（可单条删除）；输入非空时先即时给出
+/// 历史前缀匹配（零延迟），再以 350ms 防抖异步拉取 Bangumi 搜索联想
+/// （封面缩略图 + 名称 + 评分/日期），点击任一建议直接发起搜索。
+///
+/// 网络联想失败静默降级（只剩历史匹配与回车直搜），不打断输入。
+class _SearchSuggestionView extends StatefulWidget {
+  const _SearchSuggestionView({
+    required this.controller,
+    required this.searchPageController,
+    required this.onPick,
+  });
+
+  /// 搜索视图内的输入控制器（SearchController 本身就是
+  /// TextEditingController，可监听文本变化）。
+  final SearchController controller;
+  final SearchPageController searchPageController;
+  final void Function(String keyword) onPick;
+
+  @override
+  State<_SearchSuggestionView> createState() => _SearchSuggestionViewState();
+}
+
+class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
+  static const Duration _debounce = Duration(milliseconds: 350);
+
+  Timer? _debounceTimer;
+  List<BangumiItem> _remoteSuggestions = [];
+  bool _loading = false;
+
+  /// 请求序号：只接受最新一次发起的联想结果，防止快速输入时
+  /// 旧响应晚到覆盖新结果。
+  int _requestSeq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onQueryChanged);
+    _onQueryChanged();
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    widget.controller.removeListener(_onQueryChanged);
+    super.dispose();
+  }
+
+  void _onQueryChanged() {
+    _debounceTimer?.cancel();
+    final keyword = widget.controller.text.trim();
+    if (keyword.isEmpty) {
+      _requestSeq++;
+      if (_remoteSuggestions.isNotEmpty || _loading) {
+        setState(() {
+          _remoteSuggestions = [];
+          _loading = false;
+        });
+      }
+      return;
+    }
+    _debounceTimer = Timer(_debounce, () => _fetchSuggestions(keyword));
+  }
+
+  Future<void> _fetchSuggestions(String keyword) async {
+    final seq = ++_requestSeq;
+    setState(() => _loading = true);
+    try {
+      final page = await BangumiApi.bangumiSearch(
+        keyword,
+        limit: 8,
+      );
+      if (!mounted || seq != _requestSeq) return;
+      setState(() {
+        _remoteSuggestions = page?.items ?? [];
+        _loading = false;
+      });
+    } catch (e) {
+      MiruLogger().w('Search: suggestion fetch failed', error: e);
+      if (mounted && seq == _requestSeq) {
+        setState(() {
+          _remoteSuggestions = [];
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  void _pick(String keyword) {
+    widget.controller.text = keyword;
+    widget.controller.selection =
+        TextSelection.collapsed(offset: keyword.length);
+    widget.onPick(keyword);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyword = widget.controller.text.trim();
+
+    if (keyword.isEmpty) {
+      return Observer(
+        builder: (context) {
+          if (widget.searchPageController.searchHistories.isEmpty) {
+            return const SizedBox(
+              height: 200,
+              child: Center(
+                child: Text('搜索你感兴趣的番剧吧'),
+              ),
+            );
+          }
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var history
+                  in widget.searchPageController.searchHistories.take(10))
+                ListTile(
+                  leading: const Icon(Icons.history_rounded),
+                  title: Text(history.keyword),
+                  onTap: () => _pick(history.keyword),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      widget.searchPageController.deleteSearchHistory(history);
+                    },
+                  ),
+                ),
+            ],
+          );
+        },
+      );
+    }
+
+    // 输入非空：本地历史前缀匹配（即时）+ 网络联想（防抖异步）。
+    return Observer(
+      builder: (context) {
+        final localMatches = widget
+            .searchPageController.searchHistories
+            .where((history) =>
+                history.keyword != keyword &&
+                history.keyword.toLowerCase().contains(keyword.toLowerCase()))
+            .take(4)
+            .toList();
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: SizedBox(
+                  height: 2,
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              ),
+            for (final history in localMatches)
+              ListTile(
+                leading: const Icon(Icons.history_rounded),
+                title: Text(history.keyword),
+                dense: true,
+                onTap: () => _pick(history.keyword),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () {
+                    widget.searchPageController.deleteSearchHistory(history);
+                  },
+                ),
+              ),
+            for (final item in _remoteSuggestions)
+              ListTile(
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: 40,
+                    height: 56,
+                    child: item.images['large']?.isNotEmpty == true
+                        ? CachedNetworkImage(
+                            imageUrl: item.images['large']!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer
+                                  .withValues(alpha: 0.4),
+                            ),
+                            errorWidget: (_, __, ___) => Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer
+                                  .withValues(alpha: 0.4),
+                              child: const Icon(Icons.movie_outlined, size: 18),
+                            ),
+                          )
+                        : Container(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer
+                                .withValues(alpha: 0.4),
+                            child: const Icon(Icons.movie_outlined, size: 18),
+                          ),
+                  ),
+                ),
+                title: Text(
+                  item.nameCn.isNotEmpty ? item.nameCn : item.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: item.ratingScore > 0
+                    ? Text(
+                        '${item.airDate} · ${item.ratingScore.toStringAsFixed(1)} 分',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    : (item.airDate.isNotEmpty
+                        ? Text(item.airDate,
+                            maxLines: 1, overflow: TextOverflow.ellipsis)
+                        : null),
+                dense: true,
+                onTap: () =>
+                    _pick(item.nameCn.isNotEmpty ? item.nameCn : item.name),
+              ),
+            if (!_loading && localMatches.isEmpty && _remoteSuggestions.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: Text('暂无联想，按回车直接检索')),
+              ),
+          ],
+        );
+      },
+    );
   }
 }

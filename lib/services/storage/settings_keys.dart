@@ -274,6 +274,26 @@ class SettingsKeys {
     false,
     group: SettingGroup.interface,
   );
+  /// 远程公告频控状态：JSON 对象 {公告id: "关闭日期 yyyy-MM-dd"}。
+  /// once 频控 = id 存在即不再弹；daily = 同一天内不重复弹。
+  /// 用单一字符串键而不是逐公告动态键，避免 Hive 键无上限增长。
+  static const announcementDismissState = SettingKey<String>(
+    'announcementDismissState',
+    '',
+    group: SettingGroup.interface,
+  );
+  /// 「我的追番」卡片展示的自定义用户名；空串回退「我的追番」。
+  static const username = SettingKey<String>(
+    'username',
+    '',
+    group: SettingGroup.interface,
+  );
+  /// 自定义头像的本地文件路径；空串 = 未设置，回退爱心图标。
+  static const avatarPath = SettingKey<String>(
+    'avatarPath',
+    '',
+    group: SettingGroup.interface,
+  );
   static const webDavEnable = SettingKey<bool>(
     _SettingBoxKey.webDavEnable,
     false,
@@ -628,6 +648,9 @@ class SettingsKeys {
     enableSystemProxy,
     defaultStartupPage,
     isWideScreen,
+    announcementDismissState,
+    username,
+    avatarPath,
     webDavEnable,
     webDavEnableHistory,
     webDavEnableCollect,

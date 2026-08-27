@@ -1,5 +1,25 @@
 import 'dart:math';
 
+/// 三态语义化版本比较（容忍 `v` 前缀、`+build`/`-beta` 后缀）。
+///
+/// 返回 -1 / 0 / 1 分别表示 `a < b`、`a == b`、`a > b`。
+/// 任一侧无法解析时按相等处理（调用方据此放行，宁多勿漏）。
+int compareVersions(String a, String b) {
+  final segmentsA = _parseVersion(a);
+  final segmentsB = _parseVersion(b);
+  if (segmentsA == null || segmentsB == null) {
+    return 0;
+  }
+  final maxLength = max(segmentsA.length, segmentsB.length);
+  for (var i = 0; i < maxLength; i++) {
+    final segA = i < segmentsA.length ? segmentsA[i] : 0;
+    final segB = i < segmentsB.length ? segmentsB[i] : 0;
+    if (segA < segB) return -1;
+    if (segA > segB) return 1;
+  }
+  return 0;
+}
+
 /// 语义化版本比较（容忍 `v` 前缀、`-beta`/`-rc` 后缀、非数字段）。
 ///
 /// 返回 `true` 表示 `remoteVersion` 比 `localVersion` 新。

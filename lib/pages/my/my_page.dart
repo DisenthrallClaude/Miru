@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -10,6 +12,7 @@ import 'package:miru/modules/collect/collect_type.dart';
 import 'package:miru/modules/my/watch_stats.dart';
 import 'package:miru/pages/menu/route_visibility.dart';
 import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/my/profile_editor.dart';
 import 'package:miru/pages/my/recent_watch_card.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/utils/constants.dart';
@@ -323,11 +326,16 @@ class _MyPageState extends State<MyPage> {
   }
 }
 
-class _CollectHero extends StatelessWidget {
+class _CollectHero extends StatefulWidget {
   const _CollectHero({required this.stats});
 
   final WatchStats stats;
 
+  @override
+  State<_CollectHero> createState() => _CollectHeroState();
+}
+
+class _CollectHeroState extends State<_CollectHero> {
   static const List<CollectType> _order = [
     CollectType.watching,
     CollectType.planToWatch,
@@ -336,8 +344,33 @@ class _CollectHero extends StatelessWidget {
     CollectType.abandoned,
   ];
 
+  String _username = '';
+  String _avatarPath = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  void _loadProfile() {
+    _username = GStorage.getSetting(SettingsKeys.username);
+    _avatarPath = GStorage.getSetting(SettingsKeys.avatarPath);
+    if (_avatarPath.isNotEmpty && !File(_avatarPath).existsSync()) {
+      _avatarPath = '';
+    }
+  }
+
+  Future<void> _editProfile() async {
+    final changed = await showProfileEditor(context);
+    if (changed == true && mounted) {
+      setState(_loadProfile);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final stats = widget.stats;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final lastWatchTime = stats.lastWatchTime;
@@ -345,8 +378,8 @@ class _CollectHero extends StatelessWidget {
         ? '收藏番剧后会在这里汇总'
         : '最近观看 ${formatTimestampToRelativeTime(lastWatchTime.millisecondsSinceEpoch ~/ 1000)}';
 
-    // 头部用户信息卡片：换成液态玻璃材质，去掉生硬的不透明底色。
-    // 圆角走 Radii 令牌；内容排版与数据展示保持原样。
+    // 头部用户信息卡片：液态玻璃材质；头像与用户名支持自定义
+    // （点击资料行唤起编辑器），未设置时回退爱心图标与「我的追番」。
     return FrostedSurface(
       borderRadius: BorderRadius.circular(_cardRadius),
       child: Padding(
@@ -354,29 +387,60 @@ class _CollectHero extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.favorite_rounded,
-                    size: 18,
-                    color: colorScheme.onPrimaryContainer,
-                  ),
+            InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: _editProfile,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: ClipOval(
+                        child: _avatarPath.isNotEmpty
+                            ? Image.file(
+                                File(_avatarPath),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(
+                                  Icons.favorite_rounded,
+                                  size: 18,
+                                  color: colorScheme.onPrimaryContainer,
+                                ),
+                              )
+                            : Icon(
+                                Icons.favorite_rounded,
+                                size: 18,
+                                color: colorScheme.onPrimaryContainer,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _username.isEmpty ? '我的追番' : _username,
+                      style: textTheme.titleMedium?.copyWith(
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.edit_rounded,
+                      size: 14,
+                      color: colorScheme.onSurfaceVariant
+                          .withValues(alpha: 0.7),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Text(
-                  '我的追番',
-                  style: textTheme.titleMedium?.copyWith(
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ],
+              ),
             ),
             const SizedBox(height: 16),
             Text.rich(
