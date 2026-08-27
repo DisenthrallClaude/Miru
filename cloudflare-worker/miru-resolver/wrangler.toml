@@ -1,0 +1,16 @@
+{
+  "name": "miru-resolver",
+  "main": "src/worker.js",
+  "compatibility_date": "2024-12-01",
+  "kv_namespaces": [
+    {
+      "binding": "RESOLVE_CACHE",
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+    }
+  ],
+  "vars": {
+    "CACHE_TTL_SECONDS": "2700",
+    "MAX_CACHE_ENTRIES": "500",
+    "ALLOWED_ORIGINS": "*"
+  }
+}

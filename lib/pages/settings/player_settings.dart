@@ -6,6 +6,9 @@ import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 import 'package:miru/services/network/metered_network_service.dart';
+import 'package:miru/services/video_source/cloud_video_source_resolver.dart';
+import 'package:miru/services/video_source/local_media_proxy.dart';
+import 'package:miru/services/video_source/resolution_result_cache.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/player/pip_utils.dart';
@@ -44,6 +47,10 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
   late int playerControllerLayerDisappearTime;
+  late bool cloudResolverEnable;
+  late bool localMediaCacheEnable;
+  late String cloudResolverUrl;
+  bool cloudResolverTesting = false;
   final MenuController playerAspectRatioMenuController = MenuController();
   final MenuController playerLogLevelMenuController = MenuController();
 
@@ -79,6 +86,11 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     androidAutoEnterPIP =
         GStorage.getSetting<bool>(SettingsKeys.androidAutoEnterPIP);
     lowMemoryMode = GStorage.getSetting<bool>(SettingsKeys.lowMemoryMode);
+    cloudResolverEnable =
+        GStorage.getSetting<bool>(SettingsKeys.cloudResolverEnable);
+    localMediaCacheEnable =
+        GStorage.getSetting<bool>(SettingsKeys.localMediaCacheEnable);
+    cloudResolverUrl = GStorage.getSetting<String>(SettingsKeys.cloudResolverUrl);
     playResume = GStorage.getSetting<bool>(SettingsKeys.playResume);
     privateMode = GStorage.getSetting<bool>(SettingsKeys.privateMode);
     showPlayerError = GStorage.getSetting<bool>(SettingsKeys.showPlayerError);
@@ -235,6 +247,63 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
         ],
       );
     });
+  }
+
+  Future<String?> _showCloudResolverUrlDialog() async {
+    return MiruDialog.show<String>(builder: (context) {
+      String input = cloudResolverUrl;
+      return AlertDialog(
+        title: const Text('云端解析 Worker 地址'),
+        content: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+          return TextField(
+            decoration: const InputDecoration(
+              floatingLabelBehavior: FloatingLabelBehavior.never,
+              labelText: 'https://miru-resolver.xxx.workers.dev',
+              helperText: '部署方法见仓库 cloudflare-worker 目录，可填多个（逗号分隔）',
+            ),
+            onChanged: (value) {
+              input = value;
+            },
+          );
+        }),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => MiruDialog.dismiss(),
+            child: Text(
+              '取消',
+              style: TextStyle(color: Theme.of(context).colorScheme.outline),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              MiruDialog.dismiss(popWith: input.trim());
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      );
+    });
+  }
+
+  Future<void> _testCloudResolver() async {
+    if (cloudResolverUrl.isEmpty) {
+      MiruDialog.showToast(message: '请先填写 Worker 地址');
+      return;
+    }
+    setState(() {
+      cloudResolverTesting = true;
+    });
+    CloudVideoSourceResolver.instance.invalidateEndpoints();
+    final endpoint = await CloudVideoSourceResolver.instance.healthCheck();
+    if (!mounted) return;
+    setState(() {
+      cloudResolverTesting = false;
+    });
+    MiruDialog.showToast(
+        message: endpoint != null
+            ? '连接成功：${endpoint.host}'
+            : '连接失败，请检查地址与 Worker 部署');
   }
 
   double get playerControllerLayerDisappearSeconds =>
@@ -453,6 +522,71 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   title: Text('隐身模式'),
                   description: Text('不保留观看记录'),
                   initialValue: privateMode,
+                ),
+              ],
+            ),
+            SettingsSection(
+              title: Text('播放加速'),
+              tiles: [
+                SettingsTile.switchTile(
+                  leading: Icons.flash_on_rounded,
+                  onToggle: (value) async {
+                    localMediaCacheEnable = value ?? !localMediaCacheEnable;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.localMediaCacheEnable,
+                        localMediaCacheEnable);
+                    setState(() {});
+                  },
+                  title: Text('本地媒体缓存'),
+                  description: Text('预取开头数据，二刷/换集秒开（移动网络不预取）'),
+                  initialValue: localMediaCacheEnable,
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.cloud_sync_rounded,
+                  onToggle: (value) async {
+                    cloudResolverEnable = value ?? !cloudResolverEnable;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.cloudResolverEnable, cloudResolverEnable);
+                    CloudVideoSourceResolver.instance.invalidateEndpoints();
+                    setState(() {});
+                  },
+                  title: Text('云端解析加速'),
+                  description: Text(cloudResolverUrl.isEmpty
+                      ? '需部署 Cloudflare Worker（地址未填写）'
+                      : '解析搬到边缘节点，多端点并发竞速'),
+                  initialValue: cloudResolverEnable,
+                ),
+                SettingsTile(
+                  leading: Icons.link_rounded,
+                  onPressed: (_) async {
+                    final newValue = await _showCloudResolverUrlDialog();
+                    if (newValue == null) return;
+                    cloudResolverUrl = newValue;
+                    await GStorage.putSetting<String>(
+                        SettingsKeys.cloudResolverUrl, cloudResolverUrl);
+                    CloudVideoSourceResolver.instance.invalidateEndpoints();
+                    setState(() {});
+                  },
+                  title: Text('Worker 地址'),
+                  description: Text(cloudResolverUrl.isEmpty
+                      ? '未设置（默认仅本地加速）'
+                      : cloudResolverUrl),
+                ),
+                SettingsTile(
+                  leading: Icons.wifi_find_rounded,
+                  onPressed: (_) => _testCloudResolver(),
+                  title: Text('测试连接'),
+                  description: Text(cloudResolverTesting ? '正在测试…' : '验证 Worker 是否可用'),
+                ),
+                SettingsTile(
+                  leading: Icons.cleaning_services_rounded,
+                  onPressed: (_) async {
+                    await LocalMediaProxy.instance.clearAll();
+                    await ResolutionResultCache.instance.clear();
+                    MiruDialog.showToast(message: '播放加速缓存已清除');
+                  },
+                  title: Text('清除播放加速缓存'),
+                  description: Text('解析结果与已预取的视频开头数据'),
                 ),
               ],
             ),

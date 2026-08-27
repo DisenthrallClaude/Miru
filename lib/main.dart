@@ -10,6 +10,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/network/proxy_manager.dart';
 import 'package:miru/services/network/system_proxy_service.dart';
+import 'package:miru/services/video_source/local_media_proxy.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
@@ -92,6 +93,8 @@ void main() async {
     SystemProxyService.init();
   }
   MeteredNetworkService.init();
+  // 秒开链路：本地媒体代理的预取流量守卫跟随计量网络状态。
+  LocalMediaProxy.isMeteredCheck = () => MeteredNetworkService.isMetered;
   ProxyManager.applyProxy();
   runApp(
     ModularApp(

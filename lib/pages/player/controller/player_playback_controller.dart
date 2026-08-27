@@ -1,5 +1,6 @@
 // ignore_for_file: library_private_types_in_public_api
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -116,6 +117,17 @@ abstract class _PlayerPlaybackController with Store {
   /// 最近一次 open 使用的请求头，恢复时原样带上（Referer 等防盗链头缺失会 403）。
   Map<String, String> _lastHttpHeaders = const {};
 
+  // ---------------- 秒开链路（v1.5.0）：本地代理 + 直连兑底 ----------------
+
+  /// 原始直链：videoUrl() 是本地代理地址时，代理打开失败用它重开。
+  String? _directVideoUrl;
+
+  /// 实际正在播放的地址（代理或直连），恢复重开时用。
+  String? _effectiveUrl;
+
+  /// 直连兑底已尝试过（防止循环重开）。
+  bool _directFallbackAttempted = false;
+
   /// 最近一次错误 toast 时间：错误风暴下（瞬时错误成串出现）
   /// 避免同屏连拍多条报错。
   DateTime? _lastErrorToastAt;
@@ -229,7 +241,7 @@ abstract class _PlayerPlaybackController with Store {
       MiruLogger().w(
           'PlayerController: auto recovering stream at $pos (${videoUrl()})');
       await player.open(
-        Media(videoUrl(),
+        Media(_effectiveUrl ?? videoUrl(),
             start: resumeFrom, httpHeaders: _lastHttpHeaders),
         play: true,
       );
@@ -339,6 +351,40 @@ abstract class _PlayerPlaybackController with Store {
     duration = Duration.zero;
     completed = false;
     startOffset = 0;
+    _directVideoUrl = null;
+    _effectiveUrl = null;
+    _directFallbackAttempted = false;
+  }
+
+  /// 设置秒开链路的直连兑底地址（由 PlayerController.init 传入）。
+  void setDirectFallbackUrl(String? url) {
+    _directVideoUrl = (url != null && url.isNotEmpty) ? url : null;
+  }
+
+  /// 本地代理打开失败时用原始直链原地重开（仅一次）。
+  /// 返回 true 表示已接管（无需再提示用户换源）。
+  bool _attemptDirectFallback(Player player) {
+    final direct = _directVideoUrl;
+    if (direct == null || direct == videoUrl()) {
+      return false;
+    }
+    if (_directFallbackAttempted) {
+      return false;
+    }
+    if (!isCurrentPlayer(player)) {
+      return false;
+    }
+    _directFallbackAttempted = true;
+    _effectiveUrl = direct;
+    MiruLogger().w(
+        'PlayerController: local proxy failed to open, retrying with direct url');
+    unawaited(player.open(
+      Media(direct,
+          start: Duration(seconds: startOffset),
+          httpHeaders: _lastHttpHeaders),
+      play: true,
+    ));
+    return true;
   }
 
   /// 本次会话是否从距结尾 [nearEndWatchedThreshold] 以内的位置起播。
@@ -597,10 +643,13 @@ abstract class _PlayerPlaybackController with Store {
             GStorage.getSetting<bool>(SettingsKeys.showPlayerError);
         if (showPlayerError) {
           if (event.toString().contains('Failed to open') && playerBuffering) {
-            // 初始加载失败：流还没起来，无需延迟判定。
-            MiruDialog.showToast(
-                message: '加载失败, 请尝试更换其他视频来源',
-                showActionButton: true);
+            // 初始加载失败：本地代理播放时先用原始直链重开一次，
+            // 直连也打不开才提示换源。
+            if (!_attemptDirectFallback(player)) {
+              MiruDialog.showToast(
+                  message: '加载失败, 请尝试更换其他视频来源',
+                  showActionButton: true);
+            }
           } else {
             // 瞬时错误：绝大多数会被 ffmpeg 重连自愈，
             // 延迟复检确认真的影响播放才提示。
@@ -645,8 +694,20 @@ abstract class _PlayerPlaybackController with Store {
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
+        // 起播探测上限（秒开）：mpv 默认对 HLS 的 avformat 探测最长可
+        // 达数秒，封顶 2 秒 + 5MB 后首帧出画明显提前；对 HLS/MP4 直链
+        // 的流识别精度绰绰有余。
+        await pp.setProperty('demuxer-lavf-analyzeduration', '2');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+        await pp.setProperty('demuxer-lavf-probesize', '5242880');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
       }
 
+      _effectiveUrl = videoUrl();
       await player.open(
         Media(videoUrl(),
             start: Duration(seconds: offset), httpHeaders: httpHeaders),

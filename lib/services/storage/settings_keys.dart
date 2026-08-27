@@ -615,6 +615,27 @@ class SettingsKeys {
     15,
     group: SettingGroup.player,
   );
+  /// 云端解析加速：Cloudflare Worker 地址。
+  /// 留空表示未部署，解析链路自动跳过云端层。
+  /// 部署方法见仓库 cloudflare-worker/miru-resolver/README.md。
+  static const cloudResolverUrl = SettingKey<String>(
+    'cloudResolverUrl',
+    '',
+    group: SettingGroup.player,
+  );
+  /// 云端解析加速开关（地址为空时开关不生效）。
+  static const cloudResolverEnable = SettingKey<bool>(
+    'cloudResolverEnable',
+    true,
+    group: SettingGroup.player,
+  );
+  /// 播放秒开：本地媒体缓存（开头数据预取 + 二刷磁盘直读）。
+  /// 移动数据网络下预取自动跳过，不偷跑流量。
+  static const localMediaCacheEnable = SettingKey<bool>(
+    'localMediaCacheEnable',
+    true,
+    group: SettingGroup.player,
+  );
 
   static final List<SettingKey<Object?>> all = [
     hAenable,
@@ -696,6 +717,9 @@ class SettingsKeys {
     disableSuperResolutionWarning,
     playerDisableAnimations,
     playerLogLevel,
+    cloudResolverUrl,
+    cloudResolverEnable,
+    localMediaCacheEnable,
     timelineNotShowAbandonedBangumis,
     timelineNotShowWatchedBangumis,
     timelineOnlyShowWatchingBangumis,

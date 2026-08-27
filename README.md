@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.4.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.4.0/Miru-1.4.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.0/Miru-1.5.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,29 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.4.0（本次）
+### 1.5.0（本次）
+
+> 安装包：[Releases v1.5.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.0)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**播放秒开（核心升级）：**
+
+- 解析四级漏斗：本地解析缓存 → 云端解析层（Cloudflare Worker，多端点并发竞速，谁最快用谁）→ 本地 WebView 嗅探（原逻辑完整保留兑底）。同集二刷 0 解析，云端解析 1~3 秒，任何一级失败自动降级，任何情况下都能播。
+- 云端解析层（可选，开箱默认本地加速）：仓库 `cloudflare-worker/miru-resolver/` 提供完整 Worker 代码与 5 分钟部署说明（Workers + KV，免费额度足够个人使用），部署后在「设置 → 播放 → 播放加速」填入地址即启用。
+- 本地媒体代理：mpv 改播 `127.0.0.1` 代理地址，MP4 Range 代理 + HLS 清单改写分片缓存；解析出直链后后台预取开头 4MB（HLS 预取前 6 片），点播放时首帧从磁盘秒出；同一集二刷开头数据磁盘直读。移动数据下预取自动跳过，不偷跑流量。
+- 预解析下一集：播放稳定 8 秒后自动把同线路下一集的解析与开头数据备好，换集接近秒开。
+- 直连兑底：本地代理万一打开失败，mpv 自动用原始直链原地重开（带原请求头），用户无感知。
+- 起播参数调优：avformat 探测封顶 2 秒 + 5MB（原默认最长可达数秒），首帧出画提前；120 秒前向缓冲与自动重连等稳定性加固全部保留。
+- 播放加速缓存可在「设置 → 播放 → 播放加速」开关与一键清除。
+
+**修复：**
+
+- 应用内更新下载慢/失败：APK 下载此前走 GitHub 直连（国内基本不可达），现在先并发探测镜像与直连（Range 小请求，2.5 秒超时）谁先应答用谁，下载中途失败自动换下一个源；错误弹窗新增「浏览器下载」兑底。
+- 部分手机顶部内容被状态栏/刘海遮挡：接入 HyperOS 等设备 MediaQuery padding 异常的修复器（正常设备零开销）。
+- 时间表顶部季节大标题在浅色主题下与背景同色看不清：顶栏不再放标题文字，季度切换入口改为日历图标按钮；追番页顶部的「追番」二字同步移除（底部导航已有同名页签）。
+
+### 1.4.0
 
 > 安装包：[Releases v1.4.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.4.0)
 >

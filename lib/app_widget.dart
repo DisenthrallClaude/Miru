@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
+import 'package:miru/bean/appbar/safe_mediaquery_warpper.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -345,6 +346,11 @@ class _AppWidgetState extends State<AppWidget>
           themeMode: themeProvider.themeMode,
           scaffoldMessengerKey: rootScaffoldMessengerKey,
           routerConfig: ModularApp.routerConfigOf(context),
+          // 修复部分 ROM（小米 HyperOS 等，flutter/flutter#161086）上报的
+          // 系统 MediaQuery padding 异常，导致 AppBar 顶到状态栏/刘海下面、
+          // 顶部内容被遮挡。正常设备零开销直接透传。
+          builder: (context, child) =>
+              SafeMediaQueryWrapper(child: child ?? const SizedBox.shrink()),
         );
       },
     );

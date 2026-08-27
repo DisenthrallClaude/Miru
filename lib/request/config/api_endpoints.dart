@@ -55,6 +55,13 @@ class ApiEndpoints {
   static const String latestAppMirror =
       'https://gh-proxy.com/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
+  /// APK 下载镜像前缀：GitHub Releases 的 browser_download_url 直连国内
+  /// 基本不可达，下载前先并发探测镜像与直连，谁先应答用谁。
+  /// gh-proxy 支持 302 到源站的大文件转发，实测可用。
+  static const List<String> updateDownloadMirrorPrefixes = [
+    'https://gh-proxy.com/',
+  ];
+
   /// 弹弹官网
   static const String dandanIndex = 'https://www.dandanplay.com/';
 

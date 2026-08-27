@@ -150,7 +150,10 @@ abstract class _VideoPageController with Store implements Disposable {
   final IDownloadRepository downloadRepository;
   final IDownloadManager downloadManager;
 
-  WebViewVideoSourceService? _videoSourceService;
+  HybridVideoSourceService? _videoSourceService;
+
+  /// 下一集预解析的延迟触发器（播放稳定 8 秒后再做，不与起播抢带宽）。
+  Timer? _nextEpisodePrefetchTimer;
 
   final StreamController<String> _logStreamController =
       StreamController<String>.broadcast();
@@ -681,7 +684,7 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    _videoSourceService ??= WebViewVideoSourceService();
+    _videoSourceService ??= HybridVideoSourceService();
 
     await _logSubscription?.cancel();
     _logSubscription = _videoSourceService!.onLog.listen((log) {
@@ -690,6 +693,23 @@ abstract class _VideoPageController with Store implements Disposable {
       }
     });
 
+    // 播放请求头提前构造：混合解析服务的探测/预取/代理回源与 mpv 播放
+    // 共用同一套 UA/Referer/Cookie，避免「探测可达但播放 403」。
+    final cookieHeader = await PluginCookieManager.instance.cookieHeaderFor(
+      currentPlugin.name,
+      // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等子域上，
+      // 与 baseUrl 的 host 不一致时按域过滤会拿不到。
+      Uri.parse(url),
+    );
+    final playbackHeaders = <String, String>{
+      'user-agent': currentPlugin.userAgent.isEmpty
+          ? getSessionUA()
+          : currentPlugin.userAgent,
+      if (currentPlugin.referer.isNotEmpty)
+        'referer': currentPlugin.referer,
+      ...cookieHeader,
+    };
+
     try {
       final timeoutSeconds = GStorage.getSetting(SettingsKeys.parseTimeout)
           .clamp(5, 120)
@@ -697,11 +717,12 @@ abstract class _VideoPageController with Store implements Disposable {
       final Duration timeout = Duration(seconds: timeoutSeconds);
       VideoSource source;
       try {
-        source = await _videoSourceService!.resolve(
+        source = await _videoSourceService!.resolveWithHeaders(
           url,
           useLegacyParser: currentPlugin.useLegacyParser,
           offset: offset,
           timeout: timeout,
+          playbackHeaders: playbackHeaders,
         );
       } on VideoSourceTimeoutException {
         unawaited(PluginHealthTracker.instance
@@ -712,11 +733,12 @@ abstract class _VideoPageController with Store implements Disposable {
         }
         MiruLogger().w(
             'VideoPageController: resolve timed out, retrying with ${currentPlugin.useLegacyParser ? 'standard' : 'legacy'} parser');
-        source = await _videoSourceService!.resolve(
+        source = await _videoSourceService!.resolveWithHeaders(
           url,
           useLegacyParser: !currentPlugin.useLegacyParser,
           offset: offset,
           timeout: timeout,
+          playbackHeaders: playbackHeaders,
         );
       }
 
@@ -734,6 +756,8 @@ abstract class _VideoPageController with Store implements Disposable {
 
       final params = PlaybackInitParams(
         videoUrl: source.url,
+        // 原始直链：本地代理打开失败时 mpv 直接用它重开，绝不明屏。
+        directVideoUrl: source.directUrl,
         offset: source.offset,
         isLocalPlayback: false,
         videoSourceFormat: source.format,
@@ -743,24 +767,7 @@ abstract class _VideoPageController with Store implements Disposable {
         danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
         pageUrl: resolvedEpisode.pageUrl,
         sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: {
-          // UA 与 WebView 解析阶段共用会话值；规则自带 UA 时优先。
-          // Cookie 一并透传：验证通过后的 clearance/token 类凭据
-          // 不带给 mpv 的话，浏览器能播而 app 必 403。
-          'user-agent': currentPlugin.userAgent.isEmpty
-              ? getSessionUA()
-              : currentPlugin.userAgent,
-          if (currentPlugin.referer.isNotEmpty)
-            'referer': currentPlugin.referer,
-          ...await PluginCookieManager.instance.cookieHeaderFor(
-            currentPlugin.name,
-            // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等
-            // 子域上，与 baseUrl 的 host 不一致时按域过滤会拿不到。
-            Uri.parse(
-              normalizeEpisodeUrl(currentPlugin.baseUrl, resolvedEpisode.pageUrl),
-            ),
-          ),
-        },
+        httpHeaders: playbackHeaders,
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
         referer: currentPlugin.referer,
@@ -778,7 +785,11 @@ abstract class _VideoPageController with Store implements Disposable {
           road: resolvedEpisode.roadIndex,
         );
         unawaited(_loadPlaybackDanmaku(playerController, params, session));
+        // 播放已稳定：后台预解析下一集，换集时直接命中缓存。
+        _scheduleNextEpisodePrefetch(resolvedEpisode);
       } else if (session.isActive) {
+        // 初始化失败：失效本集解析缓存，避免坏结果反复被用。
+        unawaited(_videoSourceService!.invalidate(url));
         _playbackSessions.cancel();
       }
     } on VideoSourceTimeoutException {
@@ -822,6 +833,52 @@ abstract class _VideoPageController with Store implements Disposable {
     _commentSessions.cancel();
     episodeInfo.reset();
     episodeCommentsList.clear();
+  }
+
+  /// 播放稳定后预解析同线路的下一集：解析缓存 + 开头数据都提前备好，
+  /// 用户点下一集时直接命中本地缓存，接近秒开。
+  void _scheduleNextEpisodePrefetch(EpisodeRef currentEpisode) {
+    _nextEpisodePrefetchTimer?.cancel();
+    final service = _videoSourceService;
+    if (service == null || isOfflineMode) {
+      return;
+    }
+    final nextEpisode = _resolveOnlineEpisode(
+      currentEpisode.listIndex + 1,
+      road: currentEpisode.roadIndex,
+    );
+    if (nextEpisode == null || nextEpisode.pageUrl.isEmpty) {
+      return;
+    }
+    _nextEpisodePrefetchTimer = Timer(const Duration(seconds: 8), () {
+      final prefetchService = _videoSourceService;
+      if (prefetchService == null || isOfflineMode) {
+        return;
+      }
+      final url = normalizeEpisodeUrl(
+        currentPlugin.baseUrl,
+        nextEpisode.pageUrl,
+      );
+      final cookieHeader = PluginCookieManager.instance.cookieHeaderFor(
+        currentPlugin.name,
+        Uri.parse(url),
+      );
+      unawaited(
+        cookieHeader.then((cookies) {
+          return prefetchService.prefetchResolve(
+            url,
+            playbackHeaders: {
+              'user-agent': currentPlugin.userAgent.isEmpty
+                  ? getSessionUA()
+                  : currentPlugin.userAgent,
+              if (currentPlugin.referer.isNotEmpty)
+                'referer': currentPlugin.referer,
+              ...cookies,
+            },
+          );
+        }),
+      );
+    });
   }
 
   Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
@@ -892,6 +949,8 @@ abstract class _VideoPageController with Store implements Disposable {
     _playbackSessions.cancel();
     _danmakuSessions.cancel();
     _commentSessions.cancel();
+    _nextEpisodePrefetchTimer?.cancel();
+    _nextEpisodePrefetchTimer = null;
     _logSubscription?.cancel();
     _logSubscription = null;
     if (!_logStreamController.isClosed) {

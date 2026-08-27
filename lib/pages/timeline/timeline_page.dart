@@ -682,8 +682,16 @@ class _TimelinePageState extends State<TimelinePage>
         needTopOffset: false,
         // 之前 104：标题行过高，与页签之间一大块空白；与追番页统一为 56。
         toolbarHeight: 56,
-        // 筛选原本是右下角 FAB，会被底部玻璃导航条挡住，移到顶栏
+        // 顶栏不再放季节大标题（浅色主题下与背景对比度不足且遮挡页签）。
+        // 季度切换入口保留为日历图标，与右侧「排序与筛选」并列。
         actions: [
+          IconButton(
+            tooltip: '季度切换（时间机器）',
+            icon: const Icon(Icons.calendar_month_rounded),
+            onPressed: () {
+              showSeasonBottomSheet(context);
+            },
+          ),
           IconButton(
             tooltip: '排序与筛选',
             icon: const Icon(Icons.tune_rounded),
@@ -706,15 +714,6 @@ class _TimelinePageState extends State<TimelinePage>
         bottom: LiquidGlassTabBar(
           controller: tabController!,
           tabs: tabs,
-        ),
-        title: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          child: Observer(builder: (context) {
-            return Text(timelineController.seasonString);
-          }),
-          onTap: () {
-            showSeasonBottomSheet(context);
-          },
         ),
       ),
       body: Observer(builder: (context) {

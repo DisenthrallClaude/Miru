@@ -13,8 +13,12 @@ enum VideoSourceType {
 
 /// 视频源解析结果
 class VideoSource {
-  /// 视频 URL (M3U8/MP4/本地路径)
+  /// 视频 URL (M3U8/MP4/本地路径)。秒开链路下可能是本地代理地址
+  /// （`http://127.0.0.1:<port>/...`），直连兜底时用 [directUrl]。
   final String url;
+
+  /// 原始直链（未经本地代理改写）。mpv 打开代理失败时用它直连重试。
+  final String directUrl;
 
   /// 播放偏移量（秒）
   final int offset;
@@ -30,7 +34,11 @@ class VideoSource {
     required this.offset,
     required this.type,
     this.format = VideoSourceFormat.auto,
-  });
+    String? directUrl,
+  }) : directUrl = directUrl ?? url;
+
+  /// 是否为本地代理地址（127.0.0.1）。
+  bool get isProxied => directUrl != url;
 
   @override
   String toString() =>

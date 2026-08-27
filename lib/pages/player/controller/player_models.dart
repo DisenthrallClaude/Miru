@@ -2,6 +2,11 @@ import 'package:miru/services/video_source/video_source_format.dart';
 
 class PlaybackInitParams {
   final String videoUrl;
+
+  /// 原始直链（未经本地代理改写）。秒开链路下 [videoUrl] 是
+  /// `127.0.0.1` 本地代理地址；代理打开失败时 mpv 用本字段直连重开，
+  /// 保证任何情况下都能播。
+  final String? directVideoUrl;
   final int offset;
   final bool isLocalPlayback;
   final VideoSourceFormat videoSourceFormat;
@@ -34,6 +39,7 @@ class PlaybackInitParams {
     required this.episodeTitle,
     required this.referer,
     required this.currentRoad,
+    this.directVideoUrl,
     this.videoSourceFormat = VideoSourceFormat.auto,
     this.pageUrl = '',
     this.sortNumber,

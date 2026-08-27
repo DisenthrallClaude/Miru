@@ -433,15 +433,22 @@ class AutoUpdater {
       MiruDialog.dismiss();
 
       // 显示详细的错误信息
+      final msg = e.toString();
       String errorMessage = '下载失败';
-      if (e.toString().contains('Permission denied') ||
-          e.toString().contains('Operation not permitted')) {
+      if (msg.contains('Permission denied') ||
+          msg.contains('Operation not permitted')) {
         errorMessage = '权限不足，文件已保存到应用临时目录';
-      } else if (e.toString().contains('No space left')) {
+      } else if (msg.contains('No space left')) {
         errorMessage = '磁盘空间不足';
-      } else if (e.toString().contains('Network')) {
-        errorMessage = '网络连接错误';
-      } else if (e.toString().contains('文件完整性验证失败')) {
+      } else if (msg.contains('网络超时') ||
+          msg.contains('timeout') ||
+          msg.contains('TimeoutException')) {
+        errorMessage = '网络超时，请检查网络后重试';
+      } else if (msg.contains('网络连接') ||
+          msg.contains('Network') ||
+          msg.contains('Connection')) {
+        errorMessage = '网络连接错误，请检查网络后重试';
+      } else if (msg.contains('文件完整性验证失败')) {
         errorMessage = '文件完整性验证失败，可能是网络传输错误';
       }
 
@@ -456,7 +463,7 @@ class AutoUpdater {
                 Text(errorMessage),
                 const SizedBox(height: 8),
                 Text(
-                  '错误详情: ${e.toString()}',
+                  '错误详情: $e',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -465,6 +472,14 @@ class AutoUpdater {
               TextButton(
                 onPressed: () => MiruDialog.dismiss(),
                 child: const Text('确定'),
+              ),
+              TextButton(
+                onPressed: () {
+                  MiruDialog.dismiss();
+                  // 浏览器下载：应用内持续失败时的最终兑底
+                  _openReleasePage(updateInfo);
+                },
+                child: const Text('浏览器下载'),
               ),
               TextButton(
                 onPressed: () {
@@ -581,6 +596,11 @@ class AutoUpdater {
   }
 
   /// 下载文件
+  ///
+  /// GitHub Releases 直连在国内基本不可达（连接被重置 / 长时间无响应），
+  /// 因此下载前先并发探测「镜像 + 直连」的可达性（Range 0-0 小请求，
+  /// 2.5 秒超时），谁先应答就用谁下载；探测全失败则按候选顺序硬试。
+  /// 下载中途网络错误也会自动切换下一个候选源重试。
   Future<String> _downloadFile(
       String url, String version, String expectedHash) async {
     final fileName = _getFileNameFromUrl(url, version);
@@ -618,29 +638,107 @@ class AutoUpdater {
       }
     }
 
-    _cancelToken = CancelToken();
+    final candidates = _downloadUrlCandidates(url);
+    final ranked = await _rankDownloadCandidates(candidates);
 
-    await _downloadClient.download(
-      url,
-      filePath,
-      cancelToken: _cancelToken,
-      onReceiveProgress: (received, total) {
-        if (total > 0) {
-          _downloadProgress.value = received / total;
+    Object? lastError;
+    for (final candidate in ranked) {
+      _cancelToken = CancelToken();
+      _downloadProgress.value = 0.0;
+      try {
+        await _downloadClient.download(
+          candidate,
+          filePath,
+          cancelToken: _cancelToken,
+          onReceiveProgress: (received, total) {
+            if (total > 0) {
+              _downloadProgress.value = received / total;
+            }
+          },
+        );
+
+        // 下载完成后验证文件哈希
+        final downloadedHash = await calculateFileHash(file);
+        if (downloadedHash != expectedHash) {
+          // 哈希不匹配，删除文件并抛出异常
+          await file.delete();
+          throw Exception(
+              '文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
         }
-      },
-    );
-
-    // 下载完成后验证文件哈希
-    final downloadedHash = await calculateFileHash(file);
-    if (downloadedHash != expectedHash) {
-      // 哈希不匹配，删除文件并抛出异常
-      await file.delete();
-      throw Exception('文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
+        MiruLogger()
+            .i('Update: file downloaded from $candidate and hash verified');
+        return filePath;
+      } catch (e) {
+        // 用户主动取消不换源，直接抛出
+        if (_cancelToken?.isCancelled ?? false) {
+          rethrow;
+        }
+        lastError = e;
+        MiruLogger().w('Update: download failed from $candidate', error: e);
+        // 清掉半成品，换下一个源重试
+        try {
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {}
+      }
     }
-    MiruLogger().i('Update: file downloaded and hash verified: $filePath');
+    throw lastError ?? Exception('所有下载源均不可用');
+  }
 
-    return filePath;
+  /// 构造下载候选地址：镜像在前，原始直连在后。
+  List<String> _downloadUrlCandidates(String url) {
+    final candidates = <String>[
+      for (final prefix in ApiEndpoints.updateDownloadMirrorPrefixes)
+        if (!url.startsWith(prefix)) '$prefix$url',
+      url,
+    ];
+    return candidates;
+  }
+
+  /// 并发探测候选地址可达性，返回按响应速度排序的列表。
+  ///
+  /// 用 `Range: bytes=0-0` 探测（响应 206/200 即视为可用，仅需几字节
+  /// 流量），单源 2.5 秒超时。全部失败时返回原始顺序（硬试一轮）。
+  Future<List<String>> _rankDownloadCandidates(List<String> candidates) async {
+    if (candidates.length <= 1) return candidates;
+    try {
+      final results = await Future.wait(
+        candidates.map((candidate) async {
+          final stopwatch = Stopwatch()..start();
+          try {
+            await _downloadClient.getPlain(
+              candidate,
+              headers: const {'Range': 'bytes=0-0'},
+              receiveTimeout: const Duration(milliseconds: 2500),
+            );
+            return (candidate, stopwatch.elapsedMilliseconds);
+          } catch (_) {
+            return (candidate, -1);
+          }
+        }),
+      );
+      final reachable = results
+          .where((entry) => entry.$2 >= 0)
+          .toList()
+        ..sort((a, b) => a.$2.compareTo(b.$2));
+      if (reachable.isEmpty) {
+        return candidates;
+      }
+      // 可达的按速度排前，不可达的保留在后面作最后尝试
+      final ranked = [
+        for (final entry in reachable) entry.$1,
+        for (final entry in results.where((e) => e.$2 < 0)) entry.$1,
+      ];
+      MiruLogger().i(
+          'Update: download mirror probe result: ${ranked.join(' -> ')}');
+      return ranked;
+    } catch (e) {
+      MiruLogger()
+          .w('Update: download mirror probe failed, fallback to direct',
+              error: e);
+      return candidates;
+    }
   }
 
   /// 安装更新

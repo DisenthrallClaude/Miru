@@ -170,7 +170,7 @@ class _CollectPageState extends State<CollectPage>
           controller: tabController!,
           tabs: tabs,
         ),
-        title: const Text('追番'),
+        // 顶栏不放「追番」大标题：底部导航已有同名页签，重复且占地。
         actions: [
           // 同步原本是右下角 FAB，会被底部玻璃导航条挡住，移到顶栏
           IconButton(

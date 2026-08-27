@@ -174,6 +174,8 @@ class PlayerController implements Disposable {
     currentDanmakuEpisodeNumber = params.danmakuEpisodeNumber;
     currentRoad = params.currentRoad;
     referer = params.referer;
+    // 秒开链路：本地代理打开失败时用原始直链原地重开
+    playback.setDirectFallbackUrl(params.directVideoUrl);
 
     MiruLogger().i(
         'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}');
