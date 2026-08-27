@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:miru/app_module.dart';
@@ -10,6 +11,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/network/proxy_manager.dart';
 import 'package:miru/services/network/system_proxy_service.dart';
+import 'package:miru/services/network/telemetry_service.dart';
 import 'package:miru/services/video_source/local_media_proxy.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -41,6 +43,9 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
+    // 匿名活跃心跳（每日一次，fire-and-forget，失败静默）：
+    // 为云端解析层的动态配额提供「当日活跃人数」输入
+    unawaited(TelemetryService.instance.dailyPing());
   } catch (e) {
     // Log the error for debugging (if logger is available)
     debugPrint('Storage initialization failed: $e');

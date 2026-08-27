@@ -20,7 +20,6 @@ class DioFactory {
           'referer': '',
           'user-agent': getRandomUA(),
         },
-        interceptors: [_BangumiMirrorInterceptor()],
       );
 
   static Dio get rulesRepoDio => _rulesRepoDio ??= _create(
@@ -145,43 +144,6 @@ class _IdempotentRetryInterceptor extends Interceptor {
     } catch (e) {
       handler.next(err);
     }
-  }
-}
-
-class _BangumiMirrorInterceptor extends Interceptor {
-  /// 官方 host → 社区公共反代。
-  ///
-  /// 原先统一重写到 api.miru.fyi，但那个 mirror 需要 KAZUMI_APPID/KEY 签名，
-  /// 自建包拿不到密钥，导致搜索/评论/热门/时间表全部 403。
-  /// 这里改用无需鉴权的公共反代，并且按原始 host 分别映射
-  /// （两个反代的后端不同，不能混用）。
-  static const _hostProxies = <String, String>{
-    'api.bgm.tv': ApiEndpoints.bangumiApiProxyDomain,
-    'next.bgm.tv': ApiEndpoints.bangumiNextProxyDomain,
-  };
-
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    final enableBangumiProxy =
-        GStorage.getSetting(SettingsKeys.enableBangumiProxy);
-    if (!enableBangumiProxy) {
-      handler.next(options);
-      return;
-    }
-
-    final uri = options.uri;
-    final proxy = _hostProxies[uri.host];
-    if (proxy == null) {
-      handler.next(options);
-      return;
-    }
-
-    // path 与 query 原样保留，只替换域名
-    final mirrored =
-        proxy + uri.path + (uri.hasQuery ? '?${uri.query}' : '');
-    MiruLogger().d('Bangumi proxy: $mirrored');
-    options.path = mirrored;
-    handler.next(options);
   }
 }
 

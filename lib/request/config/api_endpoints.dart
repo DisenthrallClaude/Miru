@@ -41,6 +41,15 @@ class ApiEndpoints {
   /// 社区公共反代：next.bgm.tv 的替身，无需鉴权
   static const String bangumiNextProxyDomain = 'https://next.bangumi.lol';
 
+  /// 云端解析官方端点（v1.5.1 起内置，零配置可用）。
+  ///
+  /// 由项目方部署在 Cloudflare Workers 免费额度上，带匿名用户统计与
+  /// 动态配额（按当日活跃人数均摊，超限自动降级本地解析，不影响播放）。
+  /// 想自建/换源的用户可在「设置 → 播放 → 播放加速」里覆盖，
+  /// 部署方法见仓库 cloudflare-worker/miru-resolver/README.md。
+  static const String cloudResolverOfficialEndpoint =
+      'https://miru-resolver.3127467219.workers.dev';
+
   /// 推荐页 / 时间表的产地过滤标签（Bangumi 元标签）。
   ///
   /// 原版写死 '日本'，这里改为 '中国' 以只推国漫。

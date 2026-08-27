@@ -43,6 +43,12 @@ class LocalMediaProxy {
   /// 磁盘缓存总大小上限（含分片）。
   static const int maxTotalBytes = 160 * 1024 * 1024;
 
+  /// [hasUsableCache] 的 MP4 判定阈值：缓存开头至少这么多字节才值得走代理。
+  static const int usableMp4Bytes = 1024 * 1024;
+
+  /// [hasUsableCache] 的 HLS 判定阈值：至少这么多分片已落盘。
+  static const int usableHlsSegments = 2;
+
   /// 计量网络检查钩子：由外部接线（避免本文件依赖平台插件，便于单测）。
   static bool Function() isMeteredCheck = () => false;
 
@@ -98,6 +104,38 @@ class LocalMediaProxy {
     _registrations.clear();
     _rewrittenManifests.clear();
     await server?.close(force: true);
+  }
+
+  /// 判断该直链是否已有「可用的」磁盘缓存：
+  /// - MP4：开头数据 ≥ [usableMp4Bytes]（覆盖 moov + 前几十秒）；
+  /// - HLS：至少 [usableHlsSegments] 个分片已落盘。
+  ///
+  /// 智能代理模式（v1.5.1）用它决定是否走代理：
+  /// 有数据才代理（首帧从磁盘秒出），没数据直连（v1.3.2 行为，
+  /// 代理从必经之路退化成纯加速器，绝不给首播引入额外风险）。
+  Future<bool> hasUsableCache(String videoUrl,
+      {required bool isHls}) async {
+    if (!videoUrl.startsWith('http')) return false;
+    try {
+      final token = _tokenFor(videoUrl);
+      final meta = await _readMeta(token);
+      if (meta == null) return false;
+      if (!isHls) {
+        final f = File('${_cacheDir!.path}/$token.bin');
+        return await f.exists() && await f.length() >= usableMp4Bytes;
+      }
+      var present = 0;
+      for (final segToken in meta.segTokens) {
+        final f = File('${_cacheDir!.path}/seg_$segToken.bin');
+        if (await f.exists() && await f.length() > 0) {
+          present++;
+          if (present >= usableHlsSegments) return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -156,6 +194,11 @@ class LocalMediaProxy {
     if (await file.exists() && await file.length() >= mp4PrefetchBytes) {
       return; // 已预取过
     }
+    // 播放 tee 正在写同一文件时不抢写（截断+追加并存会写坏缓存；
+    // tee 本身就在填缓存，等它写满即可）
+    if (_writing.contains(token)) {
+      return;
+    }
     final client = HttpClient();
     try {
       final request = await client
@@ -184,10 +227,13 @@ class LocalMediaProxy {
     _rewrittenManifests[_tokenFor(url)] = built.manifest;
     final segments =
         built.segmentUrls.take(hlsPrefetchSegments).toList(growable: false);
+    final segTokens = <String>[];
     for (final segmentUrl in segments) {
       await _fetchSegmentToCache(segmentUrl, headers);
+      segTokens.add(_tokenFor(segmentUrl));
     }
-    await _writeMeta(_tokenFor(url), url, headers, isHls: true, total: null);
+    await _writeMeta(_tokenFor(url), url, headers, isHls: true,
+        total: null, segTokens: segTokens);
   }
 
   // ---------------------------------------------------------------------------
@@ -341,14 +387,20 @@ class LocalMediaProxy {
     }
   }
 
-  /// MP4 Range 代理：磁盘命中区间直接回，缺口回源拼接，响应流 tee 落盘。
+  /// MP4 Range 代理：磁盘命中区间直接回，缺口流式回源，响应流 tee 落盘。
   ///
   /// mpv 的典型请求形态是「bytes=0-」开放区间 + 顺序大块读；seek 时是
-  /// 「bytes=X-Y」。处理矩阵：
+  /// 「bytes=X-Y」。处理矩阵（v1.5.1 全面重写为流式，绝不把上游响应
+  /// 整段读入内存——旧实现遇到「无 Range 的 GET + 已有磁盘缓存」会把
+  /// 视频剩余全部字节缓冲进内存，大文件直接 OOM/卡死，是「有时很难
+  /// 加载进去」的第一元凶）：
   /// - 区间整段在磁盘缓存内 → 纯磁盘 206 响应；
-  /// - 区间跨缓存边界（start < cachedLen ≤ end+1）→ 磁盘部分 + 回源部分拼接，
-  ///   回源字节顺带追加进缓存；
-  /// - 区间在缓存外 → 回源透传；若正好接在缓存末尾（顺序读）则边转发边落盘。
+  /// - 有界区间越过缓存边界 → 只回磁盘部分（206 bytes X-diskEnd/total），
+  ///   mpv 短读后会带新 Range 重连补齐（本地回环，几乎零开销）；
+  /// - 开放区间且总长已知 → 磁盘部分 + 上游流式拼接为一个连续 206
+  ///   （上游请求 bytes=cachedLen-，正好接在缓存末尾，可边转发边 tee）；
+  /// - 开放区间且总长未知 → 只回磁盘部分，mpv 重连后走透传路径补齐；
+  /// - 区间在缓存外 → 回源透传；顺序读且正好接在缓存末尾时 tee。
   Future<void> _serveMediaRange(HttpRequest request, String token) async {
     final registration = _registrations[token];
     final srcUrl = registration?.url ?? _srcFromQuery(request);
@@ -364,9 +416,9 @@ class LocalMediaProxy {
         await cacheFile.exists() ? await cacheFile.length() : 0;
 
     final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-    final range = rangeHeader == null
-        ? const (start: 0, end: null)
-        : _parseRange(rangeHeader);
+    // null = 客户端没发 Range（或格式非法）：透传时不强加 Range，
+    // 避免给无 Range 请求回 206 的语义违规。
+    final range = _parseRange(rangeHeader ?? '');
     final requestedStart = range?.start ?? 0;
     final requestedEnd = range?.end; // null = 开放区间（到文件尾）
 
@@ -379,39 +431,117 @@ class LocalMediaProxy {
             requestedEnd == null || requestedEnd >= cachedLen - 1
                 ? cachedLen - 1
                 : requestedEnd;
-        final restStart = diskEnd + 1;
-        final needsUpstream = requestedEnd == null || requestedEnd > diskEnd;
 
-        List<int>? upstreamBytes;
-        if (needsUpstream && (meta?.total == null || restStart < meta!.total!)) {
-          upstreamBytes = await _fetchRangeBytes(
-              client, srcUrl, forwardHeaders, restStart, requestedEnd);
+        // 1) 有界且整段在磁盘内：纯磁盘响应，不碰上游
+        if (requestedEnd != null && requestedEnd <= diskEnd) {
+          final total = meta?.total ?? diskEnd + 1;
+          await _respondDiskRange(
+              request, cacheFile, requestedStart, diskEnd, total);
+          return;
         }
 
-        final servedEnd = upstreamBytes != null && upstreamBytes.isNotEmpty
-            ? restStart + upstreamBytes.length - 1
-            : diskEnd;
-        final total = meta?.total ?? servedEnd + 1;
+        // 2) 有界但越过缓存边界：只回磁盘部分，mpv 会重连补齐
+        if (requestedEnd != null) {
+          final total = meta?.total ?? diskEnd + 1;
+          await _respondDiskRange(
+              request, cacheFile, requestedStart, diskEnd, total);
+          return;
+        }
+
+        // 3) 开放区间且总长未知：不能回磁盘部分——Content-Range 里的
+        //    假 total 会让 mpv 以为文件只有缓存这么大，播到边界就停。
+        //    直接走透传（顺带从源站学到总长写进 meta，下次就能合并了）。
+        if (meta?.total == null) {
+          await _passthroughUpstream(request, client, srcUrl, forwardHeaders,
+              cacheFile, token, meta, range, requestedStart, cachedLen);
+          return;
+        }
+        final total = meta!.total!;
+
+        // 4) 开放区间且总长已知：磁盘 + 上游流式拼接为一个连续 206
+        final upstream = await client.getUrl(Uri.parse(srcUrl));
+        forwardHeaders.forEach(upstream.headers.set);
+        upstream.headers
+            .set(HttpHeaders.rangeHeader, 'bytes=$cachedLen-');
+        final response = await upstream.close();
+        if (response.statusCode != HttpStatus.partialContent) {
+          // 上游不接受 Range（返回 200 全量）。
+          // 请求从 0 开始时可以退化为 200 透传（字节对齐）；
+          // 否则无法与磁盘拼接，502 让 mpv 走直连兑底。
+          await response.drain<void>().catchError((_) {});
+          if (requestedStart == 0) {
+            await _passthroughFresh(
+                request, client, srcUrl, forwardHeaders, cacheFile, token);
+            return;
+          }
+          request.response.statusCode = HttpStatus.badGateway;
+          await request.response.close();
+          return;
+        }
+
+        final servedEnd = total - 1;
         request.response.statusCode = HttpStatus.partialContent;
         request.response.headers.set(HttpHeaders.contentRangeHeader,
             'bytes $requestedStart-$servedEnd/$total');
-        final diskPart =
-            await _readFileRange(cacheFile, requestedStart, diskEnd);
-        request.response.add(diskPart);
-        if (upstreamBytes != null && upstreamBytes.isNotEmpty) {
-          request.response.add(upstreamBytes);
-          unawaited(_appendCache(cacheFile, token, upstreamBytes));
+        request.response.contentLength = servedEnd - requestedStart + 1;
+        // 磁盘部分（流式，不占大内存）
+        await request.response
+            .addStream(cacheFile.openRead(requestedStart, diskEnd + 1));
+        // 上游部分：从 cachedLen 开始正好接在缓存末尾，可 tee
+        if (cachedLen < mp4PrefetchBytes && _writing.add(token)) {
+          teeSink = cacheFile.openWrite(mode: FileMode.append);
+        }
+        await for (final chunk in response) {
+          request.response.add(chunk);
+          if (teeSink != null) {
+            if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
+              teeSink.add(chunk);
+            } else {
+              await teeSink.close();
+              teeSink = null;
+              _writing.remove(token);
+            }
+          }
         }
         await request.response.close();
+        await teeSink?.close();
+        teeSink = null;
         return;
       }
 
       // ---- 区间在缓存之外：透传回源 ----
+      await _passthroughUpstream(request, client, srcUrl, forwardHeaders,
+          cacheFile, token, meta, range, requestedStart, cachedLen);
+    } catch (_) {
+      await teeSink?.close().catchError((_) {});
+      rethrow;
+    } finally {
+      _writing.remove(token);
+      client.close(force: true);
+    }
+  }
+
+  /// 回源透传：转发 Range，回传状态/Content-Range/Content-Length，
+  /// 顺带把学到的总长写进 meta；顺序读且接续缓存末尾时 tee 落盘。
+  Future<void> _passthroughUpstream(
+    HttpRequest request,
+    HttpClient client,
+    String srcUrl,
+    Map<String, String> forwardHeaders,
+    File cacheFile,
+    String token,
+    _ProxyMeta? meta,
+    ({int start, int? end})? range,
+    int requestedStart,
+    int cachedLen,
+  ) async {
+    IOSink? teeSink;
+    try {
       final upstream = await client.getUrl(Uri.parse(srcUrl));
       forwardHeaders.forEach(upstream.headers.set);
       if (range != null) {
-        upstream.headers
-            .set(HttpHeaders.rangeHeader, 'bytes=$requestedStart-${range.end ?? ''}');
+        upstream.headers.set(
+            HttpHeaders.rangeHeader, 'bytes=$requestedStart-${range.end ?? ''}');
       }
       final response = await upstream.close();
       if (response.statusCode != 206 && response.statusCode != 200) {
@@ -466,47 +596,66 @@ class LocalMediaProxy {
       rethrow;
     } finally {
       _writing.remove(token);
-      client.close(force: true);
     }
   }
 
-  Future<List<int>> _fetchRangeBytes(HttpClient client, String url,
-      Map<String, String> headers, int start, int? end) async {
-    final request = await client.getUrl(Uri.parse(url));
-    headers.forEach(request.headers.set);
-    request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-${end ?? ''}');
-    final response = await request.close();
-    if (response.statusCode != 206 && response.statusCode != 200) {
-      return const [];
-    }
-    final builder = BytesBuilder(copy: false);
-    await for (final chunk in response) {
-      builder.add(chunk);
-    }
-    return builder.takeBytes();
+  /// 纯磁盘区间响应（206 + Content-Range + 流式文件读取）。
+  Future<void> _respondDiskRange(
+    HttpRequest request,
+    File file,
+    int start,
+    int end,
+    int total,
+  ) async {
+    request.response.statusCode = HttpStatus.partialContent;
+    request.response.headers.set(
+        HttpHeaders.contentRangeHeader, 'bytes $start-$end/$total');
+    request.response.contentLength = end - start + 1;
+    await request.response.addStream(file.openRead(start, end + 1));
+    await request.response.close();
   }
 
-  Future<Uint8List> _readFileRange(File file, int start, int end) async {
-    final raf = await file.open();
+  /// 上游不接受 Range 时的退化路径：从 0 开始全量透传（可 tee 落盘）。
+  Future<void> _passthroughFresh(
+    HttpRequest request,
+    HttpClient client,
+    String srcUrl,
+    Map<String, String> forwardHeaders,
+    File cacheFile,
+    String token,
+  ) async {
+    final upstream = await client.getUrl(Uri.parse(srcUrl));
+    forwardHeaders.forEach(upstream.headers.set);
+    final response = await upstream.close();
+    if (response.statusCode != 200 && response.statusCode != 206) {
+      request.response.statusCode = HttpStatus.badGateway;
+      await request.response.close();
+      return;
+    }
+    request.response.statusCode = HttpStatus.ok;
+    IOSink? teeSink;
     try {
-      final length = end - start + 1;
-      await raf.setPosition(start);
-      return await raf.read(length);
-    } finally {
-      await raf.close();
-    }
-  }
-
-  /// 追加缓存（只在 restStart == cachedLen 的顺序场景被调用）。
-  Future<void> _appendCache(File file, String token, List<int> bytes) async {
-    if (!_writing.add(token)) return;
-    try {
-      if (await file.length() + bytes.length <= mp4PrefetchBytes) {
-        final sink = file.openWrite(mode: FileMode.append);
-        sink.add(bytes);
-        await sink.close();
+      if (cacheFile.lengthSync() == 0 && _writing.add(token)) {
+        teeSink = cacheFile.openWrite();
       }
-    } catch (_) {} finally {
+      await for (final chunk in response) {
+        request.response.add(chunk);
+        if (teeSink != null) {
+          if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
+            teeSink.add(chunk);
+          } else {
+            await teeSink.close();
+            teeSink = null;
+            _writing.remove(token);
+          }
+        }
+      }
+      await request.response.close();
+      await teeSink?.close();
+    } catch (_) {
+      await teeSink?.close().catchError((_) {});
+      rethrow;
+    } finally {
       _writing.remove(token);
     }
   }
@@ -635,13 +784,14 @@ class LocalMediaProxy {
 
   Future<void> _writeMeta(String token, String url,
       Map<String, String> headers,
-      {required bool isHls, int? total}) async {
+      {required bool isHls, int? total, List<String>? segTokens}) async {
     try {
       final meta = {
         'u': url,
         'h': headers,
         'hls': isHls ? 1 : 0,
         if (total != null) 't': total,
+        if (segTokens != null && segTokens.isNotEmpty) 's': segTokens,
         'at': DateTime.now().millisecondsSinceEpoch,
       };
       await File('${_cacheDir!.path}/$token.meta')
@@ -658,6 +808,10 @@ class LocalMediaProxy {
       return _ProxyMeta(
         url: data['u'] as String? ?? '',
         total: (data['t'] as num?)?.toInt(),
+        segTokens: (data['s'] as List?)
+                ?.map((e) => e.toString())
+                .toList(growable: false) ??
+            const [],
       );
     } catch (_) {
       return null;
@@ -840,10 +994,13 @@ class _ProxyRegistration {
 }
 
 class _ProxyMeta {
-  _ProxyMeta({required this.url, this.total});
+  _ProxyMeta({required this.url, this.total, this.segTokens = const []});
 
   final String url;
   final int? total;
+
+  /// HLS：已预取分片的 token 列表（判断缓存是否可用）。
+  final List<String> segTokens;
 }
 
 class _ResolvedManifest {

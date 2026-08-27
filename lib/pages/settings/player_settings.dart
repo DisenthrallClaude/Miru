@@ -552,7 +552,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   },
                   title: Text('云端解析加速'),
                   description: Text(cloudResolverUrl.isEmpty
-                      ? '需部署 Cloudflare Worker（地址未填写）'
+                      ? '已启用内置官方端点，点播解析快至 1~2 秒（免部署）'
                       : '解析搬到边缘节点，多端点并发竞速'),
                   initialValue: cloudResolverEnable,
                 ),
@@ -567,9 +567,9 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     CloudVideoSourceResolver.instance.invalidateEndpoints();
                     setState(() {});
                   },
-                  title: Text('Worker 地址'),
+                  title: Text('自建 Worker 地址（可选）'),
                   description: Text(cloudResolverUrl.isEmpty
-                      ? '未设置（默认仅本地加速）'
+                      ? '未设置：使用内置官方端点（推荐）'
                       : cloudResolverUrl),
                 ),
                 SettingsTile(

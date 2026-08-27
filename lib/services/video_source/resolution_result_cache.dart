@@ -81,6 +81,15 @@ class ResolutionResultCache {
     return entry.toVideoSource();
   }
 
+  /// 该条目是否在 [maxAge] 内写入（热路径探测免验证用：
+  /// 刚解析成功过的直链几乎不可能已失效，跳过可达性探测省一个 RTT）。
+  Future<bool> isFresh(String episodeUrl, Duration maxAge) async {
+    await _ensureLoaded();
+    final entry = _entries[episodeUrl];
+    if (entry == null || entry.isNegative) return false;
+    return DateTime.now().difference(entry.cachedAt) <= maxAge;
+  }
+
   /// 查询负缓存标记（该 URL 近期解析失败过）。
   Future<bool> isNegative(String episodeUrl) async {
     await _ensureLoaded();

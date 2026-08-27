@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.0/Miru-1.5.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.1/Miru-1.5.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,23 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.5.0（本次）
+### 1.5.1（本次）
+
+> 安装包：[Releases v1.5.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.1)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**播放稳定性与速度（全面整改）：**
+
+- **修复致命卡死**：本地代理在「边播边缓存」场景下会把视频剩余全部字节读进内存（大文件直接卡死/闪退），已全面重写为流式转发——边收边转发，内存占用恒定。这是「同一规则有时顺有时不顺」的第一元凶。
+- **云端解析默认可用**：官方解析端点已内置并部署上线（Cloudflare Workers 免费额度），**零配置**即享 1~2 秒解析，不再需要自己部署 Worker。想自建的仍可在「设置 → 播放 → 播放加速」替换地址。
+- **智能代理**：本地代理从「必经之路」退化为「纯加速器」——磁盘已有该集开头数据才走代理（首帧秒出），首次播放直接连源站，与老版本行为一致，代理故障不再可能影响首播。
+- **探测三态判定**：直链探测从「超时即判死」改为「仅明确的 403/404/410 才判死」，源站慢/抖动一律放行给播放器自己重试——不再把好链误杀成「重新解析 30 秒」。
+- **换集零开销**：刚解析成功的直链在 10 分钟内再次播放（换集、切回上一集）完全跳过探测，零额外等待。
+- **Bangumi 多源竞速**：详情页/首页轮播的 Bangumi 数据改为官方与镜像并发竞速（谁先回用谁），16:9 轮播图「点了加载不出来」大幅缓解。
+- 匿名活跃统计（每日一次心跳，仅一个随机 ID，无任何个人信息）用于动态分配云端解析配额；云端超限时自动降级本地解析，播放不受影响。
+
+### 1.5.0
 
 > 安装包：[Releases v1.5.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.0)
 >

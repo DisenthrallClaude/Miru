@@ -615,18 +615,33 @@ class SettingsKeys {
     15,
     group: SettingGroup.player,
   );
-  /// 云端解析加速：Cloudflare Worker 地址。
-  /// 留空表示未部署，解析链路自动跳过云端层。
+  /// 云端解析加速：自建/自定义 Worker 地址。
+  /// 留空 = 使用内置官方端点（v1.5.1 起零配置可用，见
+  /// [ApiEndpoints.cloudResolverOfficialEndpoint]）；填了则完全替换官方端点。
   /// 部署方法见仓库 cloudflare-worker/miru-resolver/README.md。
   static const cloudResolverUrl = SettingKey<String>(
     'cloudResolverUrl',
     '',
     group: SettingGroup.player,
   );
-  /// 云端解析加速开关（地址为空时开关不生效）。
+  /// 云端解析加速开关（官方或自定义端点任一存在即生效）。
   static const cloudResolverEnable = SettingKey<bool>(
     'cloudResolverEnable',
     true,
+    group: SettingGroup.player,
+  );
+  /// 匿名设备标识：首次启动随机生成，仅用于云端解析层的
+  /// 「每日活跃人数」统计与配额分配。不含任何个人信息，
+  /// 不随收藏/配置导出。空串表示尚未生成。
+  static const anonUid = SettingKey<String>(
+    'anonUid',
+    '',
+    group: SettingGroup.player,
+  );
+  /// 上次心跳的自然日（YYYYMMDD）：每天只发一次匿名活跃心跳。
+  static const lastPingDay = SettingKey<String>(
+    'lastPingDay',
+    '',
     group: SettingGroup.player,
   );
   /// 播放秒开：本地媒体缓存（开头数据预取 + 二刷磁盘直读）。

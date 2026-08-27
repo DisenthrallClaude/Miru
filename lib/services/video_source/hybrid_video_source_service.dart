@@ -12,22 +12,25 @@ import 'package:miru/utils/http_headers.dart';
 
 /// 混合视频源解析服务：秒开链路的「调度层」。
 ///
-/// 把原先单一的 WebView 嗅探（5~30 秒）升级为四级漏斗，任何一级
-/// 失败自动降级到下一级，任何情况下都能播：
+/// 四级漏斗，任何一级失败自动降级到下一级，任何情况下都能播：
 ///
 /// 1. **本地解析缓存**（`ResolutionResultCache`）——同集二刷 0 解析时间；
 /// 2. **云端解析层**（`CloudVideoSourceResolver`，多端点并发竞速）——
 ///    1~3 秒返回直链；
 /// 3. **WebView 嗅探**（原有逻辑原样保留）——最终兜底；
-/// 4. 每级成功后都过一遍**可达性探测**（Range 0-1024 / 清单首字节），
-///    死链/防盗链绑定 IP 的结果当场丢弃，绝不把坏结果交给 mpv。
+/// 4. 探测只做「三态判定」（见 [_ProbeVerdict]）：仅明确的 4xx 才判死，
+///    超时/网络抖动一律放行给 mpv（v1.5.0 的二值探测把慢源误判成死链，
+///    是「同一条规则有时顺有时不顺」的主要放大器）。
 ///
-/// 拿到可用直链后注册**本地媒体代理**（`LocalMediaProxy`）并后台预取
-/// 开头数据，mpv 播的是 `127.0.0.1` 的代理地址——首帧从磁盘秒出。
+/// 拿到可用直链后：
+/// - **智能代理**（v1.5.1）：磁盘已有该集开头数据才走本地代理（首帧从
+///   磁盘秒出）；否则 mpv 直连源站——与 v1.3.2 完全一致的行为，代理从
+///   「必经之路」退化成「纯加速器」，绝不给首播引入额外风险；
+/// - 无论走不走代理，都在后台预取开头数据（MP4 4MB / HLS 前 6 分片），
+///   为二刷和换集备好磁盘缓存。
 ///
-/// 预解析（[prefetchResolve]）在「用户还没点播放」时就把 1~3 级漏斗
-/// 跑完并预取数据：进入详情页即预解析当前集、播放稳定后预解析下一集，
-/// 点播放时整条链路已就绪。
+/// 预解析（[prefetchResolve]）在「用户还没点播放」时把 1~2 级漏斗跑完
+/// 并预取数据（播放稳定 8 秒后自动预解析下一集），点播放时整条链路已就绪。
 class HybridVideoSourceService implements IVideoSourceService {
   HybridVideoSourceService({WebViewVideoSourceService? webviewService})
       : _webviewService = webviewService ?? WebViewVideoSourceService();
@@ -38,8 +41,12 @@ class HybridVideoSourceService implements IVideoSourceService {
   final CloudVideoSourceResolver _cloud = CloudVideoSourceResolver.instance;
   final LocalMediaProxy _proxy = LocalMediaProxy.instance;
 
-  /// 直链可达性探测的超时。
+  /// 直链可达性探测的超时（只影响「判定快慢」，不影响正确性：
+  /// 超时算 unknown，一律放行给 mpv 自己重试）。
   static const Duration probeTimeout = Duration(seconds: 3);
+
+  /// 解析缓存条目的「新鲜期」：写入后这么长时间内命中免探测。
+  static const Duration freshEntryAge = Duration(minutes: 10);
 
   /// 透传 WebView 解析日志（详情页解析日志面板用）。
   Stream<String> get onLog => _webviewService.onLog;
@@ -73,11 +80,18 @@ class HybridVideoSourceService implements IVideoSourceService {
     // ---- 第 1 级：本地解析缓存 ----
     final cached = await _cache.get(episodeUrl);
     if (cached != null) {
-      if (await _isPlayable(cached.url, headers)) {
-        MiruLogger().i('HybridResolver: cache hit for $episodeUrl');
+      // 刚解析成功过的直链几乎不可能已失效：跳过探测，省一个 RTT
+      // （换集、切回刚看过的集、隔几分钟二刷都走这条零开销路径）。
+      final verdict = await _cache.isFresh(episodeUrl, freshEntryAge)
+          ? _ProbeVerdict.alive
+          : await _probe(cached.url, headers);
+      if (verdict != _ProbeVerdict.dead) {
+        // alive（正常路径，+1 RTT）或 unknown（源站慢，交给 mpv 重试）
+        MiruLogger().i(
+            'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
         return _materialize(cached, offset: offset, headers: headers);
       }
-      // 缓存的直链已失效（签名过期等），清除并继续走解析
+      // 明确的 4xx：直链已死（签名过期/防盗链），清除并继续走解析
       await _cache.invalidate(episodeUrl);
       MiruLogger()
           .w('HybridResolver: cached url is dead, re-resolving $episodeUrl');
@@ -91,17 +105,21 @@ class HybridVideoSourceService implements IVideoSourceService {
         referer: headers['referer'],
       );
       if (cloudResult != null) {
-        if (await _isPlayable(cloudResult.url, headers)) {
+        final verdict = await _probe(cloudResult.url, headers);
+        // dead = Worker 出口 IP 拿到的直链对手机明确 403（防盗链绑定
+        // IP）；unknown（超时/网络抖动）放行——mpv 有自己的重试。
+        if (verdict != _ProbeVerdict.dead) {
           await _cache.put(episodeUrl, cloudResult);
           return _materialize(cloudResult, offset: offset, headers: headers);
         }
-        // Worker 出口 IP 拿到的直链对手机不可用（防盗链绑定 IP），丢弃
         MiruLogger().w(
-            'HybridResolver: cloud url not playable on this device, falling back');
+            'HybridResolver: cloud url rejected (dead), falling back');
       }
     }
 
-    // ---- 第 3 级：WebView 嗅探（原有兜底） ----
+    // ---- 第 3 级：WebView 嗅探（原有兜底）----
+    // WebView 结果来自手机自己的会话，不做探测（v1.3.2 行为）：
+    // 探测只会徒增一次 RTT，坏链交给 mpv 打开失败 → 直连兜底 → 换源提示。
     final source = await _webviewService.resolve(
       episodeUrl,
       useLegacyParser: useLegacyParser,
@@ -114,7 +132,7 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   /// 预解析（不抛异常、不打扰用户）：填解析缓存 + 预取开头数据。
   ///
-  /// 使用场景：进入详情页预解析当前集；播放稳定后预解析下一集。
+  /// 使用场景：播放稳定后预解析下一集（换集接近秒开）。
   /// WebView 通道刻意跳过——预解析不该占用 WebView 实例，
   /// 播放请求到来时才能立即接管。
   Future<void> prefetchResolve(String episodeUrl,
@@ -171,16 +189,37 @@ class HybridVideoSourceService implements IVideoSourceService {
   // 内部
   // ---------------------------------------------------------------------------
 
-  /// 把直链包装为最终给 mpv 的播放源：优先本地代理，失败用直连。
+  /// 把直链包装为最终给 mpv 的播放源。
+  ///
+  /// 智能代理（v1.5.1）：磁盘已有可用缓存（MP4 ≥1MB / HLS ≥2 分片）才走
+  /// 代理——此时首帧从磁盘秒出；否则直连，行为与 v1.3.2 完全一致，
+  /// 代理不再是单点故障。无论走哪条路，都补一发后台预取，
+  /// 为二刷/换集备好数据。
   Future<VideoSource> _materialize(
     VideoSource source, {
     required int offset,
     required Map<String, String> headers,
   }) async {
     final directUrl = source.url;
+    final isHls = _isHls(source);
+
+    // 后台预取开头数据（不阻塞返回；计量网络下内部自动跳过）
+    unawaited(_proxy.prefetch(directUrl, isHls: isHls, headers: headers));
+
+    final useProxy = _proxy.isEnabled &&
+        await _proxy.hasUsableCache(directUrl, isHls: isHls);
+    if (!useProxy) {
+      return VideoSource(
+        url: directUrl,
+        offset: offset,
+        type: source.type,
+        format: source.format,
+        directUrl: directUrl,
+      );
+    }
     final proxyUrl = await _proxy.register(
       directUrl,
-      isHls: _isHls(source),
+      isHls: isHls,
       headers: headers,
     );
     if (proxyUrl == null) {
@@ -213,9 +252,17 @@ class HybridVideoSourceService implements IVideoSourceService {
     return headers;
   }
 
-  /// 直链可达性探测：m3u8 拉清单首字节；其余 Range 0-1023。
-  /// 任何非 2xx / 超时 / 异常都视为不可用。
-  Future<bool> _isPlayable(String url, Map<String, String> headers) async {
+  /// 直链可达性三态判定。
+  ///
+  /// v1.5.0 的二值探测（超时=死链）在源站抖动时会误杀好链：
+  /// 缓存命中 → 误判 → 作废缓存 → 全量重新解析（5~30 秒），
+  /// 用户观感就是「同一条规则有时顺有时不顺」。v1.5.1 改为：
+  /// - **alive**：2xx，健康（绝大多数情况，代价仅 1 个 RTT）；
+  /// - **dead**：明确的 403/404/410——签名过期/防盗链，判死没商量；
+  /// - **unknown**：超时/连接失败/5xx——源站慢或抽风，放行给 mpv，
+  ///   mpv 的重连自愈（v1.3.1 加固）比我们瞎猜靠谱。
+  Future<_ProbeVerdict> _probe(
+      String url, Map<String, String> headers) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
@@ -224,12 +271,17 @@ class HybridVideoSourceService implements IVideoSourceService {
         request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1023');
       }
       final response = await request.close().timeout(probeTimeout);
-      final ok = response.statusCode >= 200 && response.statusCode < 300;
+      final status = response.statusCode;
       // 消耗掉 body，复用连接
       await response.drain<void>().timeout(probeTimeout).catchError((_) {});
-      return ok;
+      if (status >= 200 && status < 300) return _ProbeVerdict.alive;
+      if (status == 403 || status == 404 || status == 410) {
+        return _ProbeVerdict.dead;
+      }
+      // 401/429/5xx 等：不确定，放行
+      return _ProbeVerdict.unknown;
     } catch (_) {
-      return false;
+      return _ProbeVerdict.unknown;
     } finally {
       client.close(force: true);
     }
@@ -253,4 +305,16 @@ class HybridVideoSourceService implements IVideoSourceService {
   Future<void> dispose() async {
     await _webviewService.dispose();
   }
+}
+
+/// 探测结论。
+enum _ProbeVerdict {
+  /// 2xx：直链健康。
+  alive,
+
+  /// 明确的 403/404/410：直链已死（签名过期/防盗链绑定 IP）。
+  dead,
+
+  /// 超时/网络抖动/5xx：不确定，放行给 mpv 自己处理。
+  unknown,
 }

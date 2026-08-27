@@ -10,7 +10,9 @@
   ],
   "vars": {
     "CACHE_TTL_SECONDS": "2700",
-    "MAX_CACHE_ENTRIES": "500",
-    "ALLOWED_ORIGINS": "*"
+    "ALLOWED_ORIGINS": "*",
+    "DAILY_RESOLVE_BUDGET": "4000",
+    "MIN_PER_USER": "30",
+    "MAX_PER_USER": "800"
   }
 }
