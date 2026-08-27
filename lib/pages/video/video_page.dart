@@ -23,6 +23,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:miru/bean/widget/embedded_native_control_area.dart';
 import 'package:miru/pages/download/download_controller.dart';
 import 'package:miru/pages/download/download_episode_sheet.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/modules/download/download_module.dart';
 import 'package:miru/services/player/timed_shutdown_service.dart';
 import 'package:miru/utils/device.dart';
@@ -1190,9 +1191,8 @@ class _VideoPageState extends State<VideoPage>
                         Positioned(
                           right: 16,
                           bottom: 16,
-                          child: FloatingActionButton(
-                            child: const Icon(Icons.download_rounded),
-                            onPressed: () {
+                          child: GlassFab(
+                            onTap: () {
                               showAdaptiveBottomSheet<void>(
                                 context: context,
                                 builder: (context) => DownloadEpisodeSheet(
@@ -1201,6 +1201,8 @@ class _VideoPageState extends State<VideoPage>
                                 ),
                               );
                             },
+                            icon: Icons.download_rounded,
+                            tooltip: '下载',
                           ),
                         ),
                     ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/network/proxy_utils.dart';
 import 'package:miru/services/network/proxy_manager.dart';
@@ -132,10 +133,10 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: saveAndTest,
-        icon: const Icon(Icons.save),
-        label: const Text('保存并测试'),
+      floatingActionButton: GlassFab.extended(
+        onTap: saveAndTest,
+        icon: Icons.save_rounded,
+        label: '保存并测试',
       ),
     );
   }

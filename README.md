@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.2.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.2.0/Miru-1.2.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.3.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.3.1/Miru-1.3.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,22 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.3.0（本次）
+### 1.3.1（本次）
+
+> 安装包：[Releases v1.3.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.3.1)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**网络播放稳定性加固：**
+
+- 针对聚合视频源 HLS 直连常见的分片请求被 CDN 重置、连接抖动问题做四层保守加固：ffmpeg 层 HTTP 自动重连（正常播放零感知）；前向缓冲从 10 秒加大到 120 秒、预读窗口从 1 秒加大到 10 秒；播放中流错误在同一播放器内原地重开并续播当前位置（每集限 2 次，带冷却窗口防死循环）；网络中断造成的「假播完」不再触发自动连播跳集。
+
+**界面：**
+
+- 全应用 7 处浮动按钮（视频页下载、追番设置、日志页清空/分享、规则编辑器保存、WebDAV 编辑器保存、代理编辑器保存）统一替换为液态玻璃材质，毛玻璃底 + 细描边 + 按压弹簧形变，与整体视觉语言一致。
+- 回退 1.3.0 热门页分类选择器的玻璃药丸样式：部分主题下底色会遮挡标题文字，恢复为无边框原版。
+
+### 1.3.0
 
 > 安装包：[Releases v1.3.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.3.0)
 >

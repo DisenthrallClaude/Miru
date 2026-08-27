@@ -82,10 +82,134 @@ abstract class _PlayerPlaybackController with Store {
   final AsyncSerialQueue _prefetchWrites = AsyncSerialQueue();
   bool _prefetchSuspendWanted = false;
 
+  // ---------------- 网络播放稳定性（v1.3.1） ----------------
+  //
+  // 针对聚合源 HLS 直连常见的不稳定（分片请求被 CDN 重置、连接抖动、
+  // 假 EOF 误触发自动连播），做四层保守加固：
+  //   1) ffmpeg 层 HTTP 自动重连（仅失败连接生效，正常播放零影响）
+  //   2) 更大的前向缓冲余量（磁盘缓存有 1.5G 上限兜底，纯缓冲策略）
+  //   3) 播放中流错误 → 同一播放器原地重开、续播当前位置（每集限 2 次）
+  //   4) 流错误造成的假 EOF 不再触发自动连播
+  // 不改动解码器、渲染器、音频输出等任何已验证路径。
+
+  /// 前向缓冲目标（mpv 默认 10s，弱网源不够用）。
+  static const String _cacheSecsNetwork = '120';
+
+  /// demuxer 预读窗口（mpv 默认 1s，CDN 慢时极易卡顿）。
+  static const String _readaheadSecsNetwork = '10';
+
+  /// 单集自动恢复上限，防止死链循环重开。
+  static const int _maxAutoRecoveries = 2;
+
+  /// 恢复动作之间的最小间隔，吞掉分片失败的错误风暴。
+  static const Duration _recoveryCooldown = Duration(seconds: 10);
+
+  /// 最近一次流错误时间。用于把「错误导致的假 EOF」与正常播完区分开。
+  DateTime? _lastStreamErrorAt;
+
+  /// 当前集已用掉的自动恢复次数（每次 createVideoController 重置）。
+  int _recoveryCount = 0;
+
+  /// 上次恢复动作时间（冷却窗口）。
+  DateTime? _lastRecoveryAt;
+
+  /// 最近一次 open 使用的请求头，恢复时原样带上（Referer 等防盗链头缺失会 403）。
+  Map<String, String> _lastHttpHeaders = const {};
+
+  /// 距离结尾还有 30s 以上却收到 completed，且 10s 内出现过流错误，
+  /// 判定为网络中断造成的假 EOF——不应触发自动连播。
+  bool get isAbnormalEnd {
+    final at = _lastStreamErrorAt;
+    if (at == null) return false;
+    if (DateTime.now().difference(at) > const Duration(seconds: 10)) {
+      return false;
+    }
+    final d = playerDuration;
+    final p = playerPosition;
+    if (d <= Duration.zero) return false;
+    return d - p > const Duration(seconds: 30);
+  }
+
+  /// 是否还允许自动恢复（未超上限、不在冷却期）。
+  bool get canAutoRecover =>
+      _recoveryCount < _maxAutoRecoveries &&
+      (_lastRecoveryAt == null ||
+          DateTime.now().difference(_lastRecoveryAt!) >= _recoveryCooldown);
+
+  /// 假 EOF 分支专用：秒级轮询会连拍，用冷却窗口去重。
+  bool _abnormalRecoveryInFlight = false;
+
+  /// 异常 EOF 的恢复入口（由 player_item 的轮询触发）。
+  ///
+  /// 走独立的在途标记 + 冷却记账，重复触发直接返回；
+  /// 恢复用尽后由调用方回落到原有的自动连播逻辑兜底。
+  Future<void> recoverForAbnormalEnd() async {
+    if (_abnormalRecoveryInFlight) return;
+    if (!canAutoRecover) return;
+    _abnormalRecoveryInFlight = true;
+    _lastRecoveryAt = DateTime.now();
+    _recoveryCount++;
+    try {
+      // 立刻清掉 completed，避免下一拍轮询再次进入完成分支。
+      completed = false;
+      await recoverPlayback();
+    } finally {
+      _abnormalRecoveryInFlight = false;
+    }
+  }
+
+  /// 错误回调里判定是否值得自动恢复：仅网络播放、且播放器处于
+  /// 播放/缓冲的活跃状态（用户主动暂停或已换集时绝不打扰）。
+  void _maybeScheduleAutoRecovery(Player player) {
+    if (!isCurrentPlayer(player)) return;
+    if (isLocalPlayback()) return;
+    if (playerCompleted) return;
+    if (!playerPlaying && !playerBuffering) return;
+    if (!canAutoRecover) return;
+    _lastRecoveryAt = DateTime.now();
+    _recoveryCount++;
+    // 抖动场景下错误是成串来的：稍等片刻让 demuxer 先自愈，
+    // 仍然失败才真正重开流。
+    Future<void>.delayed(const Duration(milliseconds: 800), () async {
+      final current = mediaPlayer;
+      if (!identical(current, player) || playerCompleted) return;
+      if (playerPlaying && !playerBuffering && playerPosition > Duration.zero) {
+        return; // 已自行恢复
+      }
+      await recoverPlayback();
+    });
+  }
+
+  /// 原地重开当前流并续播到中断位置。
+  ///
+  /// 复用同一个播放器实例：demuxer-lavf-format=hls、音频输出、
+  /// 代理等 init 期设置的属性全部保留，只重开媒体本身。
+  Future<void> recoverPlayback() async {
+    final player = mediaPlayer;
+    if (player == null) return;
+    try {
+      final pos = playerPosition;
+      final resumeFrom = pos > const Duration(seconds: 5)
+          ? pos - const Duration(seconds: 2) // 退 2s 覆盖缓冲边界
+          : (startOffset > 0 ? Duration(seconds: startOffset) : Duration.zero);
+      MiruDialog.showToast(message: '网络波动，正在恢复播放…');
+      MiruLogger().w(
+          'PlayerController: auto recovering stream at $pos (${videoUrl()})');
+      await player.open(
+        Media(videoUrl(),
+            start: resumeFrom, httpHeaders: _lastHttpHeaders),
+        play: true,
+      );
+    } catch (e) {
+      MiruLogger().w('PlayerController: auto recovery failed', error: e);
+    }
+  }
+  // ---------------- 网络播放稳定性结束 ----------------
+
   /// Android 后台会切断网络访问；预取中的 demuxer 会烧完 ffmpeg 的
   /// 重连/分片重试并把流标记为 EOF，回前台后播放永久卡住。
   /// 挂起时把预读窗口归零，不再发起新请求，已缓冲数据仍可用；
-  /// 恢复值是 mpv 默认值（media_kit 不改动它们）。
+  /// 恢复值与本控制器的网络播放默认值保持一致（见上方常量）。
   /// （同步自上游 Kazumi 84043d5）
   Future<void> setPrefetchSuspended(bool suspended) async {
     if (!Platform.isAndroid) {
@@ -100,11 +224,13 @@ abstract class _PlayerPlaybackController with Store {
       }
       try {
         final pp = player.platform as NativePlayer;
-        await pp.setProperty('cache-secs', wanted ? '0' : '36000');
+        await pp.setProperty('cache-secs',
+            wanted ? '0' : (isLocalPlayback() ? '36000' : _cacheSecsNetwork));
         if (!isCurrentPlayer(player)) {
           return;
         }
-        await pp.setProperty('demuxer-readahead-secs', wanted ? '0' : '1');
+        await pp.setProperty('demuxer-readahead-secs',
+            wanted ? '0' : (isLocalPlayback() ? '1' : _readaheadSecsNetwork));
       } catch (e) {
         MiruLogger().w(
           'PlayerController: failed to ${wanted ? 'suspend' : 'resume'} demuxer prefetch',
@@ -275,6 +401,11 @@ abstract class _PlayerPlaybackController with Store {
     VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
     startOffset = offset;
+    // 新一集开始：自动恢复计数与错误时间戳归零。
+    _recoveryCount = 0;
+    _lastRecoveryAt = null;
+    _lastStreamErrorAt = null;
+    _lastHttpHeaders = httpHeaders;
     superResolutionMode = SuperResolutionMode.fromStorageValue(
       GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
     );
@@ -424,10 +555,12 @@ abstract class _PlayerPlaybackController with Store {
 
       bool showPlayerError = GStorage.getSetting(SettingsKeys.showPlayerError);
       player.stream.error.listen((event) {
+        if (!isCurrentPlayer(player)) {
+          return;
+        }
+        // 错误时间戳先行更新：isAbnormalEnd 依赖它区分假 EOF。
+        _lastStreamErrorAt = DateTime.now();
         if (showPlayerError) {
-          if (!isCurrentPlayer(player)) {
-            return;
-          }
           if (event.toString().contains('Failed to open') && playerBuffering) {
             MiruDialog.showToast(
                 message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
@@ -440,6 +573,7 @@ abstract class _PlayerPlaybackController with Store {
         }
         MiruLogger().e('PlayerController: Player intent error ${videoUrl()}',
             error: event);
+        _maybeScheduleAutoRecovery(player);
       });
 
       if (superResolutionMode != SuperResolutionMode.off) {
@@ -451,6 +585,27 @@ abstract class _PlayerPlaybackController with Store {
 
       if (videoSourceFormat == VideoSourceFormat.hls) {
         await pp.setProperty('demuxer-lavf-format', 'hls');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+      }
+
+      // 网络流稳定性参数（本地文件零开销，跳过）：
+      // 1) ffmpeg HTTP 自动重连：连接被重置/超时后由 libavformat 原地重连，
+      //    正常播放完全无感知；这是 mpv 社区处理不稳定 HLS 的标准配置。
+      // 2) 前向缓冲与预读窗口：给弱网 CDN 留足余量，磁盘缓存有
+      //    demuxer-max-bytes 上限兜底，不会无界增长。
+      if (!isLocalPlayback()) {
+        await pp.setProperty('stream-lavf-o',
+            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+        await pp.setProperty('cache-secs', _cacheSecsNetwork);
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+        await pp.setProperty('demuxer-readahead-secs', _readaheadSecsNetwork);
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }

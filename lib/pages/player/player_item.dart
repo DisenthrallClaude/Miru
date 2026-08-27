@@ -1041,7 +1041,14 @@ class _PlayerItemState extends State<PlayerItem>
       final playingRoadData =
           videoPageController.roadList[playingSelection.road];
       if (playerController.playback.completed && !videoPageController.loading) {
-        if (playerController.playback.resumedNearEnd) {
+        if (playerController.playback.isAbnormalEnd) {
+          // 流错误造成的假 EOF：直接连播会变成「莫名跳集」。
+          // 优先原地恢复当前集；恢复用尽则等错误窗口过期，
+          // 由下方原有连播逻辑兜底（历史记录已保存，可回看）。
+          if (playerController.playback.canAutoRecover) {
+            unawaited(playerController.playback.recoverForAbnormalEnd());
+          }
+        } else if (playerController.playback.resumedNearEnd) {
           // Completion of a stale near-end resume is not a real watch;
           // replay from the beginning instead of advancing.
           unawaited(playerController.playback.restartFromBeginning());

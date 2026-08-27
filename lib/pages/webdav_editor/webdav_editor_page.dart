@@ -3,6 +3,7 @@ import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/storage/secure_field_codec.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/services/sync/webdav.dart';
 import 'package:miru/services/logging/logger.dart';
 
@@ -112,9 +113,8 @@ class _WebDavEditorPageState extends State<WebDavEditorPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.save),
-        onPressed: () async {
+      floatingActionButton: GlassFab.extended(
+        onTap: () async {
           GStorage.putSetting(SettingsKeys.webDavURL, webDavURLController.text);
           GStorage.putSetting(
               SettingsKeys.webDavUsername, webDavUsernameController.text);
@@ -141,6 +141,8 @@ class _WebDavEditorPageState extends State<WebDavEditorPage> {
             await GStorage.putSetting(SettingsKeys.webDavEnable, false);
           }
         },
+        icon: Icons.save_rounded,
+        label: '保存并测试',
       ),
     );
   }

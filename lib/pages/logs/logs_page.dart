@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
@@ -220,18 +221,16 @@ class _LogsPageState extends State<LogsPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        FloatingActionButton(
-          heroTag: null,
-          onPressed: _clearLogs,
+        GlassFab(
+          onTap: _clearLogs,
           tooltip: '清空日志',
-          child: const Icon(Icons.clear_all),
+          icon: Icons.clear_all_rounded,
         ),
         const SizedBox(width: 15),
-        FloatingActionButton(
-          heroTag: null,
-          onPressed: _copyLogs,
+        GlassFab(
+          onTap: _copyLogs,
           tooltip: '复制日志',
-          child: const Icon(Icons.copy),
+          icon: Icons.copy_rounded,
         ),
       ],
     );

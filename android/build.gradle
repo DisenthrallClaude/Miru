@@ -9,12 +9,34 @@ rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
-// compileSdk 统一(六刀裁剪之三): 各插件上游声明的 compileSdk 34/35/36 不一,
-// 会迫使 SDK 下载多套 platform JAR(每套 60M+)。统一钉到 36 后只需
+
+// 工具链强统一(根治版,六刀裁剪第二刀的补完):
+// pub 缓存里每个插件自己的 buildscript 块都以旧式 classpath 声明了
+// 各自的 AGP(8.0~9.0 共十版) 与 KGP(1.7~2.3 共十版),每次构建全部
+// 解析下载并各生成一份 instrumented 副本,仅此一项就膨胀 1.5G+ 缓存,
+// 曾多次把 9.9G 磁盘写满。settings.gradle 的 pluginManagement 重定向
+// 只作用于 plugins DSL,管不到这种 classpath 声明,必须在此对每个
+// 子项目的 buildscript classpath 再钉一次版本。插件应用与编译不受
+// 影响(AGP/KGP 向后兼容),缓存里从此只剩一套工具链。
+subprojects {
+    buildscript {
+        configurations.classpath {
+            resolutionStrategy {
+                force 'com.android.tools.build:gradle:8.11.1'
+                force 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21'
+            }
+        }
+    }
+}
+
+// compileSdk 统一(六刀裁剪之三): 各插件上游声明的 compileSdk 33/34/35/36
+// 不一,会迫使 SDK 自动下载多套 platform(每套 140M)。统一钉到 36 后只需
 // platforms;android-36 一套,老插件仅收到 warning,不影响产物。
 // 必须放在 evaluationDependsOn(':app') 之前注册: 该行会把 :app 提前求值,
 // 之后注册的钩子就变成"求值后修改"而报 too late to set compileSdk。
-// plugins.withId 在插件应用瞬间触发,天然避开 afterEvaluate 的顺序问题。
+// plugins.withId 在插件应用瞬间触发;但插件脚本体的 android{compileSdk N}
+// 会随后覆盖它,故再用 afterEvaluate(本钩子注册先于脚本求值,故先于 AGP
+// 自己的 variant 创建回调执行)在脚本求值完毕后最终钉一次。
 subprojects {
     plugins.withId("com.android.application") {
         project.android {
@@ -24,6 +46,14 @@ subprojects {
     plugins.withId("com.android.library") {
         project.android {
             compileSdk 36
+        }
+    }
+    afterEvaluate {
+        if (project.plugins.hasPlugin("com.android.library") ||
+            project.plugins.hasPlugin("com.android.application")) {
+            project.android {
+                compileSdk 36
+            }
         }
     }
 }

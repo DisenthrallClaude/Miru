@@ -8,7 +8,6 @@ import 'package:miru/pages/popular/popular_controller.dart';
 import 'package:miru/bean/card/bangumi_feed_card.dart';
 import 'package:miru/bean/card/bangumi_hero_carousel.dart';
 import 'package:miru/bean/widget/frosted_surface.dart';
-import 'package:miru/bean/widget/glass.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/utils/theme.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
@@ -294,14 +293,13 @@ class _PopularPageState extends State<PopularPage> {
                         builder: (_) {
                           final bool isTrend =
                               popularController.currentTag == '';
-                          // 分类选择器：轻玻璃药丸包住标题与下拉箭头，
-                          // 与顶栏的毛玻璃同语言；零模糊开销。
-                          // key 供 showTagMenu 定位下拉菜单。
-                          return GlassPill(
+                          // v1.3.1 回退为无边框原版样式：玻璃药丸的底色
+                          // 在部分主题下会遮挡标题文字。key 供 showTagMenu
+                          // 定位下拉菜单。
+                          return InkWell(
                             key: selectorKey,
+                            borderRadius: BorderRadius.circular(8),
                             onTap: showTagMenu,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 7),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [

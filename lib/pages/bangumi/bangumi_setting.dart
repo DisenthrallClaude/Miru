@@ -2,6 +2,7 @@ import 'package:miru/bean/settings/settings_list.dart';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/modules/bangumi/sync_priority.dart';
 import 'package:miru/services/sync/bangumi_sync_service.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -230,10 +231,9 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
             ),
           ),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: isVerifying
-              ? null
-              : () async {
+        floatingActionButton: GlassFab.extended(
+          enabled: !isVerifying,
+          onTap: () async {
                   final token = bangumiTokenController.text.trim();
                   final bool bangumiSyncEnable =
                       GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
@@ -280,7 +280,8 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                     isVerifying = false;
                   });
                 },
-          child: const Icon(Icons.save),
+          icon: Icons.save_rounded,
+          label: '保存并测试',
         ),
       ),
     );

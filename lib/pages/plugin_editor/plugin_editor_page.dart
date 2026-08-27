@@ -7,6 +7,7 @@ import 'package:miru/plugins/api_rule_config.dart';
 import 'package:miru/plugins/anti_crawler_config.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
+import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/pages/plugin_editor/editor_form_widgets.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/plugin/api_rule_engine.dart';
@@ -497,11 +498,8 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        icon: const Icon(Icons.save_rounded),
-        label: const Text(_RuleEditorText.save),
-        onPressed: () async {
+      floatingActionButton: GlassFab.extended(
+        onTap: () async {
           final editedPlugin = _tryBuildEditedPlugin();
           if (editedPlugin == null) return;
           try {
@@ -513,6 +511,8 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           if (!context.mounted) return;
           context.pop();
         },
+        icon: Icons.save_rounded,
+        label: _RuleEditorText.save,
       ),
     );
   }
