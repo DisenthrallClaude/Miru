@@ -6,116 +6,143 @@ import 'package:miru/bean/widget/frosted_surface.dart';
 import 'package:miru/modules/announcement/announcement.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// 远程公告弹窗：液态玻璃卡片风格，极简布局。
+/// 远程公告弹窗：纯白极简液态玻璃卡片（与管理端 Web 预览一致）。
 ///
-/// 结构自上而下：可选封面图（16:9）→ 标题 → 正文（纯文本，换行保留，
-/// 最多滚动约 40% 屏高）→ 按钮组（最多渲染 3 个，超出忽略）。
-/// 关闭途径：右上角 × 、点遮罩、系统返回键，三种都经由路由 pop，
-/// 频控记录由 AnnouncementService 在 onDismiss 统一处理。
+/// 结构自上而下：可选封面图（16:9，加载失败整体收起退化为纯文字
+/// 卡片）→ 标题（加粗，应用 font 字体）→ 正文（纯文本，\n 换行，
+/// 最多滚动约 40% 屏高）→ 按钮组（规格上限 2 个，超出忽略）。
+/// 白色半透明玻璃底 + 模糊 + 圆角 24 + 细白描边 + 柔和投影；
+/// 文字用深色（白卡上对比稳定，与主题无关）。
+/// 关闭途径：右上角 ✕、系统返回键；点遮罩不关闭（规格：防误触）。
 class AnnouncementDialog extends StatelessWidget {
   const AnnouncementDialog({super.key, required this.announcement});
 
   final Announcement announcement;
 
-  static const BorderRadius _radius = BorderRadius.all(Radius.circular(28));
+  static const BorderRadius _radius = BorderRadius.all(Radius.circular(24));
+
+  // 白玻璃卡上的固定前景色：不随主题翻转，保证任何主题下可读。
+  static const Color _ink = Color(0xFF1F2328);
+  static const Color _inkSoft = Color(0xFF57606A);
+  static const Color _accent = Color(0xFF2563EB);
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final font = announcement.resolvedFont;
 
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
-        child: FrostedSurface(
-          borderRadius: _radius,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.18),
-            width: 0.8,
-          ),
-          child: Material(
-            color: Colors.transparent,
+        // 柔和投影：白玻璃自身没有边界感，投影给出卡片层次。
+        child: Container(
+          decoration: BoxDecoration(
             borderRadius: _radius,
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (announcement.coverImage.isNotEmpty)
-                      _CoverImage(url: announcement.coverImage),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        24,
-                        announcement.coverImage.isEmpty ? 40 : 18,
-                        24,
-                        0,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            announcement.title,
-                            style: textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              height: 1.3,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.28),
+                blurRadius: 32,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: FrostedSurface(
+            borderRadius: _radius,
+            // 纯白玻璃：白色 tint 叠加在模糊层上，明暗主题下都是浅色卡。
+            tint: Colors.white,
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.45),
+              width: 1,
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: _radius,
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: [
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (announcement.coverImage.isNotEmpty)
+                        _CoverImage(url: announcement.coverImage),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          24,
+                          announcement.coverImage.isEmpty ? 44 : 18,
+                          24,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              announcement.title,
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w700,
+                                height: 1.3,
+                                color: _ink,
+                                fontFamily: font.fontFamily,
+                                fontFamilyFallback: font.fallback,
+                              ),
                             ),
-                          ),
-                          if (announcement.body.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Flexible(
-                              child: SingleChildScrollView(
-                                child: Text(
-                                  announcement.body,
-                                  style: textTheme.bodyMedium?.copyWith(
-                                    color:
-                                        colorScheme.onSurface.withValues(
-                                            alpha: 0.85),
-                                    height: 1.6,
+                            if (announcement.body.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Flexible(
+                                child: SingleChildScrollView(
+                                  child: Text(
+                                    announcement.body,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      height: 1.6,
+                                      color: _inkSoft,
+                                      fontFamily: font.fontFamily,
+                                      fontFamilyFallback: font.fallback,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (announcement.actions.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                        child: Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          alignment: WrapAlignment.end,
-                          children: [
-                            for (final action
-                                in announcement.actions.take(3))
-                              _ActionButton(action: action),
+                            ],
                           ],
                         ),
                       ),
-                    const SizedBox(height: 18),
-                  ],
-                ),
-                // 关闭按钮：贴右上角，玻璃小圆片，不压封面图主体。
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: IconButton(
-                    tooltip: '关闭',
-                    onPressed: () => Navigator.of(context, rootNavigator: true)
-                        .pop(),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 20,
-                      color: colorScheme.onSurface.withValues(alpha: 0.7),
+                      if (announcement.actions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                          child: Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.end,
+                            children: [
+                              // 规格上限：最多渲染 2 个动作按钮。
+                              for (final action
+                                  in announcement.actions.take(2))
+                                _ActionButton(action: action),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                  // 关闭按钮：贴右上角，玻璃小圆片，不压封面图主体。
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.of(context, rootNavigator: true)
+                          .pop(),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: _inkSoft,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -124,40 +151,46 @@ class AnnouncementDialog extends StatelessWidget {
   }
 }
 
-/// 封面图：16:9，加载中给玻璃色占位，失败退化为灰色占位（不影响弹窗）。
-class _CoverImage extends StatelessWidget {
+/// 封面图：16:9。加载失败时整体收起（规格：退化为无图纯文字卡片，
+/// 不留灰块、不报错）。
+class _CoverImage extends StatefulWidget {
   const _CoverImage({required this.url});
 
   final String url;
 
   @override
+  State<_CoverImage> createState() => _CoverImageState();
+}
+
+class _CoverImageState extends State<_CoverImage> {
+  bool _failed = false;
+
+  @override
   Widget build(BuildContext context) {
+    if (_failed) return const SizedBox.shrink();
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: CachedNetworkImage(
-        imageUrl: url,
+        imageUrl: widget.url,
         fit: BoxFit.cover,
         placeholder: (_, __) => Container(
-          color: Colors.white.withValues(alpha: 0.06),
+          color: Colors.white.withValues(alpha: 0.25),
         ),
-        errorWidget: (_, __, ___) => Container(
-          color: Colors.white.withValues(alpha: 0.06),
-          child: Icon(
-            Icons.image_outlined,
-            size: 32,
-            color: Theme.of(context)
-                .colorScheme
-                .onSurface
-                .withValues(alpha: 0.4),
-          ),
-        ),
+        errorWidget: (_, __, ___) {
+          // 下一帧再收起，避免在 build 中触发 setState。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _failed = true);
+          });
+          return const SizedBox.shrink();
+        },
       ),
     );
   }
 }
 
-/// 动作按钮：url 类型拉起外部浏览器；其余（clipboard 及未知）一律复制到
-/// 剪贴板并 toast 反馈——管理页未来新增类型时旧客户端也不至于无响应。
+/// 动作按钮：胶囊形，url 类型拉起外部浏览器；其余（clipboard 及未知）
+/// 一律复制到剪贴板并 toast 反馈——管理页未来新增类型时旧客户端
+/// 也不至于无响应。
 class _ActionButton extends StatelessWidget {
   const _ActionButton({required this.action});
 
@@ -165,12 +198,11 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
-        foregroundColor: colorScheme.primary,
+        foregroundColor: AnnouncementDialog._accent,
         side: BorderSide(
-          color: colorScheme.primary.withValues(alpha: 0.55),
+          color: AnnouncementDialog._accent.withValues(alpha: 0.55),
           width: 1,
         ),
         shape: const StadiumBorder(),

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/update_dialog.dart';
 import 'package:miru/request/clients/download_http_client.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -119,6 +120,10 @@ class AutoUpdater {
 
   final DownloadHttpClient _downloadClient = DownloadHttpClient.instance;
 
+  /// 会话级去重：避免自动检查在同一进程内重复弹窗
+  /// （引导页与主页面都接线了启动检查，极端时序下可能双触发）。
+  bool _autoDialogShownThisSession = false;
+
   /// 检测所有可能的安装类型
   Future<List<InstallationType>> _detectAvailableInstallationTypes() async {
     List<InstallationType> availableTypes = [];
@@ -158,11 +163,12 @@ class AutoUpdater {
     try {
       final data = await _latestRelease();
 
-      if (!data.containsKey('tag_name')) {
+      final tagName = data['tag_name'];
+      if (tagName is! String || tagName.isEmpty) {
         throw Exception('无效的响应数据');
       }
 
-      final remoteVersion = data['tag_name'] as String;
+      final remoteVersion = tagName;
       final currentVersion = ApiEndpoints.version;
 
       if (needUpdate(currentVersion, remoteVersion)) {
@@ -170,15 +176,21 @@ class AutoUpdater {
 
         return UpdateInfo(
           version: remoteVersion,
-          description: data['body'] ?? '发现新版本',
+          description: data['body'] is String
+              ? data['body'] as String
+              : '发现新版本',
           downloadUrl: '',
           // 将在用户选择安装类型后填充
-          releaseNotes: data['html_url'] ?? '',
-          publishedAt: data['published_at'] ?? '',
+          releaseNotes: data['html_url'] is String
+              ? data['html_url'] as String
+              : '',
+          publishedAt: data['published_at'] is String
+              ? data['published_at'] as String
+              : '',
           installationType: availableTypes.first,
           // 保持兼容性
           availableInstallationTypes: availableTypes,
-          assets: data['assets'] ?? [],
+          assets: data['assets'] is List ? data['assets'] as List : const [],
         );
       }
 
@@ -191,11 +203,18 @@ class AutoUpdater {
 
   Future<Map<String, dynamic>> _latestRelease() async {
     // 优先请求 GitHub Releases（Miru 自己的仓库），失败后降级到镜像源。
+    // 每源限时：直连被墙时 connect 阶段可能挂十几秒，
+    // 没有外层兜底的话弹窗会迟到半分钟。
     final sources = [ApiEndpoints.latestApp, ApiEndpoints.latestAppMirror];
     Object? lastError;
     for (final source in sources) {
       try {
-        final raw = await _downloadClient.getPlain(source);
+        final raw = await _downloadClient
+            .getPlain(
+              source,
+              receiveTimeout: const Duration(seconds: 8),
+            )
+            .timeout(const Duration(seconds: 10));
         final data = json.decode(raw);
         if (data is! Map) {
           throw Exception('Invalid update response');
@@ -210,16 +229,25 @@ class AutoUpdater {
     throw lastError ?? Exception('All update sources failed');
   }
 
-  /// 自动检查更新（仅在启用自动更新时）
+  /// 自动检查更新（仅在启用自动更新时）。
+  ///
+  /// 弹窗前双重静默判定：会话去重（热重启不重复弹）+
+  /// 用户「忽略此版本」（出现更新的版本号后自动恢复提醒）。
   Future<void> autoCheckForUpdates() async {
+    if (_autoDialogShownThisSession) return;
     final autoUpdate = GStorage.getSetting(SettingsKeys.autoUpdate);
     if (!autoUpdate) return;
 
     try {
       final updateInfo = await checkForUpdates();
-      if (updateInfo != null) {
-        _showUpdateDialog(updateInfo, isAutoCheck: true);
+      if (updateInfo == null) return;
+      final ignored =
+          GStorage.getSetting(SettingsKeys.updateIgnoredVersion);
+      if (ignored.isNotEmpty && ignored == updateInfo.version) {
+        return;
       }
+      _autoDialogShownThisSession = true;
+      _showUpdateDialog(updateInfo, isAutoCheck: true);
     } catch (e) {
       // 自动检查失败时不显示错误
       MiruLogger().w('Update: auto check for updates failed', error: e);
@@ -240,148 +268,47 @@ class AutoUpdater {
     }
   }
 
-  /// 显示更新对话框
+  /// 显示更新对话框（液态玻璃风格，与公告弹窗同一视觉语言）。
   void _showUpdateDialog(UpdateInfo updateInfo, {bool isAutoCheck = false}) {
     MiruDialog.show(
+      clickMaskDismiss: false,
       builder: (context) {
-        return AlertDialog(
-          title: Text('发现新版本 ${updateInfo.version}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(updateInfo.description),
-                if (updateInfo.publishedAt.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '发布时间: ${formatDate(updateInfo.publishedAt)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-                const SizedBox(height: 8),
-                if (!Platform.isLinux && !Platform.isIOS) ...[
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color:
-                          Theme.of(context).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '选择安装类型:',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        ...updateInfo.availableInstallationTypes.map((type) {
-                          return Container(
-                            margin: const EdgeInsets.symmetric(vertical: 2),
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(4),
-                                onTap: () {
-                                  MiruDialog.dismiss();
-                                  _downloadUpdateWithType(updateInfo, type);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outline
-                                          .withValues(alpha: 0.3),
-                                    ),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.download,
-                                        size: 16,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          _getInstallationTypeDescription(type),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.arrow_forward_ios,
-                                        size: 12,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .outline,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            if (isAutoCheck)
-              TextButton(
-                onPressed: () {
-                  GStorage.putSetting(SettingsKeys.autoUpdate, false);
-                  MiruDialog.dismiss();
-                  MiruDialog.showToast(message: '已关闭自动更新');
-                },
-                child: Text(
-                  '关闭自动更新',
-                  style:
-                      TextStyle(color: Theme.of(context).colorScheme.outline),
-                ),
-              ),
-            TextButton(
-              onPressed: () => MiruDialog.dismiss(),
-              child: Text(
-                '稍后提醒',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
-            ),
-            if (updateInfo.releaseNotes.isNotEmpty)
-              TextButton(
-                onPressed: () {
-                  launchUrl(Uri.parse(updateInfo.releaseNotes),
-                      mode: LaunchMode.externalApplication);
-                },
-                child: const Text('查看详情'),
-              ),
-            TextButton(
-              onPressed: () {
-                MiruDialog.dismiss();
-                // 直接使用第一个可用的安装类型
-                if (updateInfo.availableInstallationTypes.isNotEmpty) {
-                  _downloadUpdateWithType(
-                      updateInfo, updateInfo.availableInstallationTypes.first);
+        return UpdateDialog(
+          version: updateInfo.version,
+          description: stripMarkdown(updateInfo.description),
+          publishedAt: updateInfo.publishedAt.isEmpty
+              ? ''
+              : formatDate(updateInfo.publishedAt),
+          onUpdate: () {
+            // 直接使用第一个可用的安装类型（本应用实际只发 Android APK）；
+            // 没有可用类型（iOS/Linux）时由 _downloadUpdateWithType 转跳发布页。
+            if (updateInfo.availableInstallationTypes.isNotEmpty) {
+              _downloadUpdateWithType(
+                  updateInfo, updateInfo.availableInstallationTypes.first);
+            } else {
+              _openReleasePage(updateInfo);
+            }
+          },
+          onOpenPage: () => _openReleasePage(updateInfo),
+          onIgnore: isAutoCheck
+              ? () {
+                  GStorage.putSetting(
+                      SettingsKeys.updateIgnoredVersion, updateInfo.version);
+                  MiruDialog.showToast(
+                      message: '已忽略 ${updateInfo.version}，出现新版本后会再次提醒');
                 }
-              },
-              child: const Text('立即更新'),
-            ),
-          ],
+              : null,
         );
       },
     );
+  }
+
+  /// 浏览器打开 Release 发布页。
+  void _openReleasePage(UpdateInfo updateInfo) {
+    final url = updateInfo.releaseNotes.isNotEmpty
+        ? updateInfo.releaseNotes
+        : ApiEndpoints.projectUrl;
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   /// 获取安装类型的描述

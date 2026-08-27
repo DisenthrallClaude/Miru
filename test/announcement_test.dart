@@ -111,6 +111,99 @@ void main() {
     });
   });
 
+  group('AnnouncementFeed 删除语义（对接规格）', () {
+    test('deletedIds 墓碑解析：结构完整取 id，损坏条目跳过', () {
+      const raw = '''
+      {
+        "announcements": [
+          {"id": "live1", "title": "存活"}
+        ],
+        "deletedIds": [
+          {"id": "gone1", "deletedAt": "2026-08-27T00:00:00+08:00"},
+          {"id": "gone2", "deletedAt": "2026-08-26T00:00:00+08:00"},
+          {"deletedAt": "缺 id 的损坏条目"},
+          "不是对象的条目"
+        ]
+      }
+      ''';
+      final feed = AnnouncementFeed.parse(raw)!;
+      expect(feed.deletedIds, containsAll(['gone1', 'gone2']));
+      expect(feed.deletedIds, hasLength(2));
+      expect(feed.liveIds, {'live1'});
+    });
+
+    test('liveIds 含 enabled=false 的条目（下线≠删除）', () {
+      const raw = '''
+      {
+        "announcements": [
+          {"id": "a", "title": "x", "enabled": false},
+          {"id": "b", "title": "y"}
+        ]
+      }
+      ''';
+      final feed = AnnouncementFeed.parse(raw)!;
+      expect(feed.liveIds, containsAll(['a', 'b']));
+    });
+
+    test('缺 deletedIds 字段 → 空墓碑列表', () {
+      const raw = '{"announcements": [{"id": "a", "title": "x"}]}';
+      final feed = AnnouncementFeed.parse(raw)!;
+      expect(feed.deletedIds, isEmpty);
+    });
+  });
+
+  group('Announcement 字段默认值', () {
+    test('minAppVersion 缺失/空串 → 默认 1.3.0（规格约定）', () {
+      final missing = Announcement.fromJson({'id': 'a', 'title': 'x'})!;
+      expect(missing.minAppVersion, '1.3.0');
+
+      final empty = Announcement.fromJson(
+          {'id': 'a', 'title': 'x', 'minAppVersion': ''})!;
+      expect(empty.minAppVersion, '1.3.0');
+
+      final explicit = Announcement.fromJson(
+          {'id': 'a', 'title': 'x', 'minAppVersion': '1.4.0'})!;
+      expect(explicit.minAppVersion, '1.4.0');
+    });
+
+    test('font 缺失 → 空串；未知 font → 默认字体不报错', () {
+      final missing = Announcement.fromJson({'id': 'a', 'title': 'x'})!;
+      expect(missing.font, '');
+      expect(missing.resolvedFont.fontFamily, isNull);
+
+      final unknown =
+          Announcement.fromJson({'id': 'a', 'title': 'x', 'font': '不存在的字体'})!;
+      expect(unknown.resolvedFont.fontFamily, isNull);
+      expect(unknown.resolvedFont.fallback, isNull);
+    });
+  });
+
+  group('AnnouncementFont 映射', () {
+    test('衬线类 → serif + 内置 Noto Serif SC 兜底', () {
+      for (final name in ['serif', 'xiaoWei', 'playfair', 'garamond']) {
+        final font = AnnouncementFont.fromName(name);
+        expect(font.fontFamily, 'serif', reason: name);
+        expect(font.fallback, contains('Noto_Serif_SC'), reason: name);
+      }
+    });
+
+    test('楷体/手写类 → cursive + 兜底', () {
+      for (final name in ['kai', 'longCang', 'zhiMang', 'liuJian', 'maShan']) {
+        final font = AnnouncementFont.fromName(name);
+        expect(font.fontFamily, 'cursive', reason: name);
+        expect(font.fallback, isNotNull, reason: name);
+      }
+    });
+
+    test('mono → 等宽；黑体/显示类与空值 → 默认', () {
+      expect(AnnouncementFont.fromName('mono').fontFamily, 'monospace');
+      for (final name in ['', 'sans', 'notoSans', 'huangYou', 'kuaiLe', null]) {
+        expect(AnnouncementFont.fromName(name).fontFamily, isNull,
+            reason: '$name');
+      }
+    });
+  });
+
   group('AnnouncementService.selectAnnouncement', () {
     final now = DateTime.parse('2026-09-10T12:00:00+08:00');
 

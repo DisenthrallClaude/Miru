@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.3.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.3.2/Miru-1.3.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.4.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.4.0/Miru-1.4.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,27 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.3.2（本次）
+### 1.4.0（本次）
+
+> 安装包：[Releases v1.4.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.4.0)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**新版本提醒（新）：**
+
+- 启动时自动检测新版本并弹窗提醒（全新液态玻璃弹窗：版本号、发布时间、清洗后的更新说明，一键应用内下载或前往发布页）。此前该功能在国内基本不可用——更新接口的镜像源是假的（与主源同一个地址，GitHub API 被墙后检查必然失败），本次换成实测可用的公共反代并增加每源超时。
+- 新增「忽略此版本」：不想升级时一键静默，出现更新的版本后会自动恢复提醒。
+- 手动检查入口（关于页 → 检查应用更新）同步换成新弹窗。
+
+**公告系统与控制台对接（按管理端规格逐条对齐）：**
+
+- 删除语义：announcements 数组是唯一事实来源，不在最新数组中的公告无论什么频控状态、无论是否新装设备都绝不弹出；新增 deletedIds 墓碑机制，成功拉取后自动清理已删除公告的本地已读记录，被删除的公告重新发布时会当作新公告重新弹。
+- 离线容错：拉取失败或解析失败时沿用上次成功拉取的数据（不再直接放弃）；所有源都明确 404 时视为当前无公告。
+- 拉取源链升级为 cdn.jsdelivr → fastly.jsdelivr → raw 三级回退。
+- 弹窗升级为纯白极简液态玻璃卡片（圆角 24、细白描边、柔和投影，与 Web 端预览一致）；点遮罩不再关闭（防误触）；封面图加载失败自动收起退化为纯文字卡片；按钮数量按规格上限 2 个。
+- 支持 font 字段：衬线/楷体手写/等宽等字体需求映射到系统字体 + 内置思源宋体兜底，未识别的值回退默认字体。
+
+### 1.3.2
 
 > 安装包：[Releases v1.3.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.3.2)
 >

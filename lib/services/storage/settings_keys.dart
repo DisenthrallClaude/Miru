@@ -282,6 +282,21 @@ class SettingsKeys {
     '',
     group: SettingGroup.interface,
   );
+  /// 最近一次成功拉取的公告源原文（JSON 字符串）。
+  /// 拉取失败/解析失败时沿用这份上次成功数据展示（对接规格约定）；
+  /// 每次成功拉取整体覆盖，天然携带删除语义。
+  static const announcementCache = SettingKey<String>(
+    'announcementCache',
+    '',
+    group: SettingGroup.interface,
+  );
+  /// 用户选择「忽略此版本」的更新版本号；自动检查时命中则不再弹窗。
+  /// 出现更新的版本号后自动失效。
+  static const updateIgnoredVersion = SettingKey<String>(
+    'updateIgnoredVersion',
+    '',
+    group: SettingGroup.update,
+  );
   /// 「我的追番」卡片展示的自定义用户名；空串回退「我的追番」。
   static const username = SettingKey<String>(
     'username',
@@ -649,6 +664,8 @@ class SettingsKeys {
     defaultStartupPage,
     isWideScreen,
     announcementDismissState,
+    announcementCache,
+    updateIgnoredVersion,
     username,
     avatarPath,
     webDavEnable,

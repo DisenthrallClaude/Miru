@@ -49,9 +49,11 @@ class ApiEndpoints {
 
   /// 应用更新镜像源。
   ///
-  /// 上游的 `api.miru.fyi` 需要 KAZUMI_APPID/KEY 签名，自建包无法使用，
-  /// 因此 Miru 的镜像源直接复用 GitHub Releases 作为降级通道。
-  static const String latestAppMirror = latestApp;
+  /// GitHub API 在国内直连经常被重置；gh-proxy 是社区公共反代，
+  /// 可免代理拉到同一份 Releases 数据（实测可用）。
+  /// 上游的 `api.miru.fyi` 需要 KAZUMI_APPID/KEY 签名，自建包无法使用。
+  static const String latestAppMirror =
+      'https://gh-proxy.com/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
   /// 弹弹官网
   static const String dandanIndex = 'https://www.dandanplay.com/';
@@ -74,6 +76,8 @@ class ApiEndpoints {
   /// jsDelivr 主源（国内直连友好，缓存约 12 小时，管理页发布后会主动
   /// purge）；raw 兜底（即时生效但部分地区不可达）。与规则仓库的
   /// 双源回退架构完全一致。
+  static const String announcementJsonCdn =
+      'https://cdn.jsdelivr.net/gh/DisenthrallClaude/Miru@main/announcement.json';
   static const String announcementJsonMirror =
       'https://fastly.jsdelivr.net/gh/DisenthrallClaude/Miru@main/announcement.json';
   static const String announcementJson =
