@@ -29,12 +29,20 @@ class VideoSource {
   /// 解析视频源时确认的媒体格式提示
   final VideoSourceFormat format;
 
+  /// 解析层确认的源站播放请求头（v1.5.2）。
+  ///
+  /// 云端/本地快速解析提取直链时，可能同时确认了源站要求的
+  /// referer/UA（防盗链）。这组头会合并进 mpv 的 http-header-fields，
+  /// 保证「探测可达 → 播放也可达」。插件自身声明的头仍优先。
+  final Map<String, String> playbackHeaders;
+
   const VideoSource({
     required this.url,
     required this.offset,
     required this.type,
     this.format = VideoSourceFormat.auto,
     String? directUrl,
+    this.playbackHeaders = const {},
   }) : directUrl = directUrl ?? url;
 
   /// 是否为本地代理地址（127.0.0.1）。

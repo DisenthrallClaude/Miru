@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.1/Miru-1.5.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.2/Miru-1.5.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,22 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.5.1（本次）
+### 1.5.2（本次）
+
+> 安装包：[Releases v1.5.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.2)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**播放提速与规则修复（实测数据驱动）：**
+
+- **新增本地快速解析通道**：播放页 HTML 直接在手机本地静态提取（0.3~1 秒，云端解析要 1.5~3.5 秒），且出口 IP 与播放器完全一致——从根上消除「云端拿到的直链被源站防盗链拒掉」的问题。解析漏斗升级为五级：本地缓存 → 本地快速解析 → 云端解析 → WebView 嗅探，任何一级失败自动降级。
+- **修复云端解析对一批 MacCMS 站全挂的根因**：player_aaaa 变量里嵌套的 `vod_data` 对象会让旧正则提前截断、JSON 解析必然失败（淘片等站全部中招）。云端与本地解析都已改为括号配平提取，并支持苹果CMS 官方 encrypt=1（escape）/encrypt=2（base64+escape）加密解码。
+- **mpv 起播码率修复**：mpv 默认 HLS 选最高码率流，弱网下首帧要等好几秒——这正是「几秒拿到直链却迟迟不出画面」的头号元凶。现改为取首个流（站点推荐清晰度）起播，明显加快出画；连接超时从 60 秒降到 10 秒，坏链快速失败快速换源。
+- **修复 16:9 轮播海报点了加载不出来**：详情数据接口原走 next.bgm.tv（国内时好时坏），其配对的镜像 next.bangumi.lol 对非浏览器请求一律 403——竞速形同虚设。已切到 api.bgm.tv + 镜像双路竞速（镜像实测稳定），首页轮播、详情页、置顶清单全部受益。
+- **防盗链请求头不再丢失**：解析层确认的源站 Referer 现在会随直链一起传给播放器（之前会丢，是「探测可达但播放 403」的经典原因）；HLS 探测同时校验响应内容确为 m3u8 索引（防错误页 200 误判）。
+- **全规则实测**：13 条规则逐条跑通「搜索→详情→选集→解析→探测」全链路并测速，静态可解析的源全部进入秒级解析通道；JS 动态渲染/第三方解析器型源自动走 WebView 兜底。已知站况：dalvdm 域名已失效（等站方恢复）；AGE 有 Cloudflare 盾（由 WebView 自动处理）。
+
+### 1.5.1
 
 > 安装包：[Releases v1.5.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.1)
 >

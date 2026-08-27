@@ -38,7 +38,8 @@ class ApiEndpoints {
   /// 社区公共反代：api.bgm.tv 的替身，无需鉴权
   static const String bangumiApiProxyDomain = 'https://bgmapi.anibt.net';
 
-  /// 社区公共反代：next.bgm.tv 的替身，无需鉴权
+  /// next.bgm.tv 的旧镜像（v1.5.2 已弃用：该域名对非浏览器 UA 一律
+  /// 403 Cloudflare 盾，竞速无效）。保留常量仅供历史兼容参考。
   static const String bangumiNextProxyDomain = 'https://next.bangumi.lol';
 
   /// 云端解析官方端点（v1.5.1 起内置，零配置可用）。

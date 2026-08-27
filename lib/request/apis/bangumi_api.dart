@@ -320,10 +320,16 @@ class BangumiApi {
 
   static Future<BangumiItem?> getBangumiInfoByID(int id) async {
     try {
+      // v1.5.2：从 next.bgm.tv(/p1) 切到 api.bgm.tv(/v0)。
+      // 原因：详情数据是首页轮播、详情页、置顶清单的共同依赖，
+      // next.bgm.tv 国内可达性时好时坏，而配对的镜像
+      // next.bangumi.lol 对非浏览器 UA 一律 403（Cloudflare 盾），
+      // 竞速形同虚设——这正是「16:9 海报点了加载不出来」的根因。
+      // api.bgm.tv 的镜像 bgmapi.anibt.net 实测稳定可用，
+      // BangumiItem.fromJson 本就兼容 v0/next 双格式，零适配成本。
       final jsonData = await _client.get(
         ApiEndpoints.formatUrl(
-            ApiEndpoints.bangumiAPINextDomain +
-                ApiEndpoints.bangumiInfoByIDNext,
+            ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiInfoByID,
             [id]),
       );
       return BangumiItem.fromJson(jsonData);

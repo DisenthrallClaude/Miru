@@ -434,30 +434,84 @@ async function putNegative(env, key, message) {
 // 提取器（纯函数，便于本地单测；与 v1 完全一致）
 // ---------------------------------------------------------------------------
 
-/** MacCMS V10 标准变量：player_aaaa={"flag":"...","url":"..."} */
+/**
+ * MacCMS 播放器变量提取（v3，2026-08 配平修复）。
+ *
+ * 旧版正则 `(\{[^}]*\})` 在 player_aaaa 含嵌套对象（如 vod_data）
+ * 时会被第一个 `}` 提前截断，JSON.parse 必然失败——blbl/lblb/淘片
+ * 等一大批 MacCMS 站的云端解析全挂就是这个原因。新版改括号配平提取。
+ */
 function extractMaccmsPlayerVar(html) {
-  const varRe = /(?:var\s+)?(player_[a-z0-9]+)\s*=\s*(\{[^}]*\})\s*[,;]?/gi;
+  const varRe = /(?:var\s+)?(player_[a-z0-9]+)\s*=\s*\{/g;
   let m;
   while ((m = varRe.exec(html)) !== null) {
+    const raw = balancedJsonAt(html, m.index + m[0].length - 1);
+    if (!raw) continue;
+    let obj = null;
     try {
-      const obj = JSON.parse(m[2]);
-      const url = obj.url || obj.link || '';
-      if (typeof url === 'string' && url.trim() && VIDEO_EXT_RE.test(stripQuery(url))) {
-        return { url: url.trim(), varName: m[1] };
-      }
+      obj = JSON.parse(raw);
     } catch (_) {
-      // JSON 里可能含单引号或未转义字符，尝试宽松修复一次
       try {
-        const fixed = m[2].replace(/'/g, '"').replace(/,(\s*[}\]])/g, '$1');
-        const obj = JSON.parse(fixed);
-        const url = obj.url || obj.link || '';
-        if (typeof url === 'string' && url.trim() && VIDEO_EXT_RE.test(stripQuery(url))) {
-          return { url: url.trim(), varName: m[1] };
-        }
+        const fixed = raw.replace(/'/g, '"').replace(/,(\s*[}\]])/g, '$1');
+        obj = JSON.parse(fixed);
       } catch (_) {}
+    }
+    if (!obj) continue;
+    // MacCMS 官方编码（maccms10 All.php）：
+    // encrypt=1 → escape()；encrypt=2 → base64(escape())；0 → 原文
+    const decoded = resolvePlayerAaaaUrl(obj);
+    if (decoded && VIDEO_EXT_RE.test(stripQuery(decoded))) {
+      return { url: decoded, varName: m[1], referer: obj.referer || '' };
     }
   }
   return null;
+}
+
+/** 从 openIdx（指向 `{`）括号配平截取 JSON（跳过字符串字面量与转义）。 */
+function balancedJsonAt(html, openIdx) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = openIdx; i < html.length && i < openIdx + 20000; i++) {
+    const c = html[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === '\\' && inString) { escaped = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return html.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
+
+/** JS escape() 解码：%uXXXX（UTF-16）与 %XX。 */
+function macUnescape(s) {
+  return String(s).replace(/%u([0-9A-Fa-f]{4})|%([0-9A-Fa-f]{2})/g,
+    (_, u, b) => String.fromCharCode(parseInt(u || b, 16)));
+}
+
+/** 按官方 encrypt 字段解码 player_aaaa.url。 */
+function resolvePlayerAaaaUrl(a) {
+  let u = (a && a.url) || (a && a.link) || '';
+  if (typeof u !== 'string' || !u.trim()) return '';
+  u = u.trim();
+  try {
+    const enc = a.encrypt | 0;
+    if (enc === 2) u = macUnescape(atob(u));
+    else if (enc === 1) u = macUnescape(u);
+    else {
+      try {
+        const d = decodeURIComponent(u);
+        if (d.startsWith('http')) u = d;
+      } catch (_) {}
+    }
+  } catch (_) {
+    return '';
+  }
+  return u;
 }
 
 /** 从 HTML / 内联 JS 中提取 m3u8 / mp4 直链（排除广告与统计域）。 */
@@ -500,7 +554,7 @@ async function extractFromPage(pageUrl, ua, referer, depth) {
   const html = await fetchText(pageUrl, ua, referer || pageUrl);
   const base = new URL(pageUrl);
 
-  // 策略 a：MacCMS 播放器变量（player_aaaa = {"url":"...","link":"..."}）
+  // 策略 a：MacCMS 播放器变量（括号配平 + encrypt 解码，v3）
   const playerVar = extractMaccmsPlayerVar(html);
   if (playerVar) {
     const resolved = absolutize(playerVar.url, base);
@@ -508,7 +562,7 @@ async function extractFromPage(pageUrl, ua, referer, depth) {
       return {
         videoUrl: resolved,
         format: formatOf(resolved),
-        referer: referer || pageUrl,
+        referer: playerVar.referer || referer || pageUrl,
       };
     }
   }

@@ -201,6 +201,9 @@ class CloudVideoSourceResolver {
       throw Exception('resolver returned invalid url');
     }
     final formatName = data['format'] as String? ?? 'auto';
+    // Worker 提取直链时确认的源站 referer（防盗链要求），
+    // 一并带回给 mpv 播放头（v1.5.2）。
+    final resolvedReferer = (data['referer'] as String?) ?? '';
     final elapsed = DateTime.now().difference(started).inMilliseconds;
     return (
       VideoSource(
@@ -208,6 +211,9 @@ class CloudVideoSourceResolver {
         offset: 0,
         type: VideoSourceType.online,
         format: formatName == 'hls' ? VideoSourceFormat.hls : VideoSourceFormat.auto,
+        playbackHeaders: {
+          if (resolvedReferer.isNotEmpty) 'referer': resolvedReferer,
+        },
       ),
       endpoint,
       elapsed,

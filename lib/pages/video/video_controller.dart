@@ -754,6 +754,14 @@ abstract class _VideoPageController with Store implements Disposable {
       final bool forceAdBlocker =
           GStorage.getSetting(SettingsKeys.forceAdBlocker);
 
+      // 解析层确认的源站头（防盗链 referer，云端/本地快速解析带回）
+      // 合并进 mpv 播放头：插件声明的头优先，解析层补齐缺失项。
+      // 之前这组头会丢——「探测可达但播放 403」的经典原因（v1.5.2）。
+      final mergedPlaybackHeaders = <String, String>{
+        ...source.playbackHeaders,
+        ...playbackHeaders,
+      };
+
       final params = PlaybackInitParams(
         videoUrl: source.url,
         // 原始直链：本地代理打开失败时 mpv 直接用它重开，绝不明屏。
@@ -767,7 +775,7 @@ abstract class _VideoPageController with Store implements Disposable {
         danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
         pageUrl: resolvedEpisode.pageUrl,
         sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: playbackHeaders,
+        httpHeaders: mergedPlaybackHeaders,
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
         referer: currentPlugin.referer,

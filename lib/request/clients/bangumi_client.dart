@@ -25,10 +25,15 @@ class BangumiClient {
 
   static final BangumiClient instance = BangumiClient._();
 
-  /// 官方 host → 社区公共反代（无需鉴权；两个反代后端不同，不能混用）。
+  /// 官方 host → 社区公共反代（无需鉴权）。
+  ///
+  /// v1.5.2：移除 next.bgm.tv → next.bangumi.lol 的映射——该镜像对
+  /// 非浏览器 UA 一律返回 403（Cloudflare 盾），竞速不仅无效还浪费
+  /// 一次请求。next 系接口（评论/角色/日历）改为官方单路直连；
+  /// 详情主链路（getBangumiInfoByID）已切到 api.bgm.tv/v0，
+  /// 继续享受官方 + bgmapi.anibt.net 双路竞速。
   static const Map<String, String> _hostMirrors = {
     'api.bgm.tv': ApiEndpoints.bangumiApiProxyDomain,
-    'next.bgm.tv': ApiEndpoints.bangumiNextProxyDomain,
   };
 
   Future<dynamic> get(

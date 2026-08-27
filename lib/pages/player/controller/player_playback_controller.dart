@@ -673,6 +673,14 @@ abstract class _PlayerPlaybackController with Store {
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
+        // 起播码率（v1.5.2）：mpv 默认 hls-bitrate=max，master playlist
+        // 会选最高码率流，弱网下首帧要等好几秒——这是「拿得到直链
+        // 却迟迟不出画面」的头号元凶。取首个流（通常是站点推荐的
+        // 默认清晰度）起播最快，中途仍可手动切清晰度。
+        await pp.setProperty('hls-bitrate', 'no');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
       }
 
       // 网络流稳定性参数（本地文件零开销，跳过）：
@@ -683,6 +691,13 @@ abstract class _PlayerPlaybackController with Store {
       if (!isLocalPlayback()) {
         await pp.setProperty('stream-lavf-o',
             'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5');
+        if (!isCurrentPlayer(player)) {
+          return await _discardIfNotCurrent(candidate);
+        }
+        // 连接超时（v1.5.2）：mpv 默认 60 秒——坏链要等一分钟才报错，
+        // 用户体验是「卡死」。10 秒足够覆盖慢源握手，失败后自动
+        // 直连重开/换源的链路能更快接管。
+        await pp.setProperty('network-timeout', '10');
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
