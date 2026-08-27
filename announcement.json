@@ -1,3 +1,19 @@
 {
-  "announcements": []
+  "announcements": [
+    {
+      "id": "ann-20260827-5sei",
+      "enabled": true,
+      "priority": 10,
+      "title": "测试弹窗无需在意",
+      "body": "该弹窗为测试，无需在意",
+      "coverImage": "",
+      "actions": [],
+      "minAppVersion": "1.3.0",
+      "maxAppVersion": "",
+      "startAt": "",
+      "endAt": "",
+      "showFrequency": "once",
+      "font": "longCang"
+    }
+  ]
 }
