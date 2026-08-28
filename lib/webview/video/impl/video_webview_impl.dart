@@ -476,15 +476,18 @@ class VideoWebviewImpl
     if (headers == null) return false;
     final range = headers['Range'] ?? headers['range'];
     if (range == null || !range.startsWith('bytes=')) return false;
-    // 带 Range 的请求并不都是媒体：静态资源与常见数据接口
+    // 先去掉 query/fragment 再比对，防 .js?v=2 / manifest.php?x 绕过黑名单。
+    final path = Uri.tryParse(lower)?.path ?? lower;
+    // 带 Range 的请求并不都是媒体：静态资源、数据接口与动态清单
     // （字幕 .vtt/.srt、站点地图 .xml、字体、播放器清单等）一律放行。
     const nonMediaExtensions = [
       '.js', '.mjs', '.css', '.html', '.htm', '.json', '.xml', '.txt',
       '.map', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico',
       '.woff', '.woff2', '.ttf', '.otf', '.eot', '.wasm', '.vtt', '.srt',
+      '.php', '.asp', '.aspx', '.jsp', '.mpd',
     ];
     for (final ext in nonMediaExtensions) {
-      if (lower.endsWith(ext)) return false;
+      if (path.endsWith(ext)) return false;
     }
     return true;
   }

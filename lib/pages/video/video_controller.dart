@@ -519,6 +519,10 @@ abstract class _VideoPageController with Store implements Disposable {
     );
     _beginEpisodeSwitch(selection);
     _danmakuSessions.cancel();
+    // 换集/兜底换源时旧「下一集预解析」Timer 不再有意义（新集 init 完成后
+    // 才会重排），窗口内触发只会用旧线路 pageUrl 拼出错误 URL 白耗一次解析。
+    _nextEpisodePrefetchTimer?.cancel();
+    _nextEpisodePrefetchTimer = null;
     playerController.danmaku.finishDanmakuLoad();
     _videoSourceService?.cancel();
 

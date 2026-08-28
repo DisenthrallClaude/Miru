@@ -87,16 +87,29 @@ class LocalMediaProxy {
   // 生命周期
   // ---------------------------------------------------------------------------
 
-  Future<void> _ensureStarted() async {
-    if (_server != null) return;
-    _cacheDir ??= await _createCacheDir();
-    _secret = _randomSecret();
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen(_handleRequest, onError: (Object e) {
-      MiruLogger().w('LocalMediaProxy: server error', error: e);
-    });
-    _server = server;
-    MiruLogger().i('LocalMediaProxy: listening on 127.0.0.1:${server.port}');
+  /// 启动 future 记忆化：并发首调（prefetch ∥ register）只 bind 一次。
+  Future<void>? _starting;
+
+  Future<void> _ensureStarted() {
+    if (_server != null) return Future.value();
+    return _starting ??= _doStart();
+  }
+
+  Future<void> _doStart() async {
+    try {
+      _cacheDir ??= await _createCacheDir();
+      _secret = _randomSecret();
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen(_handleRequest, onError: (Object e) {
+        MiruLogger().w('LocalMediaProxy: server error', error: e);
+      });
+      _server = server;
+      MiruLogger().i('LocalMediaProxy: listening on 127.0.0.1:${server.port}');
+    } catch (_) {
+      // 启动失败允许下次重试（否则记忆化会把失败钉死）
+      _starting = null;
+      rethrow;
+    }
   }
 
   Future<Directory> _createCacheDir() async {

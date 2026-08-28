@@ -199,8 +199,10 @@ class FastVideoSourceResolver {
           !decoded.startsWith('/')) {
         continue;
       }
-      // player 变量所在页面即播放器要求的 referer
-      final referer = (obj['referer'] as String?) ?? '';
+      // player 变量所在页面即播放器要求的 referer（站点把 referer 写成
+      // 数字/对象时不要抛 TypeError 中止整层提取，降级为空即可）
+      final referer =
+          obj['referer'] is String ? obj['referer'] as String : '';
       return (decoded, referer);
     }
     return null;

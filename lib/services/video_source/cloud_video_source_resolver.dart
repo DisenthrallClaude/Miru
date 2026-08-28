@@ -316,9 +316,22 @@ class CloudVideoSourceResolver {
     } catch (e) {
       // 失败分类记日志（B14）+ 熔断计数（B6），异常继续向上抛给 _race 吞掉
       final elapsed = DateTime.now().difference(started).inMilliseconds;
+      final failureClass = _classifyFailure(e);
       MiruLogger().w('CloudResolver: endpoint ${endpoint.host} failed in '
-          '${elapsed}ms (${_classifyFailure(e)})');
-      _recordEndpointFailure(endpoint);
+          '${elapsed}ms ($failureClass)');
+      // 熔断只计传输层/服务端故障（timeout、连接错误、证书、5xx）。
+      // 站点级失败（extract-failed/bad-json/invalid-url）是「这个站云端解不了」，
+      // 换个站依然可用，计熔断会让一个 WebView-only 站点连锁关闭整个云端层；
+      // 429 配额超限同样不计（配额是全局的，熔断与否不影响它，还白丢加速机会）。
+      const circuitBreakerClasses = {
+        'timeout',
+        'connect-error',
+        'bad-certificate',
+      };
+      if (circuitBreakerClasses.contains(failureClass) ||
+          failureClass.startsWith('http-5')) {
+        _recordEndpointFailure(endpoint);
+      }
       rethrow;
     }
   }

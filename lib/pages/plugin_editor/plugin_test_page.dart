@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:html/parser.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/modules/search/plugin_search_module.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 
 import '../../modules/roads/road_module.dart';
 import '../../plugins/api_rule_config.dart';
@@ -100,10 +102,40 @@ class _PluginTestPageState extends State<PluginTestPage> {
   void _onBackPressed() =>
       MiruDialog.observer.hasMiruDialog ? MiruDialog.dismiss() : null;
 
+  /// 保存前对激活模式的 XPath 字段做校验（与编辑器保存同一套
+  /// xpath_selector 解析器与文案）：测试页的「保存此规则」入口
+  /// 不绕过校验，坏规则不得经测试页入库。
+  void _validateActiveXPathFields() {
+    final probe =
+        parse('<html><body></body></html>').documentElement!;
+    void validate(String label, String expression) {
+      final value = expression.trim();
+      if (value.isEmpty) {
+        throw FormatException('$label不能为空');
+      }
+      try {
+        probe.queryXPath(value);
+      } catch (error) {
+        throw FormatException('$label语法无效：$value（$error）');
+      }
+    }
+
+    if (plugin.searchMode == RuleMode.xpath) {
+      validate('搜索结果列表（XPath）', plugin.searchList);
+      validate('条目名称（XPath）', plugin.searchName);
+      validate('条目链接（XPath）', plugin.searchResult);
+    }
+    if (plugin.chapterMode == RuleMode.xpath) {
+      validate('播放线路列表（XPath）', plugin.chapterRoads);
+      validate('剧集列表（XPath）', plugin.chapterResult);
+    }
+  }
+
   /// 保存当前测试中的规则（与编辑器保存同一条链路：
   /// 新规则自动追加、已有规则原位替换）。
   Future<void> _saveRule() async {
     try {
+      _validateActiveXPathFields();
       await widget.controller.updatePlugin(plugin);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
