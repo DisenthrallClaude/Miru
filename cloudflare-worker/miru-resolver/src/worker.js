@@ -124,7 +124,7 @@ export default {
     }
 
     if (url.pathname === '/health') {
-      return jsonResponse({ ok: true, service: 'miru-resolver', version: 3, now: Date.now() }, cors);
+      return jsonResponse({ ok: true, service: 'miru-resolver', version: 4, now: Date.now() }, cors);
     }
 
     if (url.pathname === '/ping') {
