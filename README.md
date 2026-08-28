@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.2/Miru-1.5.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.3-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.3/Miru-1.5.3-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,27 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.5.2（本次）
+### 1.5.3（本次）
+
+> 安装包：[Releases v1.5.3](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.3)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**三轮深度代码审查后的大规模稳定性修复（131 项）：**
+
+- **播放自愈不再被误关**：之前关闭「播放错误提示」会连带关闭起播失败自动换源/直连兑底自愈，表现为永久转圈。现在提示开关只管显示，自愈永远在线。
+- **假直链不再污染缓存**：源站返回错误页却带 200 的假 m3u8，之前会被当作好链缓存 30 分钟，期间一直转圈。现在严格校验 #EXTM3U 头，假链直接判死走下一级解析。
+- **防盗链头随缓存持久化**：解析确认的 Referer/Cookie 现在写入缓存条目，二刷、换集不再因丢头而 403。
+- **卡死源站快速失败**：给探测、快解析响应体、代理回源等 8 处补上超时——之前「黑洞」源站会把整个解析漏斗挂住近 2 分钟，现在秒级判死自动降级。
+- **WebView 重试真实生效**：之前翻转解析器重试时 JS 桥接只按首次注册，重试等于原样重跑白等 15 秒；现在重试时会重新注册全部 handler。
+- **Cloudflare Cookie 归一为单头**：cf_clearance 等验证 Cookie 之前会被拆成非法独立请求头发给 mpv（直接被拒），现在播放/下载/规则抓取三侧统一按标准单 Cookie 头发送。
+- **会话级 UA 稳定**：规则抓取不再每个请求随机换 UA，改为会话内稳定 UA——UA 绑定型 CDN 间歇 403 显著减少。
+- **16:9 海报加载不出修复**：图片加载加超时与失败回退（wsrv.nl 图片代理失败自动回退原图直连），失败态与加载中可区分、可重试。
+- **下载接入五级解析漏斗**：下载不再每任务纯 WebView 嗅探硬焄 30 秒，现在与播放共用「缓存→快解→云端→WebView」漏斗，快得多也稳得多。
+- **解析端点熔断更聪明**：熔断器只统计传输层/服务器 5xx 故障，源站内容性失败（提取失败/解析错）不再误伤端点熔断。
+- 另含预取定时器取消、代理 Range 重定向去 query、Bangumi 竞速重试削减（最坏 48→12 秒）、Worker v4 等数十项底层加固。
+
+### 1.5.2
 
 > 安装包：[Releases v1.5.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.2)
 >
