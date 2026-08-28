@@ -101,12 +101,17 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   /// 带播放请求头的解析（推荐入口）：探测/预取/代理回源都复用同一套
   /// headers，与 mpv 播放时完全一致，避免「探测可达但播放 403」。
+  ///
+  /// [prefetchEnabled] 置 false 时跳过后台预取与本地代理登记，仅供
+  /// 下载路径使用：批量下载的每集 resolve 若都并发预取 4MB/6 分片，
+  /// 会与正式下载抢同一上游带宽与磁盘（代理缓存 + 下载目录双写）。
   Future<VideoSource> resolveWithHeaders(
     String episodeUrl, {
     required bool useLegacyParser,
     int offset = 0,
     Duration timeout = const Duration(seconds: 20),
     Map<String, String> playbackHeaders = const {},
+    bool prefetchEnabled = true,
   }) async {
     final headers = _mergedPlaybackHeaders(playbackHeaders);
 
@@ -122,7 +127,8 @@ class HybridVideoSourceService implements IVideoSourceService {
         // alive（正常路径，+1 RTT）或 unknown（源站慢，交给 mpv 重试）
         MiruLogger().i(
             'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
-        return _materialize(cached, offset: offset, headers: headers);
+        return _materialize(cached, offset: offset, headers: headers,
+            prefetchEnabled: prefetchEnabled);
       }
 
       // 明确的 4xx：直链已死（签名过期/防盗链），清除并继续走解析
@@ -146,7 +152,8 @@ class HybridVideoSourceService implements IVideoSourceService {
         if (verdict != _ProbeVerdict.dead) {
           await _cache.put(episodeUrl, fastResult);
           _forgetLevelFailures(episodeUrl);
-          return _materialize(fastResult, offset: offset, headers: headers);
+          return _materialize(fastResult, offset: offset, headers: headers,
+              prefetchEnabled: prefetchEnabled);
         }
         MiruLogger()
             .w('HybridResolver: fast url rejected (dead), falling back');
@@ -171,7 +178,8 @@ class HybridVideoSourceService implements IVideoSourceService {
         if (verdict != _ProbeVerdict.dead) {
           await _cache.put(episodeUrl, cloudResult);
           _forgetLevelFailures(episodeUrl);
-          return _materialize(cloudResult, offset: offset, headers: headers);
+          return _materialize(cloudResult, offset: offset, headers: headers,
+              prefetchEnabled: prefetchEnabled);
         }
         MiruLogger().w(
             'HybridResolver: cloud url rejected (dead), falling back');
@@ -192,7 +200,8 @@ class HybridVideoSourceService implements IVideoSourceService {
     );
     await _cache.put(episodeUrl, source);
     _forgetLevelFailures(episodeUrl);
-    return _materialize(source, offset: offset, headers: headers);
+    return _materialize(source, offset: offset, headers: headers,
+        prefetchEnabled: prefetchEnabled);
   }
 
   /// 预解析（不抛异常、不打扰用户）：填解析缓存 + 预取开头数据。
@@ -271,11 +280,14 @@ class HybridVideoSourceService implements IVideoSourceService {
   /// 智能代理（v1.5.1）：磁盘已有可用缓存（MP4 ≥1MB / HLS ≥2 分片）才走
   /// 代理——此时首帧从磁盘秒出；否则直连，行为与 v1.3.2 完全一致，
   /// 代理不再是单点故障。无论走哪条路，都补一发后台预取，
-  /// 为二刷/换集备好数据。
+  /// 为二刷/换集备好数据。下载路径（[prefetchEnabled] = false）跳过
+  /// 预取与代理登记：下载只用 directUrl 直连源站，预取只会与正式
+  /// 下载抢同一上游带宽/并发配额，并造成代理缓存 + 下载目录双写。
   Future<VideoSource> _materialize(
     VideoSource source, {
     required int offset,
     required Map<String, String> headers,
+    bool prefetchEnabled = true,
   }) async {
     final directUrl = source.url;
     final isHls = _isHls(source);
@@ -287,39 +299,34 @@ class HybridVideoSourceService implements IVideoSourceService {
       ...headers,
     };
 
-    // 后台预取开头数据（不阻塞返回；计量网络下内部自动跳过）
-    unawaited(
-        _proxy.prefetch(directUrl, isHls: isHls, headers: mergedHeaders));
+    if (prefetchEnabled) {
+      // 后台预取开头数据（不阻塞返回；计量网络下内部自动跳过）
+      unawaited(
+          _proxy.prefetch(directUrl, isHls: isHls, headers: mergedHeaders));
 
-    final useProxy = _proxy.isEnabled &&
-        await _proxy.hasUsableCache(directUrl, isHls: isHls);
-    if (!useProxy) {
-      return VideoSource(
-        url: directUrl,
-        offset: offset,
-        type: source.type,
-        format: source.format,
-        directUrl: directUrl,
-        playbackHeaders: mergedHeaders,
-      );
+      final useProxy = _proxy.isEnabled &&
+          await _proxy.hasUsableCache(directUrl, isHls: isHls);
+      if (useProxy) {
+        final proxyUrl = await _proxy.register(
+          directUrl,
+          isHls: isHls,
+          headers: mergedHeaders,
+        );
+        if (proxyUrl != null) {
+          return VideoSource(
+            url: proxyUrl,
+            offset: offset,
+            type: source.type,
+            format: source.format,
+            directUrl: directUrl,
+            playbackHeaders: mergedHeaders,
+          );
+        }
+      }
     }
-    final proxyUrl = await _proxy.register(
-      directUrl,
-      isHls: isHls,
-      headers: mergedHeaders,
-    );
-    if (proxyUrl == null) {
-      return VideoSource(
-        url: directUrl,
-        offset: offset,
-        type: source.type,
-        format: source.format,
-        directUrl: directUrl,
-        playbackHeaders: mergedHeaders,
-      );
-    }
+    // 无可用缓存/代理登记失败时播放路径同样退化为直连，行为不变。
     return VideoSource(
-      url: proxyUrl,
+      url: directUrl,
       offset: offset,
       type: source.type,
       format: source.format,
@@ -483,7 +490,10 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   bool _isHlsUrl(String url) {
     final path = url.split('#').first.split('?').first;
-    return path.endsWith('.m3u8');
+    // toLowerCase：大写 .M3U8 直链同样按 HLS 处理，与播放侧
+    // _isHlsPlayback 的判定对齐，避免两侧语义漂移（probe 走错分支、
+    // prefetch 按 MP4 头 4MB 预取、hasUsableCache 用错启发式）。
+    return path.toLowerCase().endsWith('.m3u8');
   }
 
   @override

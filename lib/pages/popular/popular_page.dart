@@ -159,6 +159,9 @@ class _PopularPageState extends State<PopularPage> {
                       height: 400,
                       child: BangumiMirrorErrorWidget(
                         onRetry: () {
+                          // 防双击（N4）：重试进行中直接挡掉，避免并发
+                          // 两次请求把 offset 双推进而静默跳页。
+                          if (popularController.isLoadingMore) return;
                           if (popularController.trendList.isEmpty) {
                             popularController.queryBangumiByTrend();
                           } else {
@@ -259,7 +262,10 @@ class _PopularPageState extends State<PopularPage> {
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Center(
                   child: TextButton.icon(
+                    // 防双击（N4）：横幅随 Observer 重建消失有约一帧延迟，
+                    // 连点会并发两次翻页请求（offset 双推进跳页），入口挡掉。
                     onPressed: () {
+                      if (popularController.isLoadingMore) return;
                       if (popularController.currentTag != '') {
                         popularController.queryBangumiByTag();
                       } else {
@@ -440,6 +446,11 @@ class _PopularPageState extends State<PopularPage> {
           duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
       popularController.setCurrentTag('');
       popularController.clearBangumiList();
+      // 清掉分类页遗留的翻页失败态（N5）：否则切回热门后底部仍
+      // 残留「加载更多失败」横幅（currentTag 变化会触发外层 Observer
+      // 重建，横幅随之按新值隐藏）；反向切换由 queryBangumiByTag
+      // 的 'init' 路径自行复位。
+      popularController.loadMoreFailed = false;
       if (popularController.trendList.isEmpty) {
         await popularController.queryBangumiByTrend();
       }

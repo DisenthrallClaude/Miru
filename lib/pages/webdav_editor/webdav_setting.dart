@@ -111,7 +111,8 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                   },
                   title: Text('Bangumi 镜像'),
                   description: Text(
-                      '启用社区镜像加速 Bangumi 数据请求（bgmapi.anibt.net）与封面图代理（wsrv.nl）；需要登录的请求始终直连官方'),
+                      '启用社区镜像加速 Bangumi 数据请求（bgmapi.anibt.net）与封面图代理（wsrv.nl）；'
+                      '登录凭证仅发往官方域名，镜像只接收匿名请求'),
                   initialValue: enableBangumiProxy,
                 ),
                 SettingsTile.switchTile(

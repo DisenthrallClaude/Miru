@@ -40,19 +40,37 @@ class TelemetryService {
 
       // 心跳跟随端点配置（B13）：用户配了自建 Worker 时打到自建端点
       // （否则自建端点的活跃统计永远失真，其动态配额算不准）；
-      // 多端点取第一个（与解析请求的优先级一致）。
+      // 多端点取第一个有效端点（解析侧为全端点竞速，心跳只打一个
+      // 即可满足单端点主流场景）。
       final custom = GStorage.getSetting(SettingsKeys.cloudResolverUrl);
       final source = custom.trim().isEmpty
           ? ApiEndpoints.cloudResolverOfficialEndpoint
           : custom.trim();
-      var base = source
-          .split(RegExp(r'[,\s]+'))
-          .first
-          .trim()
-          .replaceAll(RegExp(r'/resolve$'), '')
-          .replaceAll(RegExp(r'/+$'), '');
-      if (!base.startsWith('http://') && !base.startsWith('https://')) {
-        base = 'https://$base';
+      // 端点归一化与 CloudVideoSourceResolver.endpoints 同一套（N6）：
+      // 跳过空段（串以逗号/空格开头时首段为空，之前 .first 会取到
+      // 空串让 base 变成 'https://' → 心跳静默失败）、补 https://、
+      // 去尾斜杠与 /resolve 后缀（顺序同 resolver，兼容 /resolve/），
+      // 再过 Uri.tryParse + scheme 校验，取第一个有效端点。
+      String? base;
+      for (final part in source.split(RegExp(r'[,\s]+'))) {
+        var candidate = part.trim();
+        if (candidate.isEmpty) continue;
+        if (!candidate.startsWith('http://') &&
+            !candidate.startsWith('https://')) {
+          candidate = 'https://$candidate';
+        }
+        candidate = candidate.replaceAll(RegExp(r'/+$'), '');
+        candidate = candidate.replaceAll(RegExp(r'/resolve$'), '');
+        final uri = Uri.tryParse(candidate);
+        if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+          base = candidate;
+          break;
+        }
+      }
+      if (base == null) {
+        // 全部段都无效：本次不发，与解析请求「无可达端点即跳过」同兜底
+        // （lastPingDay 已写，明天再试，失败静默语义不变）。
+        return;
       }
       final uid = CloudVideoSourceResolver.instance.uid;
       await _requestPing('$base/ping?uid=$uid');

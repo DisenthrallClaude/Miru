@@ -69,7 +69,13 @@ class WebViewVideoSourceService implements IVideoSourceService {
     if (_webview == null) {
       final webview = VideoWebviewControllerFactory.getController();
       try {
-        await webview.init();
+        // 初始化必须有硬超时（P8 余项）：headless WebView 创建挂起时
+        // init() 永不完成，本实例的 _resolveTail 串行队列会被卡死，
+        // 后续所有解析请求全部排队等死。参照
+        // captcha_verification_service 的 10s 初始化上限：超时抛
+        // TimeoutException，走下方「初始化失败不残留」分支 dispose
+        // 后重抛，本次解析立即失败并降级/重试，不拖垮整条队列。
+        await webview.init().timeout(const Duration(seconds: 10));
       } catch (e) {
         // 初始化失败的 WebView 绝不能残留：半初始化实例会让下一次
         // resolve 直接操作不可用的控制器（NPE / 行为异常）。

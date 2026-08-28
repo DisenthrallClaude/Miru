@@ -25,8 +25,13 @@ class _BBCodeWidgetState extends State<BBCodeWidget> {
 
   /// 渲染缓存（F15）：同一段 bbcode 且遮罩状态不变时复用 TextSpan 树，
   /// 不再每次 build 现场重跑 ANTLR 全量解析（setState 切遮罩也不再重解析）。
+  ///
+  /// 缓存键还包含主题取色（N2/F15 回归）：span 树里的引用文字/引用
+  /// 图标取 colorScheme.outline，只看 source+visible 会在切深浅色后
+  /// 复用旧主题的 span（引用文字/图标持旧 outline 色，对比度失效）。
   String? _cachedSource;
   bool? _cachedVisible;
+  Color? _cachedOutlineColor;
   List<InlineSpan> _cachedSpans = const [];
 
   /// 当前缓存树里创建的手势识别器；缓存失效时统一释放（F15：
@@ -54,6 +59,7 @@ class _BBCodeWidgetState extends State<BBCodeWidget> {
     _recognizers.clear();
     _cachedSource = null;
     _cachedVisible = null;
+    _cachedOutlineColor = null;
     _cachedSpans = const [];
   }
 
@@ -248,10 +254,16 @@ class _BBCodeWidgetState extends State<BBCodeWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (_cachedSource != widget.bbcode || _cachedVisible != _isVisible) {
+    // Theme.of 每帧读取：既建立 inherited 依赖（主题切换必触发重建），
+    // 又以取色值本身做缓存失效条件（N2，见 _cachedOutlineColor 注释）。
+    final outlineColor = Theme.of(context).colorScheme.outline;
+    if (_cachedSource != widget.bbcode ||
+        _cachedVisible != _isVisible ||
+        _cachedOutlineColor != outlineColor) {
       _invalidateSpans();
       _cachedSource = widget.bbcode;
       _cachedVisible = _isVisible;
+      _cachedOutlineColor = outlineColor;
       _cachedSpans = _buildSpans();
     }
 

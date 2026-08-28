@@ -26,6 +26,21 @@ abstract class _PopularController with Store {
   /// 避免改动 mobx 注解成员、不需要重新跑 build_runner。
   bool loadMoreFailed = false;
 
+  /// 最近一次「加载更多失败」 toast 的时间（N3）：死网下滚动监听
+  /// 会反复触发翻页失败请求，5s 窗口内只提示一次，避免 toast 刷屏。
+  DateTime? _lastLoadMoreFailedToastAt;
+
+  void _toastLoadMoreFailed() {
+    final now = DateTime.now();
+    final last = _lastLoadMoreFailedToastAt;
+    if (last != null &&
+        now.difference(last) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastLoadMoreFailedToastAt = now;
+    MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+  }
+
   @observable
   String currentTag = '';
 
@@ -118,8 +133,9 @@ abstract class _PopularController with Store {
         MiruDialog.showToast(message: '推荐加载失败，请检查网络后重试');
       } else {
         // 列表已有内容：翻页失败不再静默，给出提示与底部重试入口
+        // （toast 节流见 N3）
         loadMoreFailed = true;
-        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+        _toastLoadMoreFailed();
       }
       return;
     }
@@ -133,6 +149,8 @@ abstract class _PopularController with Store {
     trendList.addAll(result.where((item) => existingIds.add(item.id)));
     // 落盘：下次启动直接读这份，不再联网
     await FeedCache.savePopular(trendList.toList(), offset: _trendOffset);
+    // 成功后重置 toast 节流窗：下次失败（哪怕在 5s 内）仍会提示。
+    _lastLoadMoreFailedToastAt = null;
     isLoadingMore = false;
     isTimeOut = trendList.isEmpty;
   }
@@ -162,8 +180,9 @@ abstract class _PopularController with Store {
         MiruDialog.showToast(message: '分类加载失败，请检查网络后重试');
       } else {
         // 列表已有内容：翻页失败不再静默，给出提示与底部重试入口
+        // （toast 节流见 N3）
         loadMoreFailed = true;
-        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+        _toastLoadMoreFailed();
       }
       return;
     }
@@ -173,6 +192,8 @@ abstract class _PopularController with Store {
     }
     final existingIds = bangumiList.map((item) => item.id).toSet();
     bangumiList.addAll(result.where((item) => existingIds.add(item.id)));
+    // 成功后重置 toast 节流窗：下次失败（哪怕在 5s 内）仍会提示。
+    _lastLoadMoreFailedToastAt = null;
     isLoadingMore = false;
     isTimeOut = bangumiList.isEmpty;
   }

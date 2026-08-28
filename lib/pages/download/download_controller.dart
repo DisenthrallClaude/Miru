@@ -147,6 +147,19 @@ abstract class _DownloadController with Store {
     if (record == null || !record.episodes.containsKey(episodeNumber)) {
       return;
     }
+
+    // 下载失败时同步清空存量直链（在落盘之前改，见下）：
+    // retryDownload/priorityDownload 对非空 networkM3u8Url 会直接
+    // 复用旧 URL 重新入队，直链过期场景下重试必再失败——只失效解析
+    // 缓存只惠及走 resolve 链路的重试。清空后强制重试走重新解析。
+    // 仓库只在状态变化时才持久化，若在 updateEpisode 之后再改，
+    // 得等下一次状态翻转才会写盘。
+    if (episode.status == DownloadStatus.failed &&
+        episode.networkM3u8Url.isNotEmpty &&
+        episode.episodePageUrl.isNotEmpty) {
+      episode.networkM3u8Url = '';
+    }
+
     _repository.updateEpisode(recordKey, episodeNumber, episode);
 
     final key = '${recordKey}_$episodeNumber';
@@ -613,11 +626,14 @@ abstract class _DownloadController with Store {
         }
         VideoSource source;
         try {
+          // prefetchEnabled=false：下载只用 directUrl 直连源站，跳过
+          // hybrid 的后台预取/代理登记，避免与正式下载抢带宽、双写磁盘。
           source = await hybrid.resolveWithHeaders(
             fullUrl,
             useLegacyParser: plugin.useLegacyParser,
             timeout: timeout,
             playbackHeaders: playbackHeaders,
+            prefetchEnabled: false,
           );
         } on VideoSourceTimeoutException {
           if (lease.isCancelled) rethrow;
@@ -629,6 +645,7 @@ abstract class _DownloadController with Store {
             useLegacyParser: !plugin.useLegacyParser,
             timeout: timeout,
             playbackHeaders: playbackHeaders,
+            prefetchEnabled: false,
           );
         }
         // 用直链而非本地代理地址：下载要拿的是源站内容本身。

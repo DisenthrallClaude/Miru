@@ -696,12 +696,7 @@ abstract class _VideoPageController with Store implements Disposable {
 
     // 播放请求头提前构造：混合解析服务的探测/预取/代理回源与 mpv 播放
     // 共用同一套 UA/Referer/Cookie，避免「探测可达但播放 403」。
-    final cookieHeader = await PluginCookieManager.instance.cookieHeaderFor(
-      currentPlugin.name,
-      // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等子域上，
-      // 与 baseUrl 的 host 不一致时按域过滤会拿不到。
-      Uri.parse(url),
-    );
+    final cookieHeader = await _playbackCookieHeader(url);
     final playbackHeaders = <String, String>{
       'user-agent': currentPlugin.userAgent.isEmpty
           ? getSessionUA()
@@ -847,6 +842,27 @@ abstract class _VideoPageController with Store implements Disposable {
     episodeCommentsList.clear();
   }
 
+  /// 组装播放链路的标准 Cookie 单头（`cookie: n1=v1; n2=v2`）。
+  ///
+  /// mpv（media_kit 把 httpHeaders 逐条格式化为 "$k: $v" 进
+  /// http-header-fields）与 hybrid 的 `_mergedPlaybackHeaders`（只识别
+  /// 'cookie' 键）都要求单头形态：此前把 per-Cookie 的 {名:值} Map
+  /// 直接 spread 进播放头，发出的是 `cf_clearance: xxx` 这类非法字面
+  /// 头而非 `Cookie:` 头，验证类站点「能下载、播放 403」。与
+  /// download_controller._buildPlaybackHeaders / rule_engine 同格式。
+  Future<Map<String, String>> _playbackCookieHeader(String url) async {
+    // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等子域上，
+    // 与 baseUrl 的 host 不一致时按域过滤会拿不到。
+    final cookies = await PluginCookieManager.instance.cookieHeaderFor(
+      currentPlugin.name,
+      Uri.parse(url),
+    );
+    if (cookies.isEmpty) return const {};
+    return {
+      'cookie': cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+    };
+  }
+
   /// 播放稳定后预解析同线路的下一集：解析缓存 + 开头数据都提前备好，
   /// 用户点下一集时直接命中本地缓存，接近秒开。
   ///
@@ -888,10 +904,7 @@ abstract class _VideoPageController with Store implements Disposable {
         currentPlugin.baseUrl,
         nextEpisode.pageUrl,
       );
-      final cookieHeader = PluginCookieManager.instance.cookieHeaderFor(
-        currentPlugin.name,
-        Uri.parse(url),
-      );
+      final cookieHeader = _playbackCookieHeader(url);
       unawaited(
         cookieHeader.then((cookies) {
           return prefetchService.prefetchResolve(

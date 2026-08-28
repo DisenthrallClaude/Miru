@@ -263,9 +263,14 @@ class _BangumiEditorPageState extends State<BangumiEditorPage> {
                   try {
                     await bangumi.init();
                   } catch (e) {
-                    MiruDialog.showToast(message: '验证失败：${e.toString()}');
-                    await GStorage.putSetting(
-                        SettingsKeys.bangumiSyncEnable, false);
+                    // 对齐启动路径的会话级语义（G5）：验证失败只做会话级
+                    // 禁用（reset 清内存态、下次启动 _bangumiInit 自动重试），
+                    // 不再把 bangumiSyncEnable 永久写 false——一次网络抖动
+                    // 不应让同步被静默停用。
+                    bangumi.reset();
+                    MiruDialog.showToast(
+                        message: '验证失败，本次不启用同步'
+                        '（下次启动自动重试）：${e.toString()}');
                     if (!mounted) return;
                     setState(() {
                       isVerifying = false;

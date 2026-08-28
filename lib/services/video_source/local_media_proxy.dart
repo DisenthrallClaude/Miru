@@ -402,7 +402,10 @@ class LocalMediaProxy {
       return;
     }
     final segFile = File('${_cacheDir!.path}/seg_$token.bin');
-    if (await segFile.exists()) {
+    // 正在写入的半截分片不能当完整段返回（读侧可见性，B5 补漏）：
+    // serve tee / 后台预取持锁写盘期间，文件已存在但内容不完整。
+    // 当作未命中走回源透传，写完后的请求自然命中磁盘。
+    if (await segFile.exists() && !_writing.contains(token)) {
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType('video', 'mp2t');
       await request.response.addStream(segFile.openRead());
@@ -561,8 +564,15 @@ class LocalMediaProxy {
         // 磁盘部分（流式，不占大内存）
         await request.response
             .addStream(cacheFile.openRead(requestedStart, diskEnd + 1));
-        // 上游部分：从 cachedLen 开始正好接在缓存末尾，可 tee
-        holdingWriteLock = cachedLen < mp4PrefetchBytes && _writing.add(token);
+        // 上游部分：从 cachedLen 开始正好接在缓存末尾，可 tee。
+        // B12 同款校验（case4 是三处 tee 中此前漏掉的一处）：206 的
+        // Content-Range 起始必须恰为 cachedLen——上游对开放 Range 做
+        // 钳制/回畸形 206 时字节错位，追加进缓存就是永久损坏；
+        // 校验不过只转发不落盘（丢一次缓存机会而已）。
+        final upstreamStart = _contentRangeStart(response);
+        holdingWriteLock = upstreamStart == cachedLen &&
+            cachedLen < mp4PrefetchBytes &&
+            _writing.add(token);
         if (holdingWriteLock) {
           teeSink = cacheFile.openWrite(mode: FileMode.append);
         }

@@ -43,6 +43,21 @@ abstract class _SearchPageController with Store {
   /// 列表非空时「加载更多」失败：页面据此在底部显示重试入口。
   bool loadMoreFailed = false;
 
+  /// 最近一次「加载更多失败」 toast 的时间（N3）：死网下滚动监听
+  /// 会反复触发翻页失败请求，5s 窗口内只提示一次，避免 toast 刷屏。
+  DateTime? _lastLoadMoreFailedToastAt;
+
+  void _toastLoadMoreFailed() {
+    final now = DateTime.now();
+    final last = _lastLoadMoreFailedToastAt;
+    if (last != null &&
+        now.difference(last) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastLoadMoreFailedToastAt = now;
+    MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+  }
+
   @observable
   bool isLoading = false;
 
@@ -164,12 +179,14 @@ abstract class _SearchPageController with Store {
         // 首屏即失败：渲染独立的「网络异常」错误态（与无结果区分）
         searchNetworkError = true;
       } else {
-        // 翻页失败：列表已有内容，提示 + 底部重试入口
+        // 翻页失败：列表已有内容，提示 + 底部重试入口（toast 节流见 N3）
         loadMoreFailed = true;
-        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+        _toastLoadMoreFailed();
       }
       return;
     }
+    // 成功后重置节流窗：下次失败（哪怕在 5s 内）仍会提示。
+    _lastLoadMoreFailedToastAt = null;
     isTimeOut =
         bangumiList.isEmpty && (!fetchedAnyPage || !hasMoreSearchResults);
   }

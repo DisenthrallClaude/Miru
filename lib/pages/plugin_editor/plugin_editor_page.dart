@@ -502,6 +502,17 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
       ),
       floatingActionButton: GlassFab.extended(
         onTap: () async {
+          // 保存前对激活模式的 XPath 字段做校验（P10/N：R2 挪位）：
+          // 校验只挂保存动作——测试页入口（上方虫子图标）不校验空值，
+          // 支持「先填搜索段、测试通过后再补选集」的分段迭代流；
+          // 坏规则仍在入库前被拦下（测试页对空/坏 XPath 自会显示
+          // 类型化错误）。
+          try {
+            _validateActiveXPathFields();
+          } catch (error) {
+            _showEditorError(error);
+            return;
+          }
           final editedPlugin = _tryBuildEditedPlugin();
           if (editedPlugin == null) return;
           try {
@@ -883,8 +894,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
         ),
       ];
 
-  /// Builds the edited plugin, surfacing build/validation errors to the
-  /// user. Returns null when the current input does not form a valid rule.
+  /// Builds the edited plugin, surfacing build errors to the user.
+  /// Returns null when the current input does not form a valid rule.
+  /// （XPath 空值/语法校验不在这里——只挂保存动作，见
+  /// [_validateActiveXPathFields]，测试页入口需放行分段迭代。）
   Plugin? _tryBuildEditedPlugin() {
     try {
       return _buildEditedPlugin();
@@ -895,7 +908,6 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   }
 
   Plugin _buildEditedPlugin() {
-    _validateActiveXPathFields();
     final searchConfig = _buildSearchApiConfig();
     final chapterConfig = _buildChapterApiConfig();
     return Plugin(
@@ -940,6 +952,9 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   /// 保存前对激活模式的 XPath 字段做校验（与运行时同一套
   /// xpath_selector 解析器）：空字段或语法错误当场拦下，
   /// 避免坏规则入库后到运行期才炸出类型化异常。
+  /// R2 挪位（P10 副作用）：只在保存动作调用，不挂在
+  /// _buildEditedPlugin 里——否则测试页入口（同样走构建）会被
+  /// 「选集线路列表（XPath）不能为空」拦住，无法先测搜索段。
   void _validateActiveXPathFields() {
     final probe = parse('<html><body></body></html>').documentElement!;
     void validate(String label, String expression) {

@@ -337,6 +337,9 @@ class _SearchPageState extends State<SearchPage> {
                       actions: [
                         GeneralErrorButton(
                           onPressed: () {
+                            // 防双击（N4）：重试进行中直接挡掉，避免并发
+                            // 两次请求把 offset 双推进而静默跳页。
+                            if (searchPageController.isLoading) return;
                             searchPageController.searchBangumi(
                                 searchController.text,
                                 type: 'init');
@@ -357,6 +360,8 @@ class _SearchPageState extends State<SearchPage> {
                       actions: [
                         GeneralErrorButton(
                           onPressed: () {
+                            // 防双击（N4）：同上，重试中挡并发防跳页。
+                            if (searchPageController.isLoading) return;
                             searchPageController.searchBangumi(
                                 searchController.text,
                                 type: 'init');
@@ -437,10 +442,14 @@ class _SearchPageState extends State<SearchPage> {
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: TextButton.icon(
-                          onPressed: () =>
-                              searchPageController.searchBangumi(
-                                  searchController.text,
-                                  type: 'add'),
+                          // 防双击（N4）：横幅随 Observer 重建消失有约一帧
+                          // 延迟，连点会并发两次 'add'（同 offset 重复请求
+                          // + offset 双推进 → 中间一页永不被请求），入口挡掉。
+                          onPressed: () {
+                            if (searchPageController.isLoading) return;
+                            searchPageController.searchBangumi(
+                                searchController.text, type: 'add');
+                          },
                           icon: const Icon(Icons.refresh_rounded, size: 16),
                           label: const Text('加载更多失败，点击重试'),
                         ),

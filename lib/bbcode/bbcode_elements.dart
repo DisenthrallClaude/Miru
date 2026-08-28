@@ -65,17 +65,22 @@ class BBCodeBgm {
   /// bgm 系表情图（(bgmN) 语法）的 CDN 地址。
   ///
   /// 分段规则：11/23 是动图（bgm/{id}.gif）；其余 1-23 为
-  /// bgm/{id}.png；24-32 映射 tv/0{id-23}.gif（一位数补零）；
-  /// 33 及以上映射 tv/{id-23}.gif。
+  /// bgm/{id}.png（1-9 线上实为零填充：bgm/01.png..bgm/09.png，
+  /// 不补零是 404——站内表情代码本就写作 (bgm01)）；24-32 映射
+  /// tv/0{id-23}.gif（一位数补零）；33 及以上映射 tv/{id-23}.gif。
   ///
   /// 历史版本用连续 if 且末行无条件覆盖，导致 id≤23 全部请求
-  /// tv/负数.gif 必 404（渲染成「.」），此处改为互斥分支（F7）。
+  /// tv/负数.gif 必 404（渲染成「.」），此处改为互斥分支（F7）；
+  /// 1-9 的零填充为 R2 补充（N1，线上实测 bgm/1.png=404）。
   static String smileUrl(int id) {
     if (id == 11 || id == 23) {
       return 'https://bangumi.tv/img/smiles/bgm/$id.gif';
     }
     if (id < 24) {
-      return 'https://bangumi.tv/img/smiles/bgm/$id.png';
+      // 1-9 必须补零（bgm/1.png=404、bgm/01.png=200）；
+      // 10-22 本就是两位数，padLeft 不改变。
+      return 'https://bangumi.tv/img/smiles/bgm/'
+          '${id.toString().padLeft(2, '0')}.png';
     }
     if (id < 33) {
       return 'https://bangumi.tv/img/smiles/tv/0${id - 23}.gif';
