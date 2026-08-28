@@ -131,6 +131,8 @@ class LocalMediaProxy {
   Future<void> shutdown() async {
     final server = _server;
     _server = null;
+    // 记忆化的启动 future 一并作废（支持「关停→重启」拿全新 future 重新 bind）。
+    _starting = null;
     _registrations.clear();
     _rewrittenManifests.clear();
     await server?.close(force: true);
