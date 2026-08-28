@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -25,7 +26,7 @@ class MiruLogFilter extends LogFilter {
 }
 
 class MiruLogPrinter extends LogPrinter {
-  static const int _fatalStackFrameLimit = 8;
+  static const int _stackFrameLimit = 8;
 
   @override
   List<String> log(LogEvent event) {
@@ -36,8 +37,12 @@ class MiruLogPrinter extends LogPrinter {
         event.error == null ? '' : ' | ${_singleLineLogText(event.error)}';
     final lines = <String>['$time $level $message$error'];
 
+    // error 级以上且调用方提供了堆栈时输出（fatal 一直输出，
+    // 兼容旧的无堆栈 error 调用不至于噪声爆炸）。
     if (event.level == Level.fatal) {
       lines.addAll(_formatStackTrace(event.stackTrace ?? StackTrace.current));
+    } else if (event.level == Level.error && event.stackTrace != null) {
+      lines.addAll(_formatStackTrace(event.stackTrace!));
     }
 
     return lines;
@@ -88,7 +93,7 @@ class MiruLogPrinter extends LogPrinter {
             line.trim().isNotEmpty &&
             !line.contains('package:logger/') &&
             !line.contains('package:miru/services/logging/logger.dart'))
-        .take(_fatalStackFrameLimit)
+        .take(_stackFrameLimit)
         .map((line) => '  ${line.trim()}');
   }
 }
@@ -96,6 +101,12 @@ class MiruLogPrinter extends LogPrinter {
 class MiruLogOutput extends LogOutput {
   static final Lock _logLock = Lock();
   static String? _logFilePath;
+
+  /// 单文件大小上限：超限轮转（F9）。
+  static const int _maxLogBytes = 2 * 1024 * 1024; // 2MB
+
+  /// 最多保留的轮转历史份数：log → .1 → .2（加上当前文件共 3 份）。
+  static const List<String> _rotatedSuffixes = ['.1', '.2'];
 
   static Future<String> _getLogFilePath() async {
     if (_logFilePath != null) return _logFilePath!;
@@ -131,6 +142,10 @@ class MiruLogOutput extends LogOutput {
         final filePath = await _getLogFilePath();
         final file = File(filePath);
 
+        // 写入前检查轮转：当前文件超限时 log→.1、.1→.2、删 .2，
+        // 新内容落到新文件里（F9：warning 高频落盘曾致无限增长）。
+        await _rotateIfNeeded(file);
+
         final buffer = StringBuffer();
         for (var line in event.lines) {
           final cleanLine = _removeAnsiCodes(line);
@@ -149,6 +164,33 @@ class MiruLogOutput extends LogOutput {
     });
   }
 
+  /// 超过 [_maxLogBytes] 时轮转：.2 删除、.1→.2、当前→.1。
+  /// 单次事件超大的极端情况（如带长堆栈的 fatal）允许暂时超限，
+  /// 下一次写入时再轮转。轮转失败不阻塞写入（下次再试）。
+  Future<void> _rotateIfNeeded(File file) async {
+    try {
+      if (!await file.exists()) return;
+      if (await file.length() < _maxLogBytes) return;
+
+      final rotated = [
+        for (final suffix in _rotatedSuffixes) File('${file.path}$suffix'),
+      ];
+      // 后面的往前挪：先删最老（.2）——dart:io 的 rename 在 Windows 上
+      // 不覆盖已存在的目标，不先删会让整条轮转链卡死；.1→.2，当前→.1。
+      if (await rotated.last.exists()) {
+        await rotated.last.delete();
+      }
+      for (var i = rotated.length - 1; i > 0; i--) {
+        if (await rotated[i - 1].exists()) {
+          await rotated[i - 1].rename(rotated[i].path);
+        }
+      }
+      await file.rename(rotated.first.path);
+    } catch (_) {
+      // 轮转失败（平台文件占用等）：继续追加写当前文件。
+    }
+  }
+
   /// Remove ANSI escape codes from string to ensure clean log files
   String _removeAnsiCodes(String text) {
     return text.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
@@ -157,6 +199,13 @@ class MiruLogOutput extends LogOutput {
 
 class MiruLogger {
   MiruLogger._internal() {
+    // 钉死级别（F22）：此前依赖 logger 包 Logger.level 的默认值，
+    // release 下每请求的 d 级 HTTP 日志也可能打进 logcat；现在
+    // release 只到 info，debug 全量（trace 起）。forceLog 区域不受
+    // 影响（MiruLogFilter 先查 Zone 标记）。
+    // 注意 MiruLogFilter 按 enum index 比较，故「全量」用 trace
+    // （最低档）而不是语义化的 all。
+    Logger.level = kReleaseMode ? Level.info : Level.trace;
     _logger = Logger(
       filter: MiruLogFilter(),
       printer: MiruLogPrinter(),
@@ -181,31 +230,41 @@ class MiruLogger {
   /// Trace log - lowest level, very detailed information
   void t(dynamic message,
       {Object? error, StackTrace? stackTrace, bool forceLog = false}) {
-    _log(() => _logger.t(message, error: error), forceLog);
+    _log(
+        () => _logger.t(message, error: error, stackTrace: stackTrace),
+        forceLog);
   }
 
   /// Debug log - detailed information for debugging
   void d(dynamic message,
       {Object? error, StackTrace? stackTrace, bool forceLog = false}) {
-    _log(() => _logger.d(message, error: error), forceLog);
+    _log(
+        () => _logger.d(message, error: error, stackTrace: stackTrace),
+        forceLog);
   }
 
   /// Info log - informational messages
   void i(dynamic message,
       {Object? error, StackTrace? stackTrace, bool forceLog = false}) {
-    _log(() => _logger.i(message, error: error), forceLog);
+    _log(
+        () => _logger.i(message, error: error, stackTrace: stackTrace),
+        forceLog);
   }
 
   /// Warning log - potentially harmful situations
   void w(dynamic message,
       {Object? error, StackTrace? stackTrace, bool forceLog = false}) {
-    _log(() => _logger.w(message, error: error), forceLog);
+    _log(
+        () => _logger.w(message, error: error, stackTrace: stackTrace),
+        forceLog);
   }
 
   /// Error log - error events that might still allow the app to continue
   void e(dynamic message,
       {Object? error, StackTrace? stackTrace, bool forceLog = false}) {
-    _log(() => _logger.e(message, error: error), forceLog);
+    _log(
+        () => _logger.e(message, error: error, stackTrace: stackTrace),
+        forceLog);
   }
 
   /// Fatal log - very severe error events that may cause the app to abort.
@@ -248,6 +307,13 @@ Future<bool> clearLogs() async {
     final file = await getLogsPath();
     await MiruLogOutput._logLock.synchronized(() async {
       await file.writeAsString('');
+      // 一并清掉轮转历史（F9）：「清空日志」应释放全部日志空间。
+      for (final suffix in MiruLogOutput._rotatedSuffixes) {
+        final rotated = File('${file.path}$suffix');
+        if (await rotated.exists()) {
+          await rotated.delete();
+        }
+      }
     });
     return true;
   } catch (e) {

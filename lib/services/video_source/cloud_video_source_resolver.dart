@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:miru/request/clients/download_http_client.dart';
 import 'package:miru/request/config/api_endpoints.dart';
+import 'package:miru/request/core/network_exception.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
@@ -22,8 +23,13 @@ import 'package:miru/services/video_source/video_source_service.dart';
 /// - 多端点竞速：同时请求，最先返回有效结果者胜出，其余自动放弃——
 ///   单个 Worker 故障/被墙时无感切换；
 /// - 单端点限时 [perEndpointTimeout]（默认 4s），到点放弃降级本地解析；
+/// - **端点熔断**（B6）：连续 [circuitThreshold] 次失败（超时/网络错误/
+///   非 ok 响应）的端点在 [circuitOpenDuration] 内直接跳过，窗口结束后
+///   半开试探——典型场景：官方 workers.dev 端点在大陆不可达，
+///   每次播放白付 4s 延迟税；
 /// - 结果校验：只接受 http(s) 且带视频扩展/明显是直链的地址；
-/// - 429（配额用尽）与其它非 ok 一样静默降级，绝不影响播放；
+/// - 429（配额用尽）与其它非 ok 一样静默降级，但按原因分类记日志（B14），
+///   云端层到底是超时/被墙/配额/提取失败不再是黑盒；
 /// - 全程静默失败：所有异常只记日志，绝不向上抛。
 class CloudVideoSourceResolver {
   CloudVideoSourceResolver._();
@@ -33,6 +39,12 @@ class CloudVideoSourceResolver {
 
   static const Duration perEndpointTimeout = Duration(seconds: 4);
 
+  /// 熔断阈值：连续失败这么多次的端点打开熔断。
+  static const int circuitThreshold = 3;
+
+  /// 熔断时长：打开后这么长时间内直接跳过该端点，到期半开试探。
+  static const Duration circuitOpenDuration = Duration(minutes: 5);
+
   final DownloadHttpClient _client = DownloadHttpClient.instance;
 
   /// 匿名设备标识（懒生成，首次访问时创建并持久化）。
@@ -40,6 +52,9 @@ class CloudVideoSourceResolver {
 
   /// 端点缓存：设置变更后调用 [invalidateEndpoints] 失效。
   List<Uri>? _endpoints;
+
+  /// 端点健康（内存态，进程重启即清）：endpoint → 连续失败数/熔断时刻。
+  final Map<String, _EndpointHealth> _endpointHealth = {};
 
   void invalidateEndpoints() {
     _endpoints = null;
@@ -107,29 +122,39 @@ class CloudVideoSourceResolver {
     String? userAgent,
     String? referer,
   }) async {
-    final targets = endpoints;
-    if (targets.isEmpty || episodeUrl.isEmpty) return null;
-
-    try {
-      final result = await _race(
-        targets.map((endpoint) => _resolveFromEndpoint(
-              endpoint,
-              episodeUrl,
-              userAgent: userAgent,
-              referer: referer,
-            )),
-      );
-      if (result == null) return null;
-      MiruLogger().i(
-          'CloudResolver: resolved via ${result.$2} in ${result.$3}ms: ${result.$1.url}');
-      return result.$1;
-    } catch (e) {
-      MiruLogger().w('CloudResolver: all endpoints failed', error: e);
+    if (episodeUrl.isEmpty) return null;
+    // 熔断过滤：连续失败的端点短窗内不再请求（省 4s×N 延迟税）
+    final targets =
+        endpoints.where((e) => !_isCircuitOpen(e)).toList(growable: false);
+    if (targets.isEmpty) {
+      if (endpoints.isNotEmpty) {
+        MiruLogger()
+            .w('CloudResolver: all endpoints circuit-open, skipping cloud');
+      }
       return null;
     }
+
+    final result = await _race(
+      targets.map((endpoint) => _resolveFromEndpoint(
+            endpoint,
+            episodeUrl,
+            userAgent: userAgent,
+            referer: referer,
+          )),
+    );
+    if (result == null) {
+      // 各端点的失败原因已在 _resolveFromEndpoint 里分类记录（B14）
+      MiruLogger().w(
+          'CloudResolver: all ${targets.length} endpoint(s) failed for $episodeUrl');
+      return null;
+    }
+    MiruLogger().i(
+        'CloudResolver: resolved via ${result.$2} in ${result.$3}ms: ${result.$1.url}');
+    return result.$1;
   }
 
   /// 健康检查（设置页「测试连接」用）：返回最快应答的端点，全挂返回 null。
+  /// 刻意绕过熔断——用户显式点测试就该真去打；测试成功顺手解除熔断。
   Future<Uri?> healthCheck() async {
     final targets = endpoints;
     if (targets.isEmpty) return null;
@@ -140,10 +165,76 @@ class CloudVideoSourceResolver {
           uri.toString(),
           receiveTimeout: const Duration(seconds: 5),
         );
+        _recordEndpointSuccess(endpoint);
         return (endpoint, DateTime.now().millisecondsSinceEpoch);
       }),
     );
     return result?.$1;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 端点熔断（内存态，B6）
+  // ---------------------------------------------------------------------------
+
+  /// 熔断是否处于打开状态（窗口结束则半开：允许下一次请求试探）。
+  bool _isCircuitOpen(Uri endpoint) {
+    final health = _endpointHealth[endpoint.toString()];
+    if (health == null) return false;
+    final openedAt = health.openedAt;
+    if (openedAt == null) return false;
+    if (DateTime.now().difference(openedAt) >= circuitOpenDuration) {
+      // 熔断窗口结束：半开试探（保持失败计数在阈值上，试探失败立即重开）
+      health.openedAt = null;
+      return false;
+    }
+    return true;
+  }
+
+  void _recordEndpointSuccess(Uri endpoint) {
+    _endpointHealth.remove(endpoint.toString());
+  }
+
+  void _recordEndpointFailure(Uri endpoint) {
+    final key = endpoint.toString();
+    final health =
+        _endpointHealth.putIfAbsent(key, _EndpointHealth.new);
+    health.consecutiveFailures++;
+    if (health.consecutiveFailures >= circuitThreshold) {
+      health.openedAt ??= DateTime.now();
+    }
+  }
+
+  /// 失败分类（可观测性，B14）：超时 / 连接失败 / HTTP 状态（含 429
+  /// 配额）/ 提取失败 / 响应坏——诊断「云端层为什么慢/为什么不可用」
+  /// 全靠这里，别再吞成一句 all endpoints failed。
+  String _classifyFailure(Object e) {
+    if (e is TimeoutException) return 'timeout';
+    if (e is NetworkException) {
+      switch (e.type) {
+        case NetworkExceptionType.connectionTimeout:
+        case NetworkExceptionType.receiveTimeout:
+        case NetworkExceptionType.sendTimeout:
+          return 'timeout';
+        case NetworkExceptionType.connectionError:
+          return 'connect-error';
+        case NetworkExceptionType.badResponse:
+          final code = e.statusCode;
+          if (code == 429) return 'http-429-quota';
+          return 'http-$code';
+        case NetworkExceptionType.badCertificate:
+          return 'bad-certificate';
+        case NetworkExceptionType.cancel:
+          return 'cancelled';
+        case NetworkExceptionType.parseError:
+        case NetworkExceptionType.unknown:
+          break;
+      }
+    }
+    if (e is FormatException) return 'bad-json';
+    final message = e.toString();
+    if (message.contains('not-ok')) return 'extract-failed';
+    if (message.contains('invalid url')) return 'invalid-url';
+    return 'error';
   }
 
   /// 并发赛跑：任一成功立即返回其结果；全部失败/为空返回 null。
@@ -177,46 +268,66 @@ class CloudVideoSourceResolver {
     String? referer,
   }) async {
     final started = DateTime.now();
-    final query = {
-      'url': episodeUrl,
-      'uid': uid,
-      if (userAgent != null && userAgent.isNotEmpty) 'ua': userAgent,
-      if (referer != null && referer.isNotEmpty) 'referer': referer,
-    };
-    final uri = endpoint.replace(queryParameters: {
-      ...endpoint.queryParameters,
-      ...query,
-    });
-    final raw = await _client.getPlain(
-      uri.toString(),
-      receiveTimeout: perEndpointTimeout,
-    ).timeout(perEndpointTimeout);
+    try {
+      final query = {
+        'url': episodeUrl,
+        'uid': uid,
+        if (userAgent != null && userAgent.isNotEmpty) 'ua': userAgent,
+        if (referer != null && referer.isNotEmpty) 'referer': referer,
+      };
+      final uri = endpoint.replace(queryParameters: {
+        ...endpoint.queryParameters,
+        ...query,
+      });
+      final raw = await _client.getPlain(
+        uri.toString(),
+        receiveTimeout: perEndpointTimeout,
+      ).timeout(perEndpointTimeout);
 
-    final data = json.decode(raw);
-    if (data is! Map<String, dynamic> || data['ok'] != true) {
-      throw Exception('resolver responded not-ok: $raw');
+      final data = json.decode(raw);
+      if (data is! Map<String, dynamic> || data['ok'] != true) {
+        throw Exception('resolver responded not-ok');
+      }
+      final videoUrl = data['videoUrl'] as String? ?? '';
+      if (!videoUrl.startsWith('http')) {
+        throw Exception('resolver returned invalid url');
+      }
+      final formatName = data['format'] as String? ?? 'auto';
+      // Worker 提取直链时确认的源站 referer（防盗链要求），
+      // 一并带回给 mpv 播放头（v1.5.2）。
+      final resolvedReferer = (data['referer'] as String?) ?? '';
+      final elapsed = DateTime.now().difference(started).inMilliseconds;
+      _recordEndpointSuccess(endpoint);
+      return (
+        VideoSource(
+          url: videoUrl,
+          offset: 0,
+          type: VideoSourceType.online,
+          format: formatName == 'hls'
+              ? VideoSourceFormat.hls
+              : VideoSourceFormat.auto,
+          playbackHeaders: {
+            if (resolvedReferer.isNotEmpty) 'referer': resolvedReferer,
+          },
+        ),
+        endpoint,
+        elapsed,
+      );
+    } catch (e) {
+      // 失败分类记日志（B14）+ 熔断计数（B6），异常继续向上抛给 _race 吞掉
+      final elapsed = DateTime.now().difference(started).inMilliseconds;
+      MiruLogger().w('CloudResolver: endpoint ${endpoint.host} failed in '
+          '${elapsed}ms (${_classifyFailure(e)})');
+      _recordEndpointFailure(endpoint);
+      rethrow;
     }
-    final videoUrl = data['videoUrl'] as String? ?? '';
-    if (!videoUrl.startsWith('http')) {
-      throw Exception('resolver returned invalid url');
-    }
-    final formatName = data['format'] as String? ?? 'auto';
-    // Worker 提取直链时确认的源站 referer（防盗链要求），
-    // 一并带回给 mpv 播放头（v1.5.2）。
-    final resolvedReferer = (data['referer'] as String?) ?? '';
-    final elapsed = DateTime.now().difference(started).inMilliseconds;
-    return (
-      VideoSource(
-        url: videoUrl,
-        offset: 0,
-        type: VideoSourceType.online,
-        format: formatName == 'hls' ? VideoSourceFormat.hls : VideoSourceFormat.auto,
-        playbackHeaders: {
-          if (resolvedReferer.isNotEmpty) 'referer': resolvedReferer,
-        },
-      ),
-      endpoint,
-      elapsed,
-    );
   }
+}
+
+/// 端点健康状态（内存态，仅本进程有效）。
+class _EndpointHealth {
+  int consecutiveFailures = 0;
+
+  /// 熔断打开时刻；null = 未熔断（只是累计失败数）。
+  DateTime? openedAt;
 }

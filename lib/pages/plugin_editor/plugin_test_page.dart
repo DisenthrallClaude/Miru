@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/modules/search/plugin_search_module.dart';
+import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/services/logging/logger.dart';
 
 import '../../modules/roads/road_module.dart';
@@ -34,9 +35,14 @@ class PluginTestPage extends StatefulWidget {
   const PluginTestPage({
     super.key,
     required this.plugin,
+    required this.controller,
   });
 
   final Plugin plugin;
+
+  /// 用于「保存此规则」：编辑器带进本页的是未保存副本，
+  /// 测通后可直接落盘，免得返回后忘记保存。
+  final PluginsController controller;
 
   @override
   State<PluginTestPage> createState() => _PluginTestPageState();
@@ -93,6 +99,23 @@ class _PluginTestPageState extends State<PluginTestPage> {
 
   void _onBackPressed() =>
       MiruDialog.observer.hasMiruDialog ? MiruDialog.dismiss() : null;
+
+  /// 保存当前测试中的规则（与编辑器保存同一条链路：
+  /// 新规则自动追加、已有规则原位替换）。
+  Future<void> _saveRule() async {
+    try {
+      await widget.controller.updatePlugin(plugin);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${plugin.name} 已保存')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：$error')),
+      );
+    }
+  }
 
   void _resetState() => setState(() {
         _testSearchRequestCancelToken?.cancel();
@@ -166,6 +189,11 @@ class _PluginTestPageState extends State<PluginTestPage> {
         appBar: SysAppBar(
           title: Text('${plugin.name} 测试'),
           actions: [
+            IconButton(
+              onPressed: _saveRule,
+              icon: const Icon(Icons.save_rounded),
+              tooltip: '保存此规则',
+            ),
             IconButton(
               onPressed: isTesting ? null : startTest,
               icon: const Icon(Icons.bug_report_outlined),

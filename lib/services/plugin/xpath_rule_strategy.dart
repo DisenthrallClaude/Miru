@@ -90,9 +90,10 @@ class XPathRuleStrategy {
         kind: XPathRuleFormatKind.invalidUrl,
       );
     }
-    // XPath chapter requests historically go out without stored cookies;
-    // only search requests attach them.
-    return PreparedRuleRequest(method: 'GET', url: url);
+    // 章节请求与搜索同口径携带已验证的 Cookie/UA：反反爬站点的
+    // clearance 对搜索页和选集页一视同仁，不带 Cookie 的话用户刚完成
+    // 验证、点进选集又会被拦一次（验证死循环）。
+    return PreparedRuleRequest(method: 'GET', url: url, includeCookies: true);
   }
 
   RuleSearchParseResult parseSearch(

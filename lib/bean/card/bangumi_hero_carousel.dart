@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/pages/menu/route_visibility.dart';
 import 'package:miru/request/apis/bangumi_api.dart';
 import 'package:miru/request/config/hero_banners.dart';
 import 'package:miru/services/storage/feed_cache.dart';
@@ -36,6 +37,11 @@ class _BangumiHeroCarouselState extends State<BangumiHeroCarousel> {
   Timer? _timer;
   int _index = 0;
 
+  /// 路由被全屏页（详情/播放器等）覆盖时暂停自动轮播：
+  /// 覆盖路由不绘制，继续每 5s 触发 animateToPage 只是白白跳动页码。
+  /// RouteVisibility 由导航壳（menu.dart）发布；无该祖先时默认未覆盖。
+  bool _routeCovered = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,9 +49,22 @@ class _BangumiHeroCarouselState extends State<BangumiHeroCarousel> {
     _restartTimer();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final covered = RouteVisibility.isCoveredOf(context);
+    if (covered == _routeCovered) return;
+    _routeCovered = covered;
+    if (covered) {
+      _timer?.cancel();
+    } else {
+      _restartTimer();
+    }
+  }
+
   void _restartTimer() {
     _timer?.cancel();
-    if (!widget.autoPlay || kHeroBanners.length <= 1) return;
+    if (!widget.autoPlay || kHeroBanners.length <= 1 || _routeCovered) return;
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || !_controller.hasClients) return;
       _controller.animateToPage(

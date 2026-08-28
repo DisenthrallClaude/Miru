@@ -1,19 +1,27 @@
 /**
- * Miru 云端视频解析层 v2（Cloudflare Workers + KV）
+ * Miru 云端视频解析层 v3（Cloudflare Workers + KV）
  * ================================================================
  *
- * v1.5.0 相比 v1.5.1 的关键变化（面向免费额度长期运营）：
+ * v3 相比 v2 的关键变化：
  *
- * 1. **KV 写节流**：v1 每次缓存命中都写一次 LRU 索引，免费版每天只有
- *    1000 次写，很快耗尽。v2 删除 LRU 索引（靠 TTL 淘汰），结果只在
- *    「同一 isolate 内第二次被请求」（跨用户热门内容）时才落 KV，
- *    用户计数器每 [WRITE_EVERY] 次请求才写一次。
+ * 1. **fetch 加超时与体积上限**：fetchText 带 AbortSignal.timeout +
+ *    2MB 截断——慢源站不再能把 Worker 拖过客户端 4s 上限，
+ *    超大响应也不再能撑爆 128MB 内存。
+ * 2. **全局每日硬顶**：uid 客户端自报可伪造（随机 uid 即可绕过个人
+ *    配额），全局当日计数是最后防线（GLOBAL_DAILY_HARD_CAP，默认 6 万）。
+ * 3. **提取器 v3**（括号配平，与 APP 端同源）+ 宽松 base64
+ *    （URL-safe/缺 padding 的 encrypt=2 也能解，与 APP 对齐）。
+ *
+ * v2 的长期运营设计（KV 写节流 / 匿名统计 / 动态配额）全部保留：
+ *
+ * 1. **KV 写节流**：结果只在「同一 isolate 内第二次被请求」（跨用户
+ *    热门内容）时才落 KV，用户计数器每 [WRITE_EVERY] 次请求才写一次。
  * 2. **匿名用户统计**：APP 端生成随机匿名 ID，/resolve 带 uid、每天
- *    一次 /ping 心跳。Worker 记录每日活跃人数（只计数，不存任何可
- *    识别信息），/stats 可随时查看。
+ *    一次 /ping 心跳（心跳打到用户配置的端点）。Worker 记录每日
+ *    活跃人数（只计数，不存任何可识别信息），/stats 可随时查看。
  * 3. **动态配额**：免费版每天 10 万请求 / 1000 次 KV 写。全局
  *    [DAILY_RESOLVE_BUDGET] 按当日活跃人数均摊出每用户配额：
- *    active 越少每人越多， inactive 用户不占额度；
+ *    active 越少每人越多，inactive 用户不占额度；
  *    超限返回 429，APP 自动降级本地解析——任何情况下都能播。
  *
  * 接口：
@@ -28,9 +36,9 @@
  *   { ok: false, error: "reason" }   // APP 端会降级本地解析
  *   429 { ok: false, error: "quota", limit, used }  // 今日配额用尽
  *
- * 解析策略（对 MacCMS V10 / 苹果 CMS 系国漫模板站，与 v1 相同）：
+ * 解析策略（对 MacCMS V10 / 苹果 CMS 系国漫模板站，与 v2 相同）：
  *   1. KV 缓存命中直接返回（TTL 由 CACHE_TTL_SECONDS 控制，默认 45 分钟）
- *   2. fetch 播放页 HTML（带调用方传入的 UA）
+ *   2. fetch 播放页 HTML（带调用方传入的 UA，8s 超时 + 2MB 截断）
  *   3. 提取（多策略并行尝试）：
  *      a. player_aaaa / player_data 等 MacCMS 标准播放器变量的 url 字段
  *      b. HTML / 内联 JS 中的 m3u8 / mp4 直链正则（排除广告域）
@@ -56,6 +64,8 @@ const MAX_TRACKED_KEYS = 3000; // isolate 内热门追踪表上限（防内存�
 const ANON_DAILY_BUDGET = 60; // 未带 uid 的请求（旧版 APP / 路人）共享额度
 const MIN_UID_LEN = 8;
 const MAX_UID_LEN = 64;
+const FETCH_TIMEOUT_MS = 8000; // 回源抓页超时（客户端 4s 就放弃，拖久了纯浪费）
+const MAX_PAGE_BYTES = 2 * 1024 * 1024; // 单页体积上限（超过即截断）
 
 // vars 里的配置项（wrangler.toml [vars]），在 fetch 时从 env 读取
 function cacheTtlSeconds(env) {
@@ -69,6 +79,9 @@ function minPerUser(env) {
 }
 function maxPerUser(env) {
   return parseInt(env.MAX_PER_USER || '800', 10);
+}
+function globalDailyHardCap(env) {
+  return parseInt(env.GLOBAL_DAILY_HARD_CAP || '60000', 10);
 }
 
 // 广告/统计域黑名单（与 APP 端 WebView 嗅探的过滤规则保持一致）
@@ -111,7 +124,7 @@ export default {
     }
 
     if (url.pathname === '/health') {
-      return jsonResponse({ ok: true, service: 'miru-resolver', version: 2, now: Date.now() }, cors);
+      return jsonResponse({ ok: true, service: 'miru-resolver', version: 3, now: Date.now() }, cors);
     }
 
     if (url.pathname === '/ping') {
@@ -208,6 +221,7 @@ async function handleStats(env, cors) {
         dailyBudget: dailyResolveBudget(env),
         perUserBudget: perUser,
         anonBudget: ANON_DAILY_BUDGET,
+        globalHardCap: globalDailyHardCap(env),
       },
       cors,
     );
@@ -336,12 +350,23 @@ async function bumpActive(env, day) {
 
 /**
  * 配额检查：读用户当日计数，超预算则拒绝。
- * 计数为近似值（节流写盘 + KV 最终一致），作软限制足够。
+ * 计数为近似值（节流写盘 + KV 最终一致），作软限制足够；
+ * 全局硬顶是兜底——uid 客户端自报可伪造（随机 uid 即可绕过个人
+ * 配额白嫖官方端点），全局当日计数（含缓存命中，近似值）
+ * 是唯一可信的最后防线（B9）。
  */
 async function checkQuota(uid, day, env) {
   const active = await activeCount(env, day);
   const limit = uid ? perUserBudget(env, active) : ANON_DAILY_BUDGET;
   let used = 0;
+  let globalUsed = 0;
+  try {
+    const raw = await env.RESOLVE_CACHE.get(dayKeyUsage(day));
+    globalUsed = raw ? (JSON.parse(raw).r || 0) : 0;
+  } catch (_) {}
+  if (globalUsed >= globalDailyHardCap(env)) {
+    return { allowed: false, used, limit, active, globalUsed };
+  }
   if (uid) {
     try {
       const raw = await env.RESOLVE_CACHE.get(userKey(uid, day));
@@ -354,7 +379,7 @@ async function checkQuota(uid, day, env) {
       used = raw ? (JSON.parse(raw).c || 0) : 0;
     } catch (_) {}
   }
-  return { allowed: used < limit, used, limit, active };
+  return { allowed: used < limit, used, limit, active, globalUsed };
 }
 
 /**
@@ -500,7 +525,7 @@ function resolvePlayerAaaaUrl(a) {
   u = u.trim();
   try {
     const enc = a.encrypt | 0;
-    if (enc === 2) u = macUnescape(atob(u));
+    if (enc === 2) u = macUnescape(lenientAtob(u));
     else if (enc === 1) u = macUnescape(u);
     else {
       try {
@@ -512,6 +537,21 @@ function resolvePlayerAaaaUrl(a) {
     return '';
   }
   return u;
+}
+
+/**
+ * 宽松 base64（与 APP 端 normalizedBase64Decode 对齐）：atob 遇
+ * URL-safe 字符（-/_）或缺 padding 直接抛——部分源的 encrypt=2 产物
+ * 是 URL-safe 形态，只在 Worker 侧解不开，统一替换补齐后再解。
+ */
+function lenientAtob(input) {
+  let s = String(input).trim();
+  if (s.includes('-') || s.includes('_')) {
+    s = s.replaceAll('-', '+').replaceAll('_', '/');
+  }
+  const pad = (4 - (s.length % 4)) % 4;
+  if (pad > 0) s += '='.repeat(pad);
+  return atob(s);
 }
 
 /** 从 HTML / 内联 JS 中提取 m3u8 / mp4 直链（排除广告与统计域）。 */
@@ -603,7 +643,12 @@ async function extractFromPage(pageUrl, ua, referer, depth) {
 // ---------------------------------------------------------------------------
 
 function cacheKeyFor(episodeUrl) {
-  // FNV-1a 32 位：Worker 里没有 node:crypto，够用且快
+  // 完整 URL 作 key（防 32 位 FNV 碰撞被刻意构造跨用户毒缓存，
+  // 返回错集直链）；超长（>400 字符）或含非 ASCII 的 URL 退回
+  // FNV-1a+长度（KV key 上限 512 字节）。
+  if (episodeUrl.length <= 400 && !/[^\x00-\x7F]/.test(episodeUrl)) {
+    return `r:${episodeUrl}`;
+  }
   let h = 0x811c9dc5;
   for (let i = 0; i < episodeUrl.length; i++) {
     h ^= episodeUrl.charCodeAt(i);
@@ -629,14 +674,39 @@ async function fetchText(url, ua, referer) {
       'accept-language': 'zh-CN,zh;q=0.9',
     },
     redirect: 'follow',
-    // 仅信任同协议重定向（http→https 跟随，其余按默认）
+    // B8：慢源站不得把 Worker 拖过客户端 4s 上限（拖过了也是白拖）
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`page fetch failed: ${res.status}`);
   }
-  const text = await res.text();
+  const text = await readTextLimited(res, MAX_PAGE_BYTES);
   if (!text) throw new Error('empty page body');
   return text;
+}
+
+/**
+ * 读取响应体并截断到 maxBytes（B8：res.text() 无上限，超大响应能
+ * 撑爆 isolate 的 128MB 内存；截断后的 HTML 足够提取直链）。
+ */
+async function readTextLimited(res, maxBytes) {
+  if (!res.body) return res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  let out = '';
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    out += decoder.decode(value, { stream: true });
+    if (received >= maxBytes) {
+      try { await reader.cancel(); } catch (_) {}
+      break;
+    }
+  }
+  out += decoder.decode();
+  return out;
 }
 
 const DEFAULT_UA =

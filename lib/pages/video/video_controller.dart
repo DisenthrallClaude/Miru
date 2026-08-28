@@ -152,7 +152,8 @@ abstract class _VideoPageController with Store implements Disposable {
 
   HybridVideoSourceService? _videoSourceService;
 
-  /// 下一集预解析的延迟触发器（播放稳定 8 秒后再做，不与起播抢带宽）。
+  /// 下一集预解析的延迟触发器：8 秒后若当前集仍在缓冲则顺延
+  /// （不与起播/拉流抢带宽），缓冲稳定后才真正发起。
   Timer? _nextEpisodePrefetchTimer;
 
   final StreamController<String> _logStreamController =
@@ -794,7 +795,10 @@ abstract class _VideoPageController with Store implements Disposable {
         );
         unawaited(_loadPlaybackDanmaku(playerController, params, session));
         // 播放已稳定：后台预解析下一集，换集时直接命中缓存。
-        _scheduleNextEpisodePrefetch(resolvedEpisode);
+        _scheduleNextEpisodePrefetch(
+          resolvedEpisode,
+          playerController: playerController,
+        );
       } else if (session.isActive) {
         // 初始化失败：失效本集解析缓存，避免坏结果反复被用。
         unawaited(_videoSourceService!.invalidate(url));
@@ -845,7 +849,15 @@ abstract class _VideoPageController with Store implements Disposable {
 
   /// 播放稳定后预解析同线路的下一集：解析缓存 + 开头数据都提前备好，
   /// 用户点下一集时直接命中本地缓存，接近秒开。
-  void _scheduleNextEpisodePrefetch(EpisodeRef currentEpisode) {
+  ///
+  /// 触发时机（v1.5.3）：8 秒后若当前集仍在缓冲则顺延重试——预取会
+  /// 与本集拉流抢同一上游带宽/单 IP 并发配额，恰是最糟时刻；缓冲
+  /// 稳定（首帧已出、demuxer 有余粮）才真正发起。最多顺延三轮。
+  void _scheduleNextEpisodePrefetch(
+    EpisodeRef currentEpisode, {
+    required PlayerController playerController,
+    int deferrals = 3,
+  }) {
     _nextEpisodePrefetchTimer?.cancel();
     final service = _videoSourceService;
     if (service == null || isOfflineMode) {
@@ -861,6 +873,15 @@ abstract class _VideoPageController with Store implements Disposable {
     _nextEpisodePrefetchTimer = Timer(const Duration(seconds: 8), () {
       final prefetchService = _videoSourceService;
       if (prefetchService == null || isOfflineMode) {
+        return;
+      }
+      // 当前集仍在缓冲：预取会让本集拉流雪上加霜，顺延 8 秒重试。
+      if (playerController.playback.playerBuffering && deferrals > 0) {
+        _scheduleNextEpisodePrefetch(
+          currentEpisode,
+          playerController: playerController,
+          deferrals: deferrals - 1,
+        );
         return;
       }
       final url = normalizeEpisodeUrl(

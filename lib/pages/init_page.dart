@@ -60,19 +60,22 @@ class _InitPageState extends State<InitPage> {
     _migrateStorage();
     _loadShaders();
     _loadDanmakuShield();
-    _webDavInit();
-    _githubInit();
-    _bangumiInit();
-    try {
-      await downloadController.init();
-      _setupBackgroundDownloadNavigation();
-    } catch (e) {
-      MiruLogger().e('InitPage: downloadController.init() failed', error: e);
-    }
 
-    await _checkRunningOnX11();
-    await _showShortcutDialog();
-    await _pluginInit();
+    // 首屏导航前的必要初始化并行化：下载记录复位与规则加载互不依赖
+    // （各自读写不同的目录/盒），串行 await 会把两段磁盘 IO/解析时间
+    // 叠加在空白启动页上；桌面端的 X11/快捷方式对话框也一并并行。
+    // 注意：「是否首装」依赖 _pluginInit 完成（pluginList 加载后判断），
+    // 因此路由决策必须等这一组 Future 全部结束。
+    await Future.wait([
+      _initDownloads(),
+      _pluginInit(),
+      _desktopStartupDialogs(),
+    ]);
+
+    // 三通道云同步延后到首屏导航后错峰触发（见 _delayedCloudSyncInit），
+    // 避免全量历史同步的网络/磁盘/Hive 写锁与首屏渲染竞争。
+    // 首装引导路径同样安全：未配置时各通道直接跳过。
+    unawaited(_delayedCloudSyncInit());
 
     if (!mounted) {
       return;
@@ -99,6 +102,53 @@ class _InitPageState extends State<InitPage> {
     // 远程公告：主界面就绪后异步检查（内部延迟 2s 错峰 + 会话级去重）。
     // 首装引导路径不接入——刚装 App 的用户不该被运营内容打扰。
     unawaited(AnnouncementService.instance.maybeShowAnnouncement());
+  }
+
+  /// 下载控制器初始化：失败只记日志，不阻断启动路由；
+  /// 后台下载导航回调仅在初始化成功后注册（与原串行流程同语义）。
+  Future<void> _initDownloads() async {
+    try {
+      await downloadController.init();
+      _setupBackgroundDownloadNavigation();
+    } catch (e) {
+      MiruLogger().e('InitPage: downloadController.init() failed', error: e);
+    }
+  }
+
+  /// 桌面端启动对话框（X11 环境检测 / Windows 快捷方式），
+  /// Android/iOS 上两个检查都是空操作；对话框之间保持原有先后顺序。
+  Future<void> _desktopStartupDialogs() async {
+    try {
+      await _checkRunningOnX11();
+      await _showShortcutDialog();
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'InitPage: desktop startup dialog failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// 首屏导航后的云同步错峰启动：等首个有意义页面渲染稳定（约 4s）
+  /// 再触发 WebDAV / GitHub 的全量历史同步与收藏合并、Bangumi 初始化，
+  /// 避免与 popularCache 读取、推荐页图片加载抢 CPU/IO/网络。
+  /// 各通道内部已有 try-catch，这里的兜底仅防御 Future.wait 本身。
+  Future<void> _delayedCloudSyncInit() async {
+    await Future<void>.delayed(const Duration(seconds: 4));
+    try {
+      await Future.wait([
+        _webDavInit(),
+        _githubInit(),
+        _bangumiInit(),
+      ]);
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'InitPage: delayed cloud sync initialization failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   void _setupBackgroundDownloadNavigation() {
@@ -234,22 +284,27 @@ class _InitPageState extends State<InitPage> {
   }
 
   Future<void> _bangumiInit() async {
-    bool bangumiEnable =
-        await GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
+    final bool bangumiEnable =
+        GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     if (bangumiEnable) {
       var bangumi = BangumiSyncService();
       MiruLogger().i('Bangumi: Starting Bangumi initialization');
       try {
         await bangumi.init();
-      } catch (e) {
+      } catch (e, stackTrace) {
+        // 仅当次会话禁用（reset 清掉用户名/初始化态），不再把用户的
+        // bangumiSyncEnable 开关永久置 false——一次网络抖动不应让同步
+        // 静默停用；下次启动会自动重试，用户也可随时在设置里手动重开。
         bangumi.reset();
-        await GStorage.putSetting(SettingsKeys.bangumiSyncEnable, false);
         MiruLogger().w(
-          'Bangumi: initialization failed, disabling Bangumi sync until user re-enables it',
+          'Bangumi: initialization failed, disabled for this session '
+          '(will retry on next launch)',
           error: e,
+          stackTrace: stackTrace,
         );
         MiruDialog.showToast(
-          message: '初始化Bangumi失败，已关闭 Bangumi 同步: ${e.toString()}',
+          message: '初始化Bangumi失败，本次启动已暂停 Bangumi 同步'
+              '（下次启动自动重试）：${e.toString()}',
         );
       }
     }

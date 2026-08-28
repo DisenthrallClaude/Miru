@@ -1,12 +1,15 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+// 最小冒烟测试：不依赖插件/Hive/网络，仅验证启动页占位组件可渲染。
+// （原文件是空 testWidgets 壳，无任何断言——保留结构但补上真实期望，
+//  让 `flutter test` 至少能捕获最基本的渲染回归。）
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:miru/pages/init_page.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {});
+  testWidgets('LoadingWidget renders a Scaffold smoke test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(const MaterialApp(home: LoadingWidget()));
+
+    expect(find.byType(Scaffold), findsOneWidget);
+  });
 }

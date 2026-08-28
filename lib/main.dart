@@ -72,8 +72,9 @@ void main() async {
         }));
     return;
   }
-  bool showWindowButton =
-      await GStorage.getSetting(SettingsKeys.showWindowButton);
+  // getSetting 为同步读取（Hive 盒已在 GStorage.init 打开），无需 await。
+  final showWindowButton =
+      GStorage.getSetting(SettingsKeys.showWindowButton);
   if (isDesktop()) {
     await windowManager.ensureInitialized();
     final lowResolution = await isLowResolution();

@@ -18,10 +18,14 @@ abstract final class FeedCache {
 
   // --------------------------------------------------------------------- 推荐页
 
-  static bool get hasPopular => GStorage.popularCache.isNotEmpty;
+  /// 冷启动懒加载守卫：缓存盒尚未就绪时按「无缓存」处理，
+  /// 推荐页自然回退联网（见 GStorage.ensureFeedCachesOpen）。
+  static bool get hasPopular =>
+      GStorage.popularCacheOrNull?.isNotEmpty ?? false;
 
   static List<BangumiItem> loadPopular() =>
-      GStorage.popularCache.values.toList(growable: false);
+      GStorage.popularCacheOrNull?.values.toList(growable: false) ??
+      const <BangumiItem>[];
 
   /// 已翻页到的 offset，与缓存内容一起恢复。
   static int get popularOffset =>
@@ -34,6 +38,7 @@ abstract final class FeedCache {
     // 空结果不写缓存，否则一次网络失败会把用户永久锁在空白页
     if (items.isEmpty) return;
     try {
+      await GStorage.ensureFeedCachesOpen();
       final box = GStorage.popularCache;
       await box.clear();
       await box.addAll(
@@ -56,14 +61,16 @@ abstract final class FeedCache {
   static bool hasCalendarFor(String season) =>
       season.isNotEmpty &&
       season == cachedCalendarSeason &&
-      GStorage.calendarCache.isNotEmpty;
+      (GStorage.calendarCacheOrNull?.isNotEmpty ?? false);
 
   /// 按 airWeekday 还原成 7 天分组。
   /// 与 `BangumiApi.getCalendarBySearch` 的分组方式一致，
   /// 且各天内部顺序与写入时相同（写入时按天依次展平）。
   static List<List<BangumiItem>> loadCalendar() {
+    final box = GStorage.calendarCacheOrNull;
     final grouped = List.generate(7, (_) => <BangumiItem>[]);
-    for (final item in GStorage.calendarCache.values) {
+    if (box == null) return grouped;
+    for (final item in box.values) {
       final weekday = item.airWeekday;
       if (weekday >= 1 && weekday <= 7) {
         grouped[weekday - 1].add(item);
@@ -79,6 +86,7 @@ abstract final class FeedCache {
     final flat = calendar.expand((day) => day).toList();
     if (flat.isEmpty) return;
     try {
+      await GStorage.ensureFeedCachesOpen();
       final box = GStorage.calendarCache;
       await box.clear();
       await box.addAll(flat);
@@ -94,6 +102,7 @@ abstract final class FeedCache {
   /// 供「清除缓存」一类的入口调用。
   static Future<void> clear() async {
     try {
+      await GStorage.ensureFeedCachesOpen();
       await GStorage.popularCache.clear();
       await GStorage.calendarCache.clear();
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, '');

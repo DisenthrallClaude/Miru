@@ -260,7 +260,12 @@ class _CollectPageState extends State<CollectPage>
     List<List<CollectedBangumi>> collectedBangumiRenderItemList =
         List.generate(tabs.length, (_) => <CollectedBangumi>[]);
     for (CollectedBangumi element in collectedBangumiList) {
-      collectedBangumiRenderItemList[element.type - 1].add(element);
+      // type 越界的脏数据直接跳过，避免 RangeError 导致整页白屏
+      final int typeIndex = element.type - 1;
+      if (typeIndex < 0 || typeIndex >= collectedBangumiRenderItemList.length) {
+        continue;
+      }
+      collectedBangumiRenderItemList[typeIndex].add(element);
     }
     for (List<CollectedBangumi> list in collectedBangumiRenderItemList) {
       list.sort((a, b) => b.time.millisecondsSinceEpoch
@@ -276,90 +281,99 @@ class _CollectPageState extends State<CollectPage>
     for (List<CollectedBangumi> collectedBangumiRenderItem
         in collectedBangumiRenderItemList) {
       gridViewList.add(
-        CustomScrollView(
-          slivers: [
-            SliverPadding(
-              // 底部让出毛玻璃导航条高度
-              padding: EdgeInsets.fromLTRB(
-                StyleString.cardSpace,
-                StyleString.cardSpace,
-                StyleString.cardSpace,
-                MediaQuery.paddingOf(context).bottom,
-              ),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  mainAxisSpacing: StyleString.cardSpace - 2,
-                  crossAxisSpacing: StyleString.cardSpace,
-                  crossAxisCount: crossCount,
-                  mainAxisExtent:
-                      MediaQuery.of(context).size.width / crossCount / 0.65 +
-                          MediaQuery.textScalerOf(context).scale(32.0),
+        // 用网格视口宽（而非屏幕宽）算卡片高度：宽屏侧栏模式下
+        // 网格实际宽度小于屏幕宽，之前用屏幕宽会把标题区撑得过高。
+        LayoutBuilder(builder: (context, constraints) {
+          final double tileWidth = (constraints.maxWidth -
+                  StyleString.cardSpace * 2 /*SliverPadding 水平*/ -
+                  StyleString.cardSpace * (crossCount - 1)) /
+              crossCount;
+          final double mainAxisExtent =
+              tileWidth / 0.65 + MediaQuery.textScalerOf(context).scale(32.0);
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                // 底部让出毛玻璃导航条高度
+                padding: EdgeInsets.fromLTRB(
+                  StyleString.cardSpace,
+                  StyleString.cardSpace,
+                  StyleString.cardSpace,
+                  MediaQuery.paddingOf(context).bottom,
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (BuildContext context, int index) {
-                    return collectedBangumiRenderItem.isNotEmpty
-                        ? Stack(
-                            children: [
-                              BangumiCardV(
-                                bangumiItem: collectedBangumiRenderItem[index]
-                                    .bangumiItem,
-                                canTap: !showDelete,
-                              ),
-                              Positioned(
-                                right: 5,
-                                bottom: 5,
-                                child: showDelete
-                                    ? Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .secondaryContainer,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: CollectButton(
-                                          bangumiItem:
-                                              collectedBangumiRenderItem[index]
-                                                  .bangumiItem,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSecondaryContainer,
-                                        ),
-                                      )
-                                    : Container(),
-                              ),
-                            ],
-                          )
-                        : null;
-                  },
-                  childCount: collectedBangumiRenderItem.isNotEmpty
-                      ? collectedBangumiRenderItem.length
-                      : 10,
+                sliver: SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    mainAxisSpacing: StyleString.cardSpace - 2,
+                    crossAxisSpacing: StyleString.cardSpace,
+                    crossAxisCount: crossCount,
+                    mainAxisExtent: mainAxisExtent,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (BuildContext context, int index) {
+                      return collectedBangumiRenderItem.isNotEmpty
+                          ? Stack(
+                              children: [
+                                BangumiCardV(
+                                  bangumiItem:
+                                      collectedBangumiRenderItem[index]
+                                          .bangumiItem,
+                                  canTap: !showDelete,
+                                ),
+                                Positioned(
+                                  right: 5,
+                                  bottom: 5,
+                                  child: showDelete
+                                      ? Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .secondaryContainer,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: CollectButton(
+                                            bangumiItem:
+                                                collectedBangumiRenderItem[
+                                                        index]
+                                                    .bangumiItem,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSecondaryContainer,
+                                          ),
+                                        )
+                                      : Container(),
+                                ),
+                              ],
+                            )
+                          : null;
+                    },
+                    childCount: collectedBangumiRenderItem.length,
+                  ),
                 ),
               ),
-            ),
-            if (collectedBangumiRenderItem.isNotEmpty && showAnimeCounter)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12, bottom: 12),
-                      child: Text(
-                        '总计：${collectedBangumiRenderItem.length}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+              if (collectedBangumiRenderItem.isNotEmpty && showAnimeCounter)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12, bottom: 12),
+                        child: Text(
+                          '总计：${collectedBangumiRenderItem.length}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-          ],
-        ),
+            ],
+          );
+        }),
       );
     }
     return gridViewList;

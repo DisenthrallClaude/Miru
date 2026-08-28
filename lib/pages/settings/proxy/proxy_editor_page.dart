@@ -49,6 +49,14 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
         ? 'https://www.google.com'
         : testUrlController.text.trim();
 
+    // 记录测试前状态：测试失败时整体回滚，避免把原本可用的代理
+    // （用户此前启用的另一个配置）一并改坏。
+    final previousUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
+    final previousTestUrl = GStorage.getSetting(SettingsKeys.proxyTestUrl);
+    final previousEnabled = GStorage.getSetting<bool>(SettingsKeys.proxyEnable);
+    final previousConfigured =
+        GStorage.getSetting<bool>(SettingsKeys.proxyConfigured);
+
     await GStorage.putSetting(SettingsKeys.proxyUrl, url);
     await GStorage.putSetting(SettingsKeys.proxyTestUrl, testUrl);
     // 重置配置状态，等待测试结果
@@ -82,8 +90,18 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
       await GStorage.putSetting(SettingsKeys.proxyConfigured, true);
       MiruDialog.showToast(message: '测试成功');
     } catch (e) {
-      await GStorage.putSetting(SettingsKeys.proxyEnable, false);
-      ProxyManager.clearProxy();
+      // 测试失败：回滚到保存前的完整状态（含此前启用的代理配置），
+      // 而不是一刀切关闭——用户之前可用的工作流不应被误伤。
+      await GStorage.putSetting(SettingsKeys.proxyUrl, previousUrl);
+      await GStorage.putSetting(SettingsKeys.proxyTestUrl, previousTestUrl);
+      await GStorage.putSetting(SettingsKeys.proxyEnable, previousEnabled);
+      await GStorage.putSetting(
+          SettingsKeys.proxyConfigured, previousConfigured);
+      if (previousEnabled) {
+        ProxyManager.applyProxy();
+      } else {
+        ProxyManager.clearProxy();
+      }
       MiruDialog.showToast(message: '代理连接失败');
     }
   }

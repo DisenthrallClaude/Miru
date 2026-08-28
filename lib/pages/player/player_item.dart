@@ -130,6 +130,15 @@ class _PlayerItemState extends State<PlayerItem>
   PointerDeviceKind? _lastTapPointerKind;
   PointerDeviceKind? _lastDoubleTapPointerKind;
 
+  /// 历史落盘节流（v1.5.3）：播放中从每秒 1 次 Hive 写降为 5 秒 1 次，
+  /// 暂停/播放停止与换集/退出（dispose）时立即 flush 兜底。
+  static const Duration _historyFlushInterval = Duration(seconds: 5);
+  DateTime? _lastHistoryFlushAt;
+  bool _wasPlayingForHistory = false;
+
+  /// 亮度基准同步降频计数（每 3 拍一次）。
+  int _brightnessSyncTick = 0;
+
   late final AnimationController _panelVisibilityController;
   late final AnimationController _screenshotFeedbackController;
   late final Animation<double> _screenshotFeedbackAnimation;
@@ -1005,6 +1014,32 @@ class _PlayerItemState extends State<PlayerItem>
     }
   }
 
+  /// 写入一次观看进度。
+  ///
+  /// [force] 跳过节流与播放态检查：暂停/完成/退出/换集时把节流窗口内
+  /// 残留的最后位置立即落盘（崩溃也最多丢 5 秒进度）。
+  void _persistPlaybackHistory({bool force = false}) {
+    final historyIdentity = videoPageController.currentHistoryIdentity;
+    if (historyIdentity == null || !historyIdentity.canRecord) {
+      return;
+    }
+    final now = DateTime.now();
+    if (!force) {
+      if (videoPageController.loading) return;
+      if (!playerController.playback.playerPlaying) return;
+      final last = _lastHistoryFlushAt;
+      if (last != null && now.difference(last) < _historyFlushInterval) {
+        return;
+      }
+    }
+    _lastHistoryFlushAt = now;
+    historyController.updateHistory(
+      historyIdentity,
+      playerController.playback.playerPosition,
+      duration: playerController.playback.playerDuration,
+    );
+  }
+
   Timer getPlayerTimer() {
     return Timer.periodic(const Duration(seconds: 1), (timer) {
       playerController.syncPlaybackState();
@@ -1020,23 +1055,24 @@ class _PlayerItemState extends State<PlayerItem>
       if (!Platform.isWindows &&
           !Platform.isMacOS &&
           !Platform.isLinux &&
-          !playerController.panel.brightnessSeeking) {
+          !playerController.panel.brightnessSeeking &&
+          // 亮度基准值刷新降频（v1.5.3）：自动亮度变化缓慢，每 3 拍
+          // 同步一次已足够维持手势基准精度，省掉常态化的每秒平台
+          // 通道往返。
+          _brightnessSyncTick++ % 3 == 0) {
         ScreenBrightnessPlatform.instance.application.then((value) {
           if (!mounted) return;
           playerController.panel.brightness = value;
         });
       }
-      final historyIdentity = videoPageController.currentHistoryIdentity;
-      if (playerController.playback.playerPlaying &&
-          !videoPageController.loading &&
-          historyIdentity != null &&
-          historyIdentity.canRecord) {
-        historyController.updateHistory(
-          historyIdentity,
-          playerController.playback.playerPosition,
-          duration: playerController.playback.playerDuration,
-        );
+      // 历史落盘：节流写 + 播放停止（暂停/完成/异常 EOF）时强制 flush。
+      final isPlayingNow = playerController.playback.playerPlaying;
+      if (isPlayingNow) {
+        _persistPlaybackHistory();
+      } else if (_wasPlayingForHistory) {
+        _persistPlaybackHistory(force: true);
       }
+      _wasPlayingForHistory = isPlayingNow;
       final playingSelection = videoPageController.playbackEpisode;
       final playingRoadData =
           videoPageController.roadList[playingSelection.road];
@@ -1362,6 +1398,8 @@ class _PlayerItemState extends State<PlayerItem>
 
   @override
   void dispose() {
+    // 换集/退出时立即落盘节流窗口内的最后一次进度。
+    _persistPlaybackHistory(force: true);
     // Playback lifetime is owned by the route-scoped PlayerController.
     // This widget only detaches UI listeners and timers.
     _fullscreenListener();
@@ -1478,9 +1516,8 @@ class _PlayerItemState extends State<PlayerItem>
                         if (playerController.panel.lockPanel) {
                           return;
                         }
-                        setState(() {
-                          playerController.panel.showPlaySpeed = true;
-                        });
+                        // observable 写入自带 Observer 重建，无需 setState。
+                        playerController.panel.showPlaySpeed = true;
                         lastPlayerSpeed = playerController.playback.playerSpeed;
                         setPlaybackSpeed(longPressPlaySpeed);
                       },
@@ -1488,9 +1525,7 @@ class _PlayerItemState extends State<PlayerItem>
                         if (playerController.panel.lockPanel) {
                           return;
                         }
-                        setState(() {
-                          playerController.panel.showPlaySpeed = false;
-                        });
+                        playerController.panel.showPlaySpeed = false;
                         setPlaybackSpeed(lastPlayerSpeed);
                       },
                       child: Container(
@@ -1636,7 +1671,7 @@ class _PlayerItemState extends State<PlayerItem>
                                 }
                               },
                               onVerticalDragUpdate:
-                                  (DragUpdateDetails details) async {
+                                  (DragUpdateDetails details) {
                                 if (!brightnessVolumeGesture) {
                                   return;
                                 }

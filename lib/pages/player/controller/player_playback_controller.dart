@@ -79,6 +79,10 @@ abstract class _PlayerPlaybackController with Store {
   Player? get mediaPlayer => _ownedPlayer?.player;
   VideoController? videoController;
 
+  /// 播放态流订阅（buffering/playing）：即时驱动 MobX 观察量，
+  /// stop() 时统一取消。
+  final List<StreamSubscription> _playbackStateSubscriptions = [];
+
   /// 预取挂起写入串行化：生命周期快速翻转时保证后写胜出。
   final AsyncSerialQueue _prefetchWrites = AsyncSerialQueue();
   bool _prefetchSuspendWanted = false;
@@ -158,6 +162,10 @@ abstract class _PlayerPlaybackController with Store {
   /// 假 EOF 分支专用：秒级轮询会连拍，用冷却窗口去重。
   bool _abnormalRecoveryInFlight = false;
 
+  /// 800ms 复检的在途标记（按播放器实例）：错误风暴下同一实例只排程
+  /// 一个复检，换集后的新实例不受旧复检压制。
+  Player? _recoveryCheckInFlightFor;
+
   /// 异常 EOF 的恢复入口（由 player_item 的轮询触发）。
   ///
   /// 走独立的在途标记 + 冷却记账，重复触发直接返回；
@@ -185,16 +193,28 @@ abstract class _PlayerPlaybackController with Store {
     if (playerCompleted) return;
     if (!playerPlaying && !playerBuffering) return;
     if (!canAutoRecover) return;
+    if (_recoveryCheckInFlightFor != null &&
+        identical(_recoveryCheckInFlightFor, player)) {
+      return;
+    }
+    _recoveryCheckInFlightFor = player;
+    // 冷却窗口从排程时刻起算：同时吞掉复检窗口内同实例的错误风暴。
     _lastRecoveryAt = DateTime.now();
-    _recoveryCount++;
     // 抖动场景下错误是成串来的：稍等片刻让 demuxer 先自愈，
     // 仍然失败才真正重开流。
     Future<void>.delayed(const Duration(milliseconds: 800), () async {
+      if (identical(_recoveryCheckInFlightFor, player)) {
+        _recoveryCheckInFlightFor = null;
+      }
       final current = mediaPlayer;
       if (!identical(current, player) || playerCompleted) return;
       if (playerPlaying && !playerBuffering && playerPosition > Duration.zero) {
-        return; // 已自行恢复
+        return; // 已自行恢复——配额不扣，自愈不该消耗恢复次数
       }
+      // 确认执行恢复才递增配额（v1.5.3）：此前在排程时预扣，长会话中
+      // 两起相隔超过 10s 的自愈型抖动即可烧完 2 次配额，之后真正的
+      // 断流反而失去原地重开保护。
+      _recoveryCount++;
       await recoverPlayback();
     });
   }
@@ -218,8 +238,12 @@ abstract class _PlayerPlaybackController with Store {
       final last = _lastErrorToastAt;
       if (last != null && now.difference(last) < _errorToastCooldown) return;
       _lastErrorToastAt = now;
+      // toast 不外泄内部 URL（本地代理地址是 127.0.0.1 长串，既不可读
+      // 也不可操作）；完整错误与 URL 已记入日志，只保留截断的摘要。
+      final detail = event.toString();
+      final brief = detail.length > 64 ? '${detail.substring(0, 64)}…' : detail;
       MiruDialog.showToast(
-          message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
+          message: '播放器内部错误 $brief',
           duration: const Duration(seconds: 5),
           showActionButton: true);
     });
@@ -237,7 +261,11 @@ abstract class _PlayerPlaybackController with Store {
       final resumeFrom = pos > const Duration(seconds: 5)
           ? pos - const Duration(seconds: 2) // 退 2s 覆盖缓冲边界
           : (startOffset > 0 ? Duration(seconds: startOffset) : Duration.zero);
-      MiruDialog.showToast(message: '网络波动，正在恢复播放…');
+      // 恢复进行中的提示与「错误提示」开关联动（v1.5.3）：关掉提示的
+      // 用户不想被播放错误族的 toast 打扰，恢复动作本身照常执行。
+      if (GStorage.getSetting<bool>(SettingsKeys.showPlayerError)) {
+        MiruDialog.showToast(message: '网络波动，正在恢复播放…');
+      }
       MiruLogger().w(
           'PlayerController: auto recovering stream at $pos (${videoUrl()})');
       await player.open(
@@ -472,6 +500,73 @@ abstract class _PlayerPlaybackController with Store {
     }
   }
 
+  // ---------------- 装配辅助（v1.5.3） ----------------
+
+  /// demuxer-cache-dir 的临时目录进程内不变：缓存结果后，换集装配
+  /// 不再重复走 path_provider 平台通道往返。
+  static String? _cachedPlayerTempPath;
+
+  Future<String> getPlayerTempPathCached() async {
+    final cached = _cachedPlayerTempPath;
+    if (cached != null) {
+      return cached;
+    }
+    final path = await getPlayerTempPath();
+    _cachedPlayerTempPath = path;
+    return path;
+  }
+
+  /// Android 音频输出装配（volume-max + ao）。
+  Future<void> _applyAndroidAudioProperties(NativePlayer pp) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    await pp.setProperty("volume-max", "100");
+    await pp.setProperty(
+        "ao", androidEnableOpenSLES ? "opensles" : "audiotrack");
+  }
+
+  /// mpv 网络代理装配：用户代理优先，未配置时跟随系统代理。
+  Future<void> _applyProxyProperty(NativePlayer pp) async {
+    final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
+    if (proxyEnable) {
+      final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
+      final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
+      if (formattedProxy != null) {
+        await pp.setProperty("http-proxy", formattedProxy);
+        MiruLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
+      }
+      return;
+    }
+    if (SystemProxyService.isActive) {
+      final proxy = SystemProxyService.proxyFor('https');
+      if (proxy != null) {
+        await pp.setProperty("http-proxy", 'http://${proxy.$1}:${proxy.$2}');
+        MiruLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
+      }
+    }
+  }
+
+  /// HLS 起播判定：与 hybrid 解析服务的宽松判定对齐——
+  /// `format == hls || 去掉 query/fragment 后 URL 以 .m3u8 结尾`。
+  /// 走本地代理时 [url] 是 127.0.0.1 代理地址（不含 .m3u8 后缀），
+  /// 此时再回退用原始直链判定。
+  bool _isHlsPlayback(VideoSourceFormat format, String url) {
+    if (format == VideoSourceFormat.hls) {
+      return true;
+    }
+    final direct = _directVideoUrl;
+    final candidates =
+        (direct == null || direct == url) ? [url] : [url, direct];
+    for (final candidate in candidates) {
+      final path = candidate.split('#').first.split('?').first.toLowerCase();
+      if (path.endsWith('.m3u8')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   Future<Player?> createVideoController(
     Map<String, String> httpHeaders,
     bool adBlockerEnabled, {
@@ -528,61 +623,22 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       var pp = player.platform as NativePlayer;
+      // 装配属性并行下发（v1.5.3）：以下都是 open 之前互不依赖的全局
+      // 选项，media-kit 按请求 id 逐条应答，Future.wait 把十几个串行
+      // 平台通道往返压成一批（典型省 50-150ms）；竞态守卫在批次末复查。
+      //
       // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下减轻内存压力
       // media-kit 内部硬盘缓存目录按照 Linux 配置，这导致该功能在其他平台上被损坏
       // 该设置可以在所有平台上正确启用双重缓存
-      await pp.setProperty("demuxer-cache-dir", await getPlayerTempPath());
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(candidate);
-      }
-      await cachePolicy.apply();
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(candidate);
-      }
-      await pp.setProperty("af", "scaletempo2=max-speed=8");
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(candidate);
-      }
-      if (Platform.isAndroid) {
-        await pp.setProperty("volume-max", "100");
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        if (androidEnableOpenSLES) {
-          await pp.setProperty("ao", "opensles");
-        } else {
-          await pp.setProperty("ao", "audiotrack");
-        }
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-      }
-
-      final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
-      if (proxyEnable) {
-        final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
-        final formattedProxy = ProxyUtils.getFormattedProxyUrl(proxyUrl);
-        if (formattedProxy != null) {
-          await pp.setProperty("http-proxy", formattedProxy);
-          if (!isCurrentPlayer(player)) {
-            return await _discardIfNotCurrent(candidate);
-          }
-          MiruLogger().i('Player: HTTP 代理设置成功 $formattedProxy');
-        }
-      } else if (SystemProxyService.isActive) {
-        final proxy = SystemProxyService.proxyFor('https');
-        if (proxy != null) {
-          await pp.setProperty("http-proxy", 'http://${proxy.$1}:${proxy.$2}');
-          if (!isCurrentPlayer(player)) {
-            return await _discardIfNotCurrent(candidate);
-          }
-          MiruLogger().i('Player: 跟随系统代理 http://${proxy.$1}:${proxy.$2}');
-        }
-      }
-
-      await player.setAudioTrack(
-        AudioTrack.auto(),
-      );
+      await Future.wait([
+        getPlayerTempPathCached()
+            .then((path) => pp.setProperty("demuxer-cache-dir", path)),
+        cachePolicy.apply(),
+        pp.setProperty("af", "scaletempo2=max-speed=8"),
+        _applyAndroidAudioProperties(pp),
+        _applyProxyProperty(pp),
+        player.setAudioTrack(AudioTrack.auto()),
+      ]);
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
@@ -617,6 +673,13 @@ abstract class _PlayerPlaybackController with Store {
         superResolutionMode = SuperResolutionMode.off;
       }
 
+      // SDK 版本查询的 await 之后紧邻复查（v1.5.3）：stop() 若已插入，
+      // 不能再为已 dispose 的 player 创建 VideoController——否则纹理
+      // 绑死在死实例上，黑屏直到下一次 init 才被清理。
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
+      }
+      final hadVideoController = videoController != null;
       videoController ??= VideoController(
         player,
         configuration: VideoControllerConfiguration(
@@ -629,6 +692,11 @@ abstract class _PlayerPlaybackController with Store {
       );
       player.setPlaylistMode(PlaylistMode.none);
       if (!isCurrentPlayer(player)) {
+        // 本调用刚创建的 VideoController 随候选一起丢弃，
+        // 不给下一次 init 留下死纹理。
+        if (!hadVideoController) {
+          videoController = null;
+        }
         return await _discardIfNotCurrent(candidate);
       }
 
@@ -638,28 +706,48 @@ abstract class _PlayerPlaybackController with Store {
         }
         // 错误时间戳先行更新：isAbnormalEnd 依赖它区分假 EOF。
         _lastStreamErrorAt = DateTime.now();
-        // 每次读实时值：用户在播放中途开关「错误提示」立即生效。
-        final bool showPlayerError =
-            GStorage.getSetting<bool>(SettingsKeys.showPlayerError);
-        if (showPlayerError) {
-          if (event.toString().contains('Failed to open') && playerBuffering) {
-            // 初始加载失败：本地代理播放时先用原始直链重开一次，
-            // 直连也打不开才提示换源。
-            if (!_attemptDirectFallback(player)) {
+        if (event.toString().contains('Failed to open') && playerBuffering) {
+          // 初始加载失败：本地代理播放时先用原始直链重开一次，
+          // 直连也打不开才提示换源。
+          // 自愈动作不受「错误提示」开关控制（v1.5.3）：开关只决定
+          // toast 的显示——否则关提示的用户坏链既无直连重试也无提示，
+          // 只能烧完自动恢复配额后静默卡死。
+          if (!_attemptDirectFallback(player)) {
+            // 每次读实时值：用户在播放中途开关「错误提示」立即生效。
+            if (GStorage.getSetting<bool>(SettingsKeys.showPlayerError)) {
               MiruDialog.showToast(
                   message: '加载失败, 请尝试更换其他视频来源',
                   showActionButton: true);
             }
-          } else {
-            // 瞬时错误：绝大多数会被 ffmpeg 重连自愈，
-            // 延迟复检确认真的影响播放才提示。
-            _showTransientErrorToast(player, event);
           }
+        } else if (GStorage.getSetting<bool>(SettingsKeys.showPlayerError)) {
+          // 瞬时错误：绝大多数会被 ffmpeg 重连自愈，
+          // 延迟复检确认真的影响播放才提示。
+          _showTransientErrorToast(player, event);
         }
         MiruLogger().e('PlayerController: Player intent error ${videoUrl()}',
             error: event);
         _maybeScheduleAutoRecovery(player);
       });
+
+      // 播放态直通（v1.5.3）：buffering/playing 直接订阅 mpv 流，转圈
+      // spinner 随真实状态即时翻转；1Hz 轮询保留给历史持久化等低频
+      // 任务。若 spinner 只靠轮询驱动，首帧渲染完成后转圈平均还会
+      // 盖住画面 ~500ms（轮询粒度上限 1s）。
+      _playbackStateSubscriptions.addAll([
+        player.stream.buffering.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (isBuffering != value) {
+            isBuffering = value;
+          }
+        }),
+        player.stream.playing.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (playing != value) {
+            playing = value;
+          }
+        }),
+      ]);
 
       if (superResolutionMode != SuperResolutionMode.off) {
         await setShader(superResolutionMode, player: player);
@@ -668,16 +756,18 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
-      if (videoSourceFormat == VideoSourceFormat.hls) {
-        await pp.setProperty('demuxer-lavf-format', 'hls');
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        // 起播码率（v1.5.2）：mpv 默认 hls-bitrate=max，master playlist
-        // 会选最高码率流，弱网下首帧要等好几秒——这是「拿得到直链
-        // 却迟迟不出画面」的头号元凶。取首个流（通常是站点推荐的
-        // 默认清晰度）起播最快，中途仍可手动切清晰度。
-        await pp.setProperty('hls-bitrate', 'no');
+      // 起播码率判定放宽（v1.5.3）：格式标注链并不可靠——云端解析器
+      // 仅 Worker 明确回 hls 才标注、解析缓存默认 auto，未标注的
+      // .m3u8 master playlist 会回落 mpv 默认 hls-bitrate=max：选最高
+      // 码率变体，弱网下首帧要等好几秒，正是「拿得到直链却迟迟不出
+      // 画面」的头号元凶。这里与 hybrid 解析服务的宽松判定对齐。
+      if (_isHlsPlayback(videoSourceFormat, videoUrl())) {
+        // 取首个流（通常是站点推荐的默认清晰度）起播最快，
+        // 中途仍可手动切清晰度。
+        await Future.wait([
+          pp.setProperty('demuxer-lavf-format', 'hls'),
+          pp.setProperty('hls-bitrate', 'no'),
+        ]);
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
@@ -688,35 +778,22 @@ abstract class _PlayerPlaybackController with Store {
       //    正常播放完全无感知；这是 mpv 社区处理不稳定 HLS 的标准配置。
       // 2) 前向缓冲与预读窗口：给弱网 CDN 留足余量，磁盘缓存有
       //    demuxer-max-bytes 上限兜底，不会无界增长。
+      // 3) 连接超时（v1.5.2）：mpv 默认 60 秒——坏链要等一分钟才报错，
+      //    用户体验是「卡死」。10 秒足够覆盖慢源握手，失败后自动
+      //    直连重开/换源的链路能更快接管。
+      // 4) 起播探测上限（秒开）：mpv 默认对 HLS 的 avformat 探测最长可
+      //    达数秒，封顶 2 秒 + 5MB 后首帧出画明显提前；对 HLS/MP4 直链
+      //    的流识别精度绰绰有余。
       if (!isLocalPlayback()) {
-        await pp.setProperty('stream-lavf-o',
-            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5');
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        // 连接超时（v1.5.2）：mpv 默认 60 秒——坏链要等一分钟才报错，
-        // 用户体验是「卡死」。10 秒足够覆盖慢源握手，失败后自动
-        // 直连重开/换源的链路能更快接管。
-        await pp.setProperty('network-timeout', '10');
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        await pp.setProperty('cache-secs', _cacheSecsNetwork);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        await pp.setProperty('demuxer-readahead-secs', _readaheadSecsNetwork);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        // 起播探测上限（秒开）：mpv 默认对 HLS 的 avformat 探测最长可
-        // 达数秒，封顶 2 秒 + 5MB 后首帧出画明显提前；对 HLS/MP4 直链
-        // 的流识别精度绰绰有余。
-        await pp.setProperty('demuxer-lavf-analyzeduration', '2');
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-        await pp.setProperty('demuxer-lavf-probesize', '5242880');
+        await Future.wait([
+          pp.setProperty('stream-lavf-o',
+              'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5'),
+          pp.setProperty('network-timeout', '10'),
+          pp.setProperty('cache-secs', _cacheSecsNetwork),
+          pp.setProperty('demuxer-readahead-secs', _readaheadSecsNetwork),
+          pp.setProperty('demuxer-lavf-analyzeduration', '2'),
+          pp.setProperty('demuxer-lavf-probesize', '5242880'),
+        ]);
         if (!isCurrentPlayer(player)) {
           return await _discardIfNotCurrent(candidate);
         }
@@ -888,6 +965,11 @@ abstract class _PlayerPlaybackController with Store {
     videoController = null;
     playing = false;
     loading = true;
+    // 先摘掉播放态流订阅再销毁实例，避免 dispose 期间的残余事件。
+    for (final subscription in _playbackStateSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _playbackStateSubscriptions.clear();
     // media_kit stops playback as part of disposal before releasing native
     // resources. Debug subscriptions can be cancelled concurrently.
     await Future.wait([

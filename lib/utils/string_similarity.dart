@@ -1,5 +1,9 @@
-// 计算两个字符串的编辑距离, 曾用于弹幕标题匹配
-// 由于 DanDanPlay 现在直接提供基于 bgmBangumiID 的弹幕反查，此方法已不再使用
+// 计算两个字符串的编辑距离。
+//
+// 注意（F25）：此工具并非死代码——danmaku_api.getBangumiIDByTitle
+// 仍以它作标题相似度兜底（bgmBangumiID 反查失败/无 ID 时的路径）；
+// 曾有注释声称「已不再使用」与实际调用矛盾，此处修正。
+// 调用方注意 O(n·m) 复杂度，仅适用于短标题比较。
 
 import 'dart:math';
 

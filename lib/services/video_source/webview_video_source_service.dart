@@ -28,7 +28,11 @@ class WebViewVideoSourceService implements IVideoSourceService {
     String episodeUrl, {
     required bool useLegacyParser,
     int offset = 0,
-    Duration timeout = const Duration(seconds: 15),
+    // 默认超时统一 20s（B7）：与 video_source_service 接口默认、
+    // hybrid 编排层对齐；实际值由 video_controller 读
+    // SettingsKeys.parseTimeout（设置页「解析超时」）后显式传入。
+    // WebView 嗅探按自家文档需 5~30s，15s 会系统性砍掉慢 JS 站。
+    Duration timeout = const Duration(seconds: 20),
   }) async {
     final resolveTail = _resolveTail;
     if (resolveTail == null) {

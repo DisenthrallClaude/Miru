@@ -9,12 +9,16 @@ import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
     as android_webview;
 import 'package:miru/utils/media.dart';
 import 'package:miru/utils/http_headers.dart';
+import 'package:miru/webview/video/sniffed_url_filter.dart';
 
 class VideoWebviewAndroidImpl
     extends VideoWebviewController<PlatformInAppWebViewController> {
   PlatformHeadlessInAppWebView? headlessWebView;
-  bool hasInjectedScripts = false;
-  bool shouldInjectIframeRedirect = false;
+
+  /// 当前已注入嗅探脚本的解析器模式（null = 尚未注入）。
+  /// 「超时换解析器重试」会以翻转的模式再次 loadUrl，若沿用首次注入
+  /// 的那套 UserScript，重试只是原脚本下多等一轮超时（伪重试）。
+  bool? _injectedParserLegacy;
 
   @override
   Future<void> init() async {
@@ -53,22 +57,26 @@ class VideoWebviewAndroidImpl
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
     await unloadPage();
-    if (!hasInjectedScripts) {
-      addJavaScriptHandlers(useLegacyParser);
-      await addUserScripts(useLegacyParser);
-      hasInjectedScripts = true;
+    if (_injectedParserLegacy != useLegacyParser) {
+      addJavaScriptHandlers();
+      await _replaceUserScripts(useLegacyParser);
+      _injectedParserLegacy = useLegacyParser;
     }
-    count = 0;
     this.offset = offset;
     isIframeLoaded = false;
     isVideoSourceLoaded = false;
-    shouldInjectIframeRedirect = true;
-    videoLoadingEventController.add(true);
 
     await webviewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
-  void addJavaScriptHandlers(bool useLegacyParser) {
+  Future<void> _replaceUserScripts(bool useLegacyParser) async {
+    await webviewController?.removeAllUserScripts();
+    await addUserScripts(useLegacyParser);
+  }
+
+  /// 两套桥 handler 常驻注册：注入脚本按解析器模式只调用其中一套，
+  /// 常驻可避免「换解析器重试后脚本调用了未注册的 handler」而必然超时。
+  void addJavaScriptHandlers() {
     logEventController.add('Adding LogBridge handler');
     webviewController?.addJavaScriptHandler(
         handlerName: 'LogBridge',
@@ -80,65 +88,59 @@ class VideoWebviewAndroidImpl
           logEventController.add(message);
         });
 
-    if (useLegacyParser) {
-      logEventController.add('Adding JSBridgeDebug handler');
-      webviewController?.addJavaScriptHandler(
-          handlerName: 'JSBridgeDebug',
-          callback: (args) {
-            String message = args[0].toString();
-            logEventController.add('Callback received: $message');
-            logEventController.add(
-                'If there is audio but no video, please report it to the rule developer.');
-            if ((message.contains('http') || message.startsWith('//')) &&
-                !message.contains('googleads') &&
-                !message.contains('googlesyndication.com') &&
-                !message.contains('prestrain.html') &&
-                !message.contains('prestrain%2Ehtml') &&
-                !message.contains('adtrafficquality')) {
-              logEventController.add('Parsing video source $message');
-              String encodedUrl = Uri.encodeFull(message);
-              if (decodeVideoSource(encodedUrl) != encodedUrl) {
-                isIframeLoaded = true;
-                isVideoSourceLoaded = true;
-                videoLoadingEventController.add(false);
-                logEventController.add(
-                    'Loading video source ${decodeVideoSource(encodedUrl)}');
-                unloadPage();
-                final videoUrl = decodeVideoSource(encodedUrl);
-                notifyVideoSourceResolved(videoUrl);
-              }
-            }
-          });
-    } else {
-      logEventController.add('Adding VideoBridgeDebug handler');
-      webviewController?.addJavaScriptHandler(
-          handlerName: 'VideoBridgeDebug',
-          callback: (args) {
-            String message = args[0].toString();
-            logEventController.add('Callback received: $message');
-            // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，
-            // 不补全会被下面的 http 检查直接拒收。
-            if (message.startsWith('//')) {
-              message = 'https:$message';
-            }
-            if (message.contains('http') && !isVideoSourceLoaded) {
-              logEventController.add('Loading video source: $message');
+    logEventController.add('Adding JSBridgeDebug handler');
+    webviewController?.addJavaScriptHandler(
+        handlerName: 'JSBridgeDebug',
+        callback: (args) {
+          String message = args[0].toString();
+          logEventController.add('Callback received: $message');
+          logEventController.add(
+              'If there is audio but no video, please report it to the rule developer.');
+          if ((message.contains('http') || message.startsWith('//')) &&
+              !SniffedUrlFilter.isAdUrl(message)) {
+            logEventController.add('Parsing video source $message');
+            String encodedUrl = Uri.encodeFull(message);
+            if (decodeVideoSource(encodedUrl) != encodedUrl) {
               isIframeLoaded = true;
               isVideoSourceLoaded = true;
-              videoLoadingEventController.add(false);
+              logEventController.add(
+                  'Loading video source ${decodeVideoSource(encodedUrl)}');
               unloadPage();
-              // 嗅探到的 .m3u8 显式标注 HLS：mpv 侧据此强制
-              // demuxer-lavf-format=hls，避开内容探测失误
-              // （对齐上游 Windows 平台 43e0fe8 的做法）。
-              notifyVideoSourceResolved(
-                message,
-                format: _isHlsUrl(message)
-                    ? VideoSourceFormat.hls
-                    : VideoSourceFormat.auto,
-              );
+              final videoUrl = decodeVideoSource(encodedUrl);
+              notifyVideoSourceResolved(videoUrl);
             }
-          });
-    }
+          }
+        });
+
+    logEventController.add('Adding VideoBridgeDebug handler');
+    webviewController?.addJavaScriptHandler(
+        handlerName: 'VideoBridgeDebug',
+        callback: (args) {
+          String message = args[0].toString();
+          logEventController.add('Callback received: $message');
+          // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，
+          // 不补全会被下面的 http 检查直接拒收。
+          if (message.startsWith('//')) {
+            message = 'https:$message';
+          }
+          if (message.contains('http') &&
+              !isVideoSourceLoaded &&
+              !SniffedUrlFilter.isAdUrl(message)) {
+            logEventController.add('Loading video source: $message');
+            isIframeLoaded = true;
+            isVideoSourceLoaded = true;
+            unloadPage();
+            // 嗅探到的 .m3u8 显式标注 HLS：mpv 侧据此强制
+            // demuxer-lavf-format=hls，避开内容探测失误
+            // （对齐上游 Windows 平台 43e0fe8 的做法）。
+            notifyVideoSourceResolved(
+              message,
+              format: _isHlsUrl(message)
+                  ? VideoSourceFormat.hls
+                  : VideoSourceFormat.auto,
+            );
+          }
+        });
   }
 
   Future<void> addUserScripts(bool useLegacyParser) async {
@@ -182,6 +184,9 @@ class VideoWebviewAndroidImpl
       scripts.add(UserScript(
         source: jsBridgeDebugScript,
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        // 跨域 iframe 播放器也必须被注入：显式钉死 false，
+        // 不依赖包版本的平台默认值。
+        forMainFrameOnly: false,
       ));
     } else {
       logEventController.add('Adding VideoBridgeDebug UserScripts');
@@ -288,10 +293,12 @@ class VideoWebviewAndroidImpl
       scripts.add(UserScript(
         source: blobParserScript,
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
       ));
       scripts.add(UserScript(
         source: videoTagParserScript,
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
       ));
     }
 
@@ -302,8 +309,10 @@ class VideoWebviewAndroidImpl
 
   @override
   Future<void> unloadPage() async {
-    await webviewController!
-        .loadUrl(urlRequest: URLRequest(url: WebUri("about:blank")));
+    // init 未完成（onWebViewCreated 尚未回调）时不硬崩：
+    // 空断言会把这次嗅探失败放大成未捕获异常。
+    await webviewController?.loadUrl(
+        urlRequest: URLRequest(url: WebUri("about:blank")));
   }
 
   @override

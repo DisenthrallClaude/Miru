@@ -243,7 +243,35 @@ class _PopularPageState extends State<PopularPage> {
                 onImageLoaded: () => _onCoverLoaded(item.id),
               );
             },
-            childCount: gridItems.isNotEmpty ? gridItems.length : 10,
+            childCount: gridItems.length,
+          ),
+        ),
+        // 翻页失败的重试入口（列表非空时不再静默）。
+        // 单独 Observer：靠 isLoadingMore 的变化触发重建读取最新值。
+        SliverToBoxAdapter(
+          child: Observer(
+            builder: (_) {
+              if (popularController.isLoadingMore ||
+                  !popularController.loadMoreFailed) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Center(
+                  child: TextButton.icon(
+                    onPressed: () {
+                      if (popularController.currentTag != '') {
+                        popularController.queryBangumiByTag();
+                      } else {
+                        popularController.queryBangumiByTrend();
+                      }
+                    },
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('加载更多失败，点击重试'),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],

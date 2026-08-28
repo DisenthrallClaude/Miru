@@ -4,10 +4,19 @@ import 'package:miru/services/logging/logger.dart';
 class DioLoggerInterceptor extends Interceptor {
   static const _startedAtExtraKey = '_miruStartedAt';
 
+  /// 日志脱敏（F26）：uid 是遥测匿名标识，不应以明文出现在控制台/
+  /// logcat（中间代理与抓 log 的工具都可见），统一打码为 ***。
+  static final RegExp _uidQueryPattern = RegExp(r'uid=[^&\s]*');
+
+  String _logUri(RequestOptions options) {
+    return options.uri.toString().replaceAllMapped(_uidQueryPattern,
+        (match) => 'uid=***');
+  }
+
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     options.extra[_startedAtExtraKey] = DateTime.now();
-    MiruLogger().d('HTTP: --> ${options.method} ${options.uri}');
+    MiruLogger().d('HTTP: --> ${options.method} ${_logUri(options)}');
     handler.next(options);
   }
 
@@ -16,7 +25,7 @@ class DioLoggerInterceptor extends Interceptor {
     final elapsed = _elapsed(response.requestOptions);
     MiruLogger().d(
       'HTTP: <-- ${response.statusCode} '
-      '${response.requestOptions.method} ${response.requestOptions.uri}'
+      '${response.requestOptions.method} ${_logUri(response.requestOptions)}'
       '${elapsed == null ? '' : ' ${elapsed}ms'}',
     );
     handler.next(response);
@@ -28,7 +37,7 @@ class DioLoggerInterceptor extends Interceptor {
     final statusCode = err.response?.statusCode;
     final status = statusCode == null ? err.type.name : statusCode.toString();
     MiruLogger().w(
-      'HTTP: <-- $status ${err.requestOptions.method} ${err.requestOptions.uri}'
+      'HTTP: <-- $status ${err.requestOptions.method} ${_logUri(err.requestOptions)}'
       '${elapsed == null ? '' : ' ${elapsed}ms'}',
       error: err.message,
     );

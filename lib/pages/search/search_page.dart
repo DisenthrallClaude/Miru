@@ -326,6 +326,28 @@ class _SearchPageState extends State<SearchPage> {
           ),
           Expanded(
             child: Observer(builder: (context) {
+              // 网络异常与「无结果」分开渲染：之前两者同文案，
+              // 网络故障会被误导成「什么都没有找到」。
+              if (searchPageController.searchNetworkError) {
+                return Center(
+                  child: SizedBox(
+                    height: 400,
+                    child: GeneralErrorWidget(
+                      errMsg: '网络异常，加载失败了 (｡•́︿•̀｡)',
+                      actions: [
+                        GeneralErrorButton(
+                          onPressed: () {
+                            searchPageController.searchBangumi(
+                                searchController.text,
+                                type: 'init');
+                          },
+                          text: '点击重试',
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
               if (searchPageController.isTimeOut) {
                 return Center(
                   child: SizedBox(
@@ -379,27 +401,53 @@ class _SearchPageState extends State<SearchPage> {
                     .toList();
               }
 
-              return GridView.builder(
-                controller: scrollController,
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  mainAxisSpacing: StyleString.cardSpace - 2,
-                  crossAxisSpacing: StyleString.cardSpace,
-                  crossAxisCount: crossCount,
-                  mainAxisExtent:
-                      MediaQuery.of(context).size.width / crossCount / 0.65 +
-                          MediaQuery.textScalerOf(context).scale(32.0),
-                ),
-                itemCount: filteredList.isNotEmpty ? filteredList.length : 10,
-                itemBuilder: (context, index) {
-                  return filteredList.isNotEmpty
-                      ? BangumiCardV(
-                          enableHero: false,
-                          bangumiItem: filteredList[index],
-                        )
-                      : Container();
-                },
-              );
+              return LayoutBuilder(builder: (context, constraints) {
+                // 用网格视口宽（而非屏幕宽）算卡片高度：
+                // 宽屏侧栏模式下网格实际宽度小于屏幕宽，
+                // 之前用屏幕宽会把标题区撑得过高。
+                final double tileWidth = (constraints.maxWidth -
+                        16 /*网格水平内边距*/ -
+                        StyleString.cardSpace * (crossCount - 1)) /
+                    crossCount;
+                final double mainAxisExtent =
+                    tileWidth / 0.65 + MediaQuery.textScalerOf(context).scale(32.0);
+                return Column(
+                  children: [
+                    Expanded(
+                      child: GridView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          mainAxisSpacing: StyleString.cardSpace - 2,
+                          crossAxisSpacing: StyleString.cardSpace,
+                          crossAxisCount: crossCount,
+                          mainAxisExtent: mainAxisExtent,
+                        ),
+                        itemCount: filteredList.length,
+                        itemBuilder: (context, index) {
+                          return BangumiCardV(
+                            enableHero: false,
+                            bangumiItem: filteredList[index],
+                          );
+                        },
+                      ),
+                    ),
+                    // 翻页失败的重试入口（列表非空时不再静默）
+                    if (searchPageController.loadMoreFailed)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              searchPageController.searchBangumi(
+                                  searchController.text,
+                                  type: 'add'),
+                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          label: const Text('加载更多失败，点击重试'),
+                        ),
+                      ),
+                  ],
+                );
+              });
             }),
           ),
         ],

@@ -15,6 +15,17 @@ abstract class _PopularController with Store {
 
   int _trendOffset = 0;
 
+  /// 分类浏览的累计已请求条数（服务器侧游标）。
+  /// 不能用去重后的列表长度：存在重复项时游标不前进会原地循环。
+  int _tagOffset = 0;
+
+  /// 列表非空时最近一次「加载更多」是否失败（页面据此显示重试入口）。
+  ///
+  /// 非 observable：与 isLoadingMore 在同一个 action 事务内写入，
+  /// Observer 由 isLoadingMore 的通知触发重建，重建时即可读到最新值，
+  /// 避免改动 mobx 注解成员、不需要重新跑 build_runner。
+  bool loadMoreFailed = false;
+
   @observable
   String currentTag = '';
 
@@ -82,6 +93,7 @@ abstract class _PopularController with Store {
       _featuredLoaded = false;
     }
     isLoadingMore = true;
+    loadMoreFailed = false;
 
     // 首屏先铺置顶清单：封面轮播取列表前几条，因此这里决定了「封面推荐」的内容。
     if (!_featuredLoaded) {
@@ -104,6 +116,10 @@ abstract class _PopularController with Store {
       isTimeOut = trendList.isEmpty;
       if (isTimeOut) {
         MiruDialog.showToast(message: '推荐加载失败，请检查网络后重试');
+      } else {
+        // 列表已有内容：翻页失败不再静默，给出提示与底部重试入口
+        loadMoreFailed = true;
+        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
       }
       return;
     }
@@ -125,23 +141,35 @@ abstract class _PopularController with Store {
   Future<void> queryBangumiByTag({String type = 'add'}) async {
     if (type == 'init') {
       bangumiList.clear();
+      _tagOffset = 0;
     }
     isLoadingMore = true;
+    loadMoreFailed = false;
     var tag = currentTag;
-    // 分类浏览同样限定产地，并用 offset 翻页
+    // 分类浏览同样限定产地，并用 offset 翻页。
+    // offset 用累计已请求条数（服务器侧游标），而非去重后的列表长度：
+    // 返回重复项时列表长度不前进，旧写法会一直重拉同一页。
     final List<BangumiItem> result;
     try {
       result = await BangumiApi.getBangumiList(
         tag: tag,
-        offset: bangumiList.length,
+        offset: _tagOffset,
       );
     } catch (e) {
       isLoadingMore = false;
       isTimeOut = bangumiList.isEmpty;
       if (isTimeOut) {
         MiruDialog.showToast(message: '分类加载失败，请检查网络后重试');
+      } else {
+        // 列表已有内容：翻页失败不再静默，给出提示与底部重试入口
+        loadMoreFailed = true;
+        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
       }
       return;
+    }
+    // 与推荐流一致：按实际返回条数推进服务器侧游标
+    if (result.isNotEmpty) {
+      _tagOffset += result.length;
     }
     final existingIds = bangumiList.map((item) => item.id).toSet();
     bangumiList.addAll(result.where((item) => existingIds.add(item.id)));

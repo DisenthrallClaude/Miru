@@ -10,6 +10,9 @@ class RemotePlay {
     final searcher = DLNAManager();
     final dlna = await searcher.start();
     List<Widget> dlnaDevice = [];
+    // 「搜索」每点一次都会新增一个 devices.stream 订阅：先取消上一个，
+    // 弹窗关闭时统一取消，避免监听器随搜索次数累积（v1.5.3）。
+    StreamSubscription? deviceSubscription;
     await MiruDialog.show(builder: (BuildContext context) {
       return StatefulBuilder(builder: (context, setState) {
         return AlertDialog(
@@ -38,7 +41,8 @@ class RemotePlay {
                   MiruDialog.showToast(
                     message: '开始搜索',
                   );
-                  dlna.devices.stream.listen((deviceList) {
+                  deviceSubscription?.cancel();
+                  deviceSubscription = dlna.devices.stream.listen((deviceList) {
                     dlnaDevice = [];
                     deviceList.forEach((key, value) async {
                       MiruLogger().i('RemotePlay: key: $key');
@@ -86,6 +90,7 @@ class RemotePlay {
         );
       });
     }, onDismiss: () {
+      deviceSubscription?.cancel();
       searcher.stop();
     });
   }

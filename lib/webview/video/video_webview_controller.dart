@@ -20,8 +20,6 @@ abstract class VideoWebviewController<T> {
   // WebView controller.
   T? webviewController;
 
-  // Retry count
-  int count = 0;
   // Last watched position
   int offset = 0;
   bool isIframeLoaded = false;
@@ -41,12 +39,6 @@ abstract class VideoWebviewController<T> {
 
   // Stream to subscribe to webview logs
   Stream<String> get onLog => logEventController.stream;
-
-  final StreamController<bool> videoLoadingEventController =
-      StreamController<bool>.broadcast();
-
-  // Stream to notify when the video source is loaded
-  Stream<bool> get onVideoLoading => videoLoadingEventController.stream;
 
   // Stream to notify when a video source URL is resolved, including its
   // playback offset and any format information confirmed by the parser.
@@ -74,9 +66,6 @@ abstract class VideoWebviewController<T> {
     }
     if (!logEventController.isClosed) {
       logEventController.close();
-    }
-    if (!videoLoadingEventController.isClosed) {
-      videoLoadingEventController.close();
     }
     if (!_videoParserEventController.isClosed) {
       _videoParserEventController.close();

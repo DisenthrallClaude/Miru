@@ -47,11 +47,12 @@ class VideoWebviewWindowsImpl
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
     await unloadPage();
-    count = 0;
     this.offset = offset;
     isIframeLoaded = false;
     isVideoSourceLoaded = false;
-    videoLoadingEventController.add(true);
+    // 防御性清理：即使调用方连续 loadUrl 未经 unloadPage，
+    // 也不让旧监听重复触发回调（对齐其他平台的重复注册保护）。
+    _cancelSubscriptions();
     subscriptions.add(headlessWebview!.onM3USourceLoaded.listen((data) {
       if (headlessWebview == null) return;
       String url = data['url'] ?? '';
@@ -61,7 +62,6 @@ class VideoWebviewWindowsImpl
       unloadPage();
       isIframeLoaded = true;
       isVideoSourceLoaded = true;
-      videoLoadingEventController.add(false);
       logEventController.add('Loading m3u8 source: $url');
       notifyVideoSourceResolved(
         url,
@@ -77,7 +77,6 @@ class VideoWebviewWindowsImpl
       unloadPage();
       isIframeLoaded = true;
       isVideoSourceLoaded = true;
-      videoLoadingEventController.add(false);
       logEventController.add('Loading video source: $url');
       notifyVideoSourceResolved(url);
     }));
@@ -86,23 +85,22 @@ class VideoWebviewWindowsImpl
 
   @override
   Future<void> unloadPage() async {
+    _cancelSubscriptions();
+    await redirect2Blank();
+  }
+
+  void _cancelSubscriptions() {
     for (final s in subscriptions) {
       try {
         s.cancel();
       } catch (_) {}
     }
     subscriptions.clear();
-    await redirect2Blank();
   }
 
   @override
   Future<void> dispose() async {
-    for (final s in subscriptions) {
-      try {
-        s.cancel();
-      } catch (_) {}
-    }
-    subscriptions.clear();
+    _cancelSubscriptions();
     await headlessWebview?.dispose();
     headlessWebview = null;
     disposeEventControllers();

@@ -272,6 +272,9 @@ class DownloadManager implements IDownloadManager {
 
   @override
   Future<void> enqueue(DownloadRequest request) async {
+    // 并发参数热生效：每次入队时重读设置（与解析池的 resize 热生效
+    // 对齐），设置页「修改后对新开始的下载生效」的说明自此为真。
+    _loadSettings();
     final key = _taskKey(request.recordKey, request.episodeNumber);
     if (_activeTasks.containsKey(key)) return;
 
@@ -301,6 +304,7 @@ class DownloadManager implements IDownloadManager {
 
   @override
   Future<void> enqueuePriority(DownloadRequest request) async {
+    _loadSettings();
     final key = _taskKey(request.recordKey, request.episodeNumber);
 
     _queue.removeWhere(
@@ -308,7 +312,13 @@ class DownloadManager implements IDownloadManager {
           r.recordKey == request.recordKey &&
           r.episodeNumber == request.episodeNumber,
     );
-    _activeTasks.remove(key);
+
+    // 同键任务若仍在跑，先取消再插队：两个执行流并发写同一集的
+    // 分片会互相覆盖（此前仅靠 UI 不对 downloading 状态暴露按钮兜底）。
+    final running = _activeTasks.remove(key);
+    if (running != null) {
+      running.cancelToken.cancel('superseded by priority re-enqueue');
+    }
 
     final task = DownloadTask(
       recordKey: request.recordKey,
@@ -341,6 +351,7 @@ class DownloadManager implements IDownloadManager {
 
   @override
   Future<void> resume(DownloadRequest request) async {
+    _loadSettings();
     final key = _taskKey(request.recordKey, request.episodeNumber);
     _activeTasks.remove(key);
 
@@ -380,6 +391,8 @@ class DownloadManager implements IDownloadManager {
   }
 
   void _processQueue() {
+    // 批次启动前重读并发设置：队列里积压的任务按最新配置起跑。
+    _loadSettings();
     while (_runningCount < maxParallelEpisodes && _queue.isNotEmpty) {
       final request = _queue.removeAt(0);
       final key = _taskKey(request.recordKey, request.episodeNumber);
@@ -661,7 +674,7 @@ class DownloadManager implements IDownloadManager {
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
       MiruLogger().e('DownloadManager: episode download failed', error: e);
     } finally {
-      _onTaskComplete(key);
+      _onTaskComplete(key, task);
     }
   }
 
@@ -809,9 +822,13 @@ class DownloadManager implements IDownloadManager {
     }
   }
 
-  void _onTaskComplete(String key) {
-    _activeTasks.remove(key);
-    _speedTrackers.remove(key);
+  void _onTaskComplete(String key, DownloadTask task) {
+    // 只清理自己注册的任务：插队被取消的旧任务完成时，不能把同键的
+    // 新任务从活跃表/速度表里误删。
+    if (identical(_activeTasks[key], task)) {
+      _activeTasks.remove(key);
+      _speedTrackers.remove(key);
+    }
     _runningCount--;
     _processQueue();
   }

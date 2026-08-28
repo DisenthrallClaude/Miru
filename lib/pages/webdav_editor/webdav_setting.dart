@@ -12,10 +12,10 @@ class WebDavSettingsPage extends StatefulWidget {
   const WebDavSettingsPage({super.key});
 
   @override
-  State<WebDavSettingsPage> createState() => _PlayerSettingsPageState();
+  State<WebDavSettingsPage> createState() => _WebDavSettingsPageState();
 }
 
-class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
+class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
   late bool webDavEnable;
   late bool webDavEnableHistory;
   late bool webDavEnableCollect;
@@ -110,7 +110,8 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                     }
                   },
                   title: Text('Bangumi 镜像'),
-                  description: Text('使用本地 Bangumi 缓存后端加载热门与分类榜单'),
+                  description: Text(
+                      '启用社区镜像加速 Bangumi 数据请求（bgmapi.anibt.net）与封面图代理（wsrv.nl）；需要登录的请求始终直连官方'),
                   initialValue: enableBangumiProxy,
                 ),
                 SettingsTile.switchTile(

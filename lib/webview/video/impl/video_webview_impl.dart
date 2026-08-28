@@ -10,6 +10,7 @@ import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
     as android_webview;
 import 'package:miru/utils/media.dart';
 import 'package:miru/utils/http_headers.dart';
+import 'package:miru/webview/video/sniffed_url_filter.dart';
 
 class VideoWebviewImpl
     extends VideoWebviewController<PlatformInAppWebViewController> {
@@ -40,13 +41,12 @@ class VideoWebviewImpl
           if (useLegacyParser || isVideoSourceLoaded) return null;
           final url = request.url.toString();
           final lower = url.toLowerCase();
-          if (_isAdUrl(lower)) return null;
+          if (SniffedUrlFilter.isAdUrl(lower)) return null;
           if (_isM3U8Url(lower) ||
               _isRangeVideoRequest(lower, request.headers)) {
             logEventController.add('Native intercepted video URL: $url');
             isIframeLoaded = true;
             isVideoSourceLoaded = true;
-            videoLoadingEventController.add(false);
             unloadPage();
             notifyVideoSourceResolved(url);
           }
@@ -81,21 +81,24 @@ class VideoWebviewImpl
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
     await unloadPage();
+    // 两套桥 handler 常驻注册：本实现的脚本注入时机（onLoadStart/
+    // onLoadStop）始终跟随本次 loadUrl 的模式，若 handler 仍停留在首次
+    // 注册的那套，换解析器重试时脚本会调用未注册的 handler 而必然超时。
     if (!hasRegisteredHandlers) {
-      _addJavaScriptHandlers(useLegacyParser);
+      _addJavaScriptHandlers();
       hasRegisteredHandlers = true;
     }
-    count = 0;
     this.offset = offset;
     this.useLegacyParser = useLegacyParser;
     isIframeLoaded = false;
     isVideoSourceLoaded = false;
-    videoLoadingEventController.add(true);
 
     await webviewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
-  void _addJavaScriptHandlers(bool useLegacyParser) {
+  /// 两套桥 handler 都常驻注册（LogBridge + JSBridgeDebug +
+  /// VideoBridgeDebug）：脚本按解析器模式只调用其一。
+  void _addJavaScriptHandlers() {
     logEventController.add('Adding LogBridge handler');
     webviewController?.addJavaScriptHandler(
         handlerName: 'LogBridge',
@@ -107,65 +110,59 @@ class VideoWebviewImpl
           logEventController.add(message);
         });
 
-    if (useLegacyParser) {
-      logEventController.add('Adding JSBridgeDebug handler');
-      webviewController?.addJavaScriptHandler(
-          handlerName: 'JSBridgeDebug',
-          callback: (args) {
-            String message = args[0].toString();
-            logEventController.add('Callback received: $message');
-            logEventController.add(
-                'If there is audio but no video, please report it to the rule developer.');
-            if ((message.contains('http') || message.startsWith('//')) &&
-                !message.contains('googleads') &&
-                !message.contains('googlesyndication.com') &&
-                !message.contains('prestrain.html') &&
-                !message.contains('prestrain%2Ehtml') &&
-                !message.contains('adtrafficquality')) {
-              logEventController.add('Parsing video source $message');
-              String encodedUrl = Uri.encodeFull(message);
-              if (decodeVideoSource(encodedUrl) != encodedUrl) {
-                isIframeLoaded = true;
-                isVideoSourceLoaded = true;
-                videoLoadingEventController.add(false);
-                logEventController.add(
-                    'Loading video source ${decodeVideoSource(encodedUrl)}');
-                unloadPage();
-                final videoUrl = decodeVideoSource(encodedUrl);
-                notifyVideoSourceResolved(videoUrl);
-              }
-            }
-          });
-    } else {
-      logEventController.add('Adding VideoBridgeDebug handler');
-      webviewController?.addJavaScriptHandler(
-          handlerName: 'VideoBridgeDebug',
-          callback: (args) {
-            String message = args[0].toString();
-            logEventController.add('Callback received: $message');
-            // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，
-            // 不补全会被下面的 http 检查直接拒收。
-            if (message.startsWith('//')) {
-              message = 'https:$message';
-            }
-            if (message.contains('http') && !isVideoSourceLoaded) {
-              logEventController.add('Loading video source: $message');
+    logEventController.add('Adding JSBridgeDebug handler');
+    webviewController?.addJavaScriptHandler(
+        handlerName: 'JSBridgeDebug',
+        callback: (args) {
+          String message = args[0].toString();
+          logEventController.add('Callback received: $message');
+          logEventController.add(
+              'If there is audio but no video, please report it to the rule developer.');
+          if ((message.contains('http') || message.startsWith('//')) &&
+              !SniffedUrlFilter.isAdUrl(message)) {
+            logEventController.add('Parsing video source $message');
+            String encodedUrl = Uri.encodeFull(message);
+            if (decodeVideoSource(encodedUrl) != encodedUrl) {
               isIframeLoaded = true;
               isVideoSourceLoaded = true;
-              videoLoadingEventController.add(false);
+              logEventController.add(
+                  'Loading video source ${decodeVideoSource(encodedUrl)}');
               unloadPage();
-              // 嗅探到的 .m3u8 显式标注 HLS：mpv 侧据此强制
-              // demuxer-lavf-format=hls，避开内容探测失误
-              // （对齐上游 Windows 平台 43e0fe8 的做法）。
-              notifyVideoSourceResolved(
-                message,
-                format: _isHlsUrl(message)
-                    ? VideoSourceFormat.hls
-                    : VideoSourceFormat.auto,
-              );
+              final videoUrl = decodeVideoSource(encodedUrl);
+              notifyVideoSourceResolved(videoUrl);
             }
-          });
-    }
+          }
+        });
+
+    logEventController.add('Adding VideoBridgeDebug handler');
+    webviewController?.addJavaScriptHandler(
+        handlerName: 'VideoBridgeDebug',
+        callback: (args) {
+          String message = args[0].toString();
+          logEventController.add('Callback received: $message');
+          // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，
+          // 不补全会被下面的 http 检查直接拒收。
+          if (message.startsWith('//')) {
+            message = 'https:$message';
+          }
+          if (message.contains('http') &&
+              !isVideoSourceLoaded &&
+              !SniffedUrlFilter.isAdUrl(message)) {
+            logEventController.add('Loading video source: $message');
+            isIframeLoaded = true;
+            isVideoSourceLoaded = true;
+            unloadPage();
+            // 嗅探到的 .m3u8 显式标注 HLS：mpv 侧据此强制
+            // demuxer-lavf-format=hls，避开内容探测失误
+            // （对齐上游 Windows 平台 43e0fe8 的做法）。
+            notifyVideoSourceResolved(
+              message,
+              format: _isHlsUrl(message)
+                  ? VideoSourceFormat.hls
+                  : VideoSourceFormat.auto,
+            );
+          }
+        });
   }
 
   /// URL 是否应按 HLS 流处理：以 .m3u8 结尾，或 .m3u8 后跟查询串。
@@ -198,8 +195,12 @@ class VideoWebviewImpl
                 try {
                     let content = this.responseText;
                     if (content.trim().startsWith("#EXTM3U")) {
-                        window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found: ' + args[1]);
-                        window.flutter_inappwebview.callHandler('VideoBridgeDebug', args[1]);
+                        // 站点可能给相对地址；统一在 JS 侧按页面 baseURI 补全，
+                        // 否则 mpv 收到相对路径必然 Failed to open。
+                        let requestUrl = args[1];
+                        try { requestUrl = new URL(requestUrl, document.baseURI).href; } catch {}
+                        window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found: ' + requestUrl);
+                        window.flutter_inappwebview.callHandler('VideoBridgeDebug', requestUrl);
                     };
                 } catch {}
             });
@@ -230,8 +231,11 @@ class VideoWebviewImpl
                 try {
                   let content = this.responseText;
                   if (content.trim().startsWith("#EXTM3U") && args[1] !== null && args[1] !== undefined) {
-                    window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found in iframe: ' + args[1]);
-                    window.flutter_inappwebview.callHandler('VideoBridgeDebug', args[1]);
+                    // 相对地址按 iframe 自身 baseURI 补全后再上抛。
+                    let requestUrl = args[1];
+                    try { requestUrl = new URL(requestUrl, iframeWindow.document.baseURI).href; } catch {}
+                    window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found in iframe: ' + requestUrl);
+                    window.flutter_inappwebview.callHandler('VideoBridgeDebug', requestUrl);
                   };
                 } catch {}
               });
@@ -472,27 +476,17 @@ class VideoWebviewImpl
     if (headers == null) return false;
     final range = headers['Range'] ?? headers['range'];
     if (range == null || !range.startsWith('bytes=')) return false;
-    if (lower.endsWith('.js') ||
-        lower.endsWith('.css') ||
-        lower.endsWith('.html') ||
-        lower.endsWith('.json') ||
-        lower.endsWith('.png') ||
-        lower.endsWith('.jpg') ||
-        lower.endsWith('.gif') ||
-        lower.endsWith('.svg') ||
-        lower.endsWith('.woff') ||
-        lower.endsWith('.woff2') ||
-        lower.endsWith('.wasm')) {
-      return false;
+    // 带 Range 的请求并不都是媒体：静态资源与常见数据接口
+    // （字幕 .vtt/.srt、站点地图 .xml、字体、播放器清单等）一律放行。
+    const nonMediaExtensions = [
+      '.js', '.mjs', '.css', '.html', '.htm', '.json', '.xml', '.txt',
+      '.map', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico',
+      '.woff', '.woff2', '.ttf', '.otf', '.eot', '.wasm', '.vtt', '.srt',
+    ];
+    for (final ext in nonMediaExtensions) {
+      if (lower.endsWith(ext)) return false;
     }
     return true;
-  }
-
-  bool _isAdUrl(String lower) {
-    return lower.contains('googleads') ||
-        lower.contains('googlesyndication') ||
-        lower.contains('adtrafficquality') ||
-        lower.contains('doubleclick');
   }
 
   Future<void> _setupProxy() async {

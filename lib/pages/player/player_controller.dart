@@ -174,13 +174,15 @@ class PlayerController implements Disposable {
     currentDanmakuEpisodeNumber = params.danmakuEpisodeNumber;
     currentRoad = params.currentRoad;
     referer = params.referer;
-    // 秒开链路：本地代理打开失败时用原始直链原地重开
-    playback.setDirectFallbackUrl(params.directVideoUrl);
 
     MiruLogger().i(
         'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}');
 
     playback.resetForInit();
+    // 秒开链路：本地代理打开失败时用原始直链原地重开。
+    // 必须在 resetForInit 之后设置——后者会清空兜底地址，先设后清
+    // 会让直连兜底永远拿不到地址（v1.5.3 修复装配顺序缺陷）。
+    playback.setDirectFallbackUrl(params.directVideoUrl);
     debug.playerLogLevel = GStorage.getSetting(SettingsKeys.playerLogLevel);
     playback.playerSpeed = GStorage.getSetting(SettingsKeys.defaultPlaySpeed);
     panel.aspectRatioMode = PlayerAspectRatio.fromStorageValue(
@@ -190,8 +192,12 @@ class PlayerController implements Disposable {
     playback.buttonSkipTime = GStorage.getSetting(SettingsKeys.buttonSkipTime);
     playback.arrowKeySkipTime =
         GStorage.getSetting(SettingsKeys.arrowKeySkipTime);
+    // 上游 changeEpisode 在 init 前必然已 stop()（两个调用点皆然）。
+    // 此处再走全量释放（audio_service setActive + 音量 UI 恢复等
+    // 3-4 个平台通道往返）纯属重复，还会把音频会话 active 状态
+    // 翻转一遍。只保留兜底性的播放内核复位：无实例时零开销。
     try {
-      await _releasePlaybackResources();
+      await playback.stop();
     } catch (_) {}
     if (initialization.isStale) {
       return false;

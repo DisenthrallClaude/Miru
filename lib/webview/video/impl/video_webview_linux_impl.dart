@@ -5,9 +5,14 @@ import 'package:miru/services/network/proxy_utils.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:miru/utils/media.dart';
+import 'package:miru/webview/video/sniffed_url_filter.dart';
 
 class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
   bool bridgeInited = false;
+
+  /// 当前解析器模式。回调读字段而非闭包捕获的首次值：
+  /// 「超时换解析器重试」模式翻转后闭包旧值会让 iframe 分支判定失真。
+  bool _useLegacyParser = false;
 
   @override
   Future<void> init() async {
@@ -53,8 +58,8 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
     return ProxyConfiguration(host: host, port: port);
   }
 
-  Future<void> initBridge(bool useLegacyParser) async {
-    await initJSBridge(useLegacyParser);
+  Future<void> initBridge() async {
+    await initJSBridge();
     bridgeInited = true;
   }
 
@@ -62,14 +67,13 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
     await unloadPage();
+    _useLegacyParser = useLegacyParser;
     if (!bridgeInited) {
-      await initBridge(useLegacyParser);
+      await initBridge();
     }
-    count = 0;
     this.offset = offset;
     isIframeLoaded = false;
     isVideoSourceLoaded = false;
-    videoLoadingEventController.add(true);
     webviewController!.launch(url);
   }
 
@@ -86,7 +90,7 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
     disposeEventControllers();
   }
 
-  Future<void> initJSBridge(bool useLegacyParser) async {
+  Future<void> initJSBridge() async {
     webviewController!.addOnWebMessageReceivedCallback((message) async {
       if (message.contains('iframeMessage:')) {
         String messageItem =
@@ -94,17 +98,12 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
         logEventController
             .add('Callback received: [iframe] ${Uri.decodeFull(messageItem)}');
         if ((messageItem.contains('http') || messageItem.startsWith('//')) &&
-            !messageItem.contains('googleads') &&
-            !messageItem.contains('googlesyndication.com') &&
-            !messageItem.contains('prestrain.html') &&
-            !messageItem.contains('prestrain%2Ehtml') &&
-            !messageItem.contains('adtrafficquality')) {
+            !SniffedUrlFilter.isAdUrl(messageItem)) {
           if (decodeVideoSource(messageItem) != Uri.encodeFull(messageItem) &&
-              useLegacyParser) {
+              _useLegacyParser) {
             logEventController.add('Parsing video source $messageItem');
             isIframeLoaded = true;
             isVideoSourceLoaded = true;
-            videoLoadingEventController.add(false);
             logEventController
                 .add('Loading video source ${decodeVideoSource(messageItem)}');
             unloadPage();
@@ -114,16 +113,21 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
         }
       }
       if (message.contains('videoMessage:')) {
-        String messageItem =
-            Uri.encodeFull(message.replaceFirst('videoMessage:', ''));
+        var rawUrl = message.replaceFirst('videoMessage:', '');
+        // 协议相对地址（//cdn.com/x.m3u8）不含 "http" 子串，先补全，
+        // 否则会被下面的 http 检查直接拒收。
+        if (rawUrl.startsWith('//')) {
+          rawUrl = 'https:$rawUrl';
+        }
+        String messageItem = Uri.encodeFull(rawUrl);
         logEventController
             .add('Callback received: [video] ${Uri.decodeFull(messageItem)}');
-        if (messageItem.contains('http')) {
+        if (messageItem.contains('http') &&
+            !SniffedUrlFilter.isAdUrl(messageItem)) {
           String videoUrl = Uri.decodeFull(messageItem);
           logEventController.add('Loading video source: $videoUrl');
           isIframeLoaded = true;
           isVideoSourceLoaded = true;
-          videoLoadingEventController.add(false);
           unloadPage();
           notifyVideoSourceResolved(videoUrl);
         }
@@ -202,7 +206,10 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
             try {
                 let content = this.responseText;
                 if (content.trim().startsWith("#EXTM3U")) {
-                    window.webkit.messageHandlers.msgToNative.postMessage('videoMessage:' + args[1]);
+                    // 站点可能给相对地址；按页面 baseURI 补全后再上抛。
+                    let requestUrl = args[1];
+                    try { requestUrl = new URL(requestUrl, document.baseURI).href; } catch {}
+                    window.webkit.messageHandlers.msgToNative.postMessage('videoMessage:' + requestUrl);
                 };
             } catch { }
         });

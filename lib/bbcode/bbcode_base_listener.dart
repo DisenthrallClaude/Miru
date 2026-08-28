@@ -155,9 +155,20 @@ class BBCodeBaseListener implements BBCodeListener {
         break;
       case 'SIZE':
       case 'size':
-        for (int i = bbCodeTag.size!; i < bbcode.length; i++) {
-          if (bbcode.isNotEmpty && bbcode[i] is BBCodeText) {
-            bbcode[i].size = int.parse(ctx.attr!.text!);
+        // [size=large]/[size]/负数/超大值等非法属性：忽略 size 效果，
+        // 不崩渲染（此前 int.parse(ctx.attr!.text!) 一抛整条评论挂掉）。
+        {
+          final size = int.tryParse(ctx.attr?.text ?? '');
+          const maxSize = 200;
+          if (size != null && size > 0 && size <= maxSize) {
+            for (int i = bbCodeTag.size!; i < bbcode.length; i++) {
+              if (bbcode.isNotEmpty && bbcode[i] is BBCodeText) {
+                bbcode[i].size = size;
+              }
+            }
+          } else {
+            MiruLogger()
+                .d('BBCode: ignored invalid size attr "${ctx.attr?.text}"');
           }
         }
         break;

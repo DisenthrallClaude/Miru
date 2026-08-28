@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:mobx/mobx.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/modules/collect/collect_type.dart';
 import 'package:miru/modules/search/image_search_module.dart';
@@ -9,6 +10,7 @@ import 'package:miru/repositories/collect_repository.dart';
 import 'package:miru/repositories/search_history_repository.dart';
 import 'package:miru/request/apis/bangumi_api.dart';
 import 'package:miru/request/apis/trace_api.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/search_parser.dart';
 
 part 'search_controller.g.dart';
@@ -30,6 +32,16 @@ abstract class _SearchPageController with Store {
   int _searchOffset = 0;
 
   bool hasMoreSearchResults = true;
+
+  /// 最近一次搜索是否因网络异常失败（与「无结果」分开渲染）。
+  ///
+  /// 非 observable：与 isTimeOut / isLoading 在同一个 action 事务内写入，
+  /// Observer 由后两者的通知触发重建，重建时即可读到最新值，
+  /// 这样可以不动 mobx 注解成员、避免重新跑 build_runner。
+  bool searchNetworkError = false;
+
+  /// 列表非空时「加载更多」失败：页面据此在底部显示重试入口。
+  bool loadMoreFailed = false;
 
   @observable
   bool isLoading = false;
@@ -87,6 +99,8 @@ abstract class _SearchPageController with Store {
     }
     isLoading = true;
     isTimeOut = false;
+    searchNetworkError = false;
+    loadMoreFailed = false;
     SearchParser parser = SearchParser(input);
     final filterState = parser.toFilterState();
     String? idString = filterState.id.isEmpty ? null : filterState.id;
@@ -106,17 +120,28 @@ abstract class _SearchPageController with Store {
     var addedVisibleItems = false;
     var fetchedAnyPage = false;
     var pagesFetched = 0;
+    var networkFailed = false;
     do {
-      final page = await BangumiApi.bangumiSearch(filterState.keyword,
-          tags: filterState.tags,
-          limit: _searchPageSize,
-          offset: _searchOffset,
-          sort: filterState.sort,
-          dateRange: filterState.effectiveDateRange,
-          rankRange: filterState.rankRange,
-          scoreRange: filterState.scoreRange,
-          weekdays: filterState.weekdays);
+      // 双契约兼容：FIX-F 落地后网络异常会直接抛出（catch 兜底转错误态）；
+      // 落地前异常被吞成 null（同样按网络错误处理，而不是误判成「无结果」）。
+      BangumiSearchPage? page;
+      try {
+        page = await BangumiApi.bangumiSearch(filterState.keyword,
+            tags: filterState.tags,
+            limit: _searchPageSize,
+            offset: _searchOffset,
+            sort: filterState.sort,
+            dateRange: filterState.effectiveDateRange,
+            rankRange: filterState.rankRange,
+            scoreRange: filterState.scoreRange,
+            weekdays: filterState.weekdays);
+      } catch (e) {
+        MiruLogger().w('Search: bangumiSearch failed', error: e);
+        networkFailed = true;
+        break;
+      }
       if (page == null) {
+        networkFailed = true;
         break;
       }
       fetchedAnyPage = true;
@@ -134,6 +159,17 @@ abstract class _SearchPageController with Store {
         hasMoreSearchResults &&
         pagesFetched < _maxPagesPerSearch);
     isLoading = false;
+    if (networkFailed) {
+      if (bangumiList.isEmpty) {
+        // 首屏即失败：渲染独立的「网络异常」错误态（与无结果区分）
+        searchNetworkError = true;
+      } else {
+        // 翻页失败：列表已有内容，提示 + 底部重试入口
+        loadMoreFailed = true;
+        MiruDialog.showToast(message: '加载更多失败，请检查网络后重试');
+      }
+      return;
+    }
     isTimeOut =
         bangumiList.isEmpty && (!fetchedAnyPage || !hasMoreSearchResults);
   }

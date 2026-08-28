@@ -1,0 +1,10 @@
+# 真实网络测试隔离：默认 `flutter test` 跳过 live 用例，
+# 需要跑真实网络验证时显式执行：
+#   flutter test --tags live            # 只跑 live 用例
+#   flutter test --exclude-tags live    # 只跑离线用例（CI / 无外网环境）
+# 各 live 测试文件顶部已加 `@Tags(['live'])` 标注
+# （live_rule_validation / live_playback_probe / fast_resolver_live /
+#   catalog_flow）。
+tags:
+  live:
+    skip: "live network test — run with: flutter test --tags live"

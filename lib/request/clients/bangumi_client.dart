@@ -16,14 +16,22 @@ import 'package:miru/services/storage/storage.dart';
 ///
 /// 策略（[SettingsKeys.enableBangumiProxy] 开启时）：
 /// - **GET**：官方与镜像并发，先回 2xx 者胜出，其余当场取消——
-///   任何单边故障都无感；
+///   任何单边故障都无感；竞速两侧单次快失败（不叠加拦截器重试），
+///   最坏耗时压在 ≈24s（竞速 12s + 全败回退 12s）；
 /// - **POST**：不能并发竞速（有副作用，可能重复执行），改为
 ///   官方优先、连接层失败（请求确定没到达）转镜像重试一次。
 /// 开关关闭时全部直连官方（原行为）。
+///
+/// 安全（F3）：携带 Bearer Token 的请求只发官方域——镜像
+/// bgmapi.anibt.net 是无需鉴权的社区公共反代，仅参与匿名请求，
+/// 开启同步时 token 也不会再泄露给第三方。
 class BangumiClient {
   BangumiClient._();
 
   static final BangumiClient instance = BangumiClient._();
+
+  /// Bearer Token 只允许发往这些官方域。
+  static const Set<String> _officialHosts = {'api.bgm.tv', 'next.bgm.tv'};
 
   /// 官方 host → 社区公共反代（无需鉴权）。
   ///
@@ -42,13 +50,17 @@ class BangumiClient {
     bool requiresAuth = false,
     CancelToken? cancelToken,
   }) async {
+    final headers = _headers(requiresAuth: requiresAuth, url: url);
     final candidates = _getCandidateUrls(url);
-    if (candidates.length > 1) {
-      final data = await _raceGet(candidates,
-          queryParameters: queryParameters,
-          requiresAuth: requiresAuth,
-          externalCancelToken: cancelToken);
-      if (data != null) return data;
+    final raced = candidates.length > 1;
+    if (raced) {
+      final (won, data) = await _raceGet(
+        candidates,
+        queryParameters: queryParameters,
+        requiresAuth: requiresAuth,
+        externalCancelToken: cancelToken,
+      );
+      if (won) return data;
       // 全部失败：退回单请求路径，让其抛出真实异常（含错误映射）
     }
     try {
@@ -56,11 +68,11 @@ class BangumiClient {
         url,
         queryParameters: queryParameters,
         options: Options(
-          headers: _headers(
-            requiresAuth: requiresAuth,
-            url: url,
-            method: 'GET',
-          ),
+          headers: headers,
+          // 竞速全败后的回退只保留一次不带重试的尝试（F2）：竞速两侧
+          // 已各试过一次，这里再叠拦截器重试会把最坏耗时推回 48s。
+          // 镜像关闭/无镜像域的直连路径维持原有的单次自动重试。
+          extra: raced ? DioFactory.noRetryExtra() : null,
         ),
         cancelToken: cancelToken,
       );
@@ -77,20 +89,17 @@ class BangumiClient {
     bool requiresAuth = false,
     CancelToken? cancelToken,
   }) async {
-    final fallback = _mirrorUrlFor(url);
+    final headers = _headers(requiresAuth: requiresAuth, url: url);
+    // 鉴权 POST（收藏写入等）绝不转镜像（F3）：匿名镜像只会 401，
+    // 还会把带 token 的写请求暴露给第三方；匿名 POST（如搜索）
+    // 仍享受连接层失败转镜像的回退。
+    final fallback = requiresAuth ? null : _mirrorUrlFor(url);
     try {
       final response = await DioFactory.apiDio.post(
         url,
         data: data,
         queryParameters: queryParameters,
-        options: Options(
-          headers: _headers(
-            requiresAuth: requiresAuth,
-            url: url,
-            method: 'POST',
-            data: data,
-          ),
-        ),
+        options: Options(headers: headers),
         cancelToken: cancelToken,
       );
       return response.data;
@@ -110,12 +119,7 @@ class BangumiClient {
           data: data,
           queryParameters: queryParameters,
           options: Options(
-            headers: _headers(
-              requiresAuth: requiresAuth,
-              url: url,
-              method: 'POST',
-              data: data,
-            ),
+            headers: _headers(requiresAuth: false, url: fallback),
           ),
           cancelToken: cancelToken,
         );
@@ -153,9 +157,9 @@ class BangumiClient {
   bool _isCancelled(CancelToken? token) =>
       token != null && token.isCancelled;
 
-  /// 并发竞速：任一候选先回 2xx 且有数据即胜出，其余取消；
-  /// 全部失败返回 null（调用方退回单请求路径拿真实异常）。
-  Future<dynamic> _raceGet(
+  /// 并发竞速：任一候选先回 2xx 即胜出（空体也算，F19），其余取消；
+  /// 全部失败返回 won=false（调用方退回单请求路径拿真实异常）。
+  Future<(bool, dynamic)> _raceGet(
     List<String> urls, {
     Map<String, dynamic>? queryParameters,
     required bool requiresAuth,
@@ -169,7 +173,7 @@ class BangumiClient {
       }
     });
 
-    final completer = Completer<dynamic>();
+    final completer = Completer<(bool, dynamic)>();
     var pending = urls.length;
     for (final u in urls) {
       unawaited(
@@ -178,25 +182,31 @@ class BangumiClient {
               u,
               queryParameters: queryParameters,
               options: Options(
+                // _headers 按目标 URL 域名决定是否携带 Bearer（F3）：
+                // 官方侧带 token，镜像侧自动剥离。
                 headers: _headers(
                   requiresAuth: requiresAuth,
                   url: u,
-                  method: 'GET',
                 ),
+                // 竞速两侧单次快失败（F2）：内嵌重试会把单侧最坏耗时
+                // 翻倍，且重试副本曾脱离竞速取消链（幽灵请求）。
+                extra: DioFactory.noRetryExtra(),
               ),
               cancelToken: sideTokens[u],
             )
             .then((response) {
-              final data = response.data;
-              if (!completer.isCompleted && data != null) {
-                completer.complete(data);
+              // apiDio 的 validateStatus 只放行 2xx；到这里即为胜。
+              // 2xx 空体（204/合法空）也算胜，不再因 data==null
+              // 误判全败再走回退长路（F19）。
+              if (!completer.isCompleted) {
+                completer.complete((true, response.data));
               }
             })
             .catchError((_) {})
             .whenComplete(() {
               pending -= 1;
               if (pending == 0 && !completer.isCompleted) {
-                completer.complete(null);
+                completer.complete((false, null));
               }
             }),
       );
@@ -213,16 +223,23 @@ class BangumiClient {
   Map<String, dynamic> _headers({
     required bool requiresAuth,
     String? url,
-    String method = 'GET',
-    Object? data,
   }) {
     final headers = <String, dynamic>{...bangumiHTTPHeader};
     final bangumiSyncEnable =
         GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
     final token = GStorage.getSetting(SettingsKeys.bangumiAccessToken).trim();
-    if ((requiresAuth || bangumiSyncEnable) && token.isNotEmpty) {
+    final wantsAuth = (requiresAuth || bangumiSyncEnable) && token.isNotEmpty;
+    // Bearer 只发官方域（F3）：镜像等第三方域名一律剥离——镜像无需
+    // 鉴权，把 token 发过去只会扩大泄露面（被入侵即可操作用户收藏）。
+    if (wantsAuth && _isOfficialUrl(url)) {
       headers['Authorization'] = 'Bearer $token';
     }
     return headers;
+  }
+
+  bool _isOfficialUrl(String? url) {
+    if (url == null) return false;
+    final host = Uri.tryParse(url)?.host;
+    return host != null && _officialHosts.contains(host);
   }
 }

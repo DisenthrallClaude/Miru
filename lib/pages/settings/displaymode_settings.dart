@@ -37,7 +37,8 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
   Future<void> fetchAll() async {
     preferred = await FlutterDisplayMode.preferred;
     active = await FlutterDisplayMode.active;
-    await GStorage.putSetting(SettingsKeys.displayMode, preferred.toString());
+    // 只读不写：设置项仅在用户主动选择时落盘（读取路径顺带写盘
+    // 会把「从未设置过」的用户也固化成当前系统模式）。
     // await 之后页面可能已退出，避免对已卸载的 State 调用 setState。
     if (!mounted) return;
     setState(() {});
@@ -84,6 +85,9 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
                   groupValue: preferred,
                   onChanged: (DisplayMode? newMode) async {
                     await FlutterDisplayMode.setPreferredMode(newMode!);
+                    // 用户主动选择时才持久化（见 fetchAll 的只读说明）。
+                    await GStorage.putSetting(
+                        SettingsKeys.displayMode, newMode.toString());
                     await Future<dynamic>.delayed(
                       const Duration(milliseconds: 100),
                     );

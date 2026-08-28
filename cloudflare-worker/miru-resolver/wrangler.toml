@@ -13,6 +13,7 @@
     "ALLOWED_ORIGINS": "*",
     "DAILY_RESOLVE_BUDGET": "4000",
     "MIN_PER_USER": "30",
-    "MAX_PER_USER": "800"
+    "MAX_PER_USER": "800",
+    "GLOBAL_DAILY_HARD_CAP": "60000"
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:miru/services/logging/logger.dart';
@@ -28,6 +29,10 @@ import 'package:miru/utils/http_headers.dart';
 ///    超时/网络抖动一律放行给 mpv（v1.5.0 的二值探测把慢源误判成死链，
 ///    是「同一条规则有时顺有时不顺」的主要放大器）。
 ///
+/// 失败止损：某层级失败后 60 秒内重试会跳过该层级
+/// （内存短窗记忆 + ResolutionResultCache 负缓存），解析器翻转重试
+/// 不再把快解/云端整层重跑一遍。
+///
 /// 拿到可用直链后：
 /// - **智能代理**（v1.5.1）：磁盘已有该集开头数据才走本地代理（首帧从
 ///   磁盘秒出）；否则 mpv 直连源站——与 v1.3.2 完全一致的行为，代理从
@@ -49,11 +54,29 @@ class HybridVideoSourceService implements IVideoSourceService {
   final FastVideoSourceResolver _fast = FastVideoSourceResolver.instance;
 
   /// 直链可达性探测的超时（只影响「判定快慢」，不影响正确性：
-  /// 超时算 unknown，一律放行给 mpv 自己重试）。
-  static const Duration probeTimeout = Duration(seconds: 3);
+  /// 超时算 unknown，一律放行给 mpv 自己重试）。1.5s：探测串行在关键
+  /// 路径上（弱网下健康源也常 >3s），三态判定下收紧是安全的——
+  /// 只有明确的 403/404/410 才判死，其余全部放行（B16）。
+  static const Duration probeTimeout = Duration(milliseconds: 1500);
+
+  /// 探测连接阶段超时：黑洞主机（SYN 被丢，被墙 CDN 常态）会挂到
+  /// OS 级 ~2 分钟，这里硬顶住（B1）。
+  static const Duration probeConnectTimeout = Duration(milliseconds: 1500);
 
   /// 解析缓存条目的「新鲜期」：写入后这么长时间内命中免探测。
   static const Duration freshEntryAge = Duration(minutes: 10);
+
+  /// 短窗失败记忆：某层级失败后这么长时间内重试跳过该层级。
+  /// WebView 超时 → 解析器翻转重试时，刚失败过的快解/云端（其行为
+  /// 与 useLegacyParser 无关）重跑纯烧时间（B15）。
+  static const Duration levelRetryBackoff = Duration(seconds: 60);
+
+  /// 负缓存键后缀（写入 ResolutionResultCache，TTL 60s，跨进程生效）。
+  static const String _fastLevelSuffix = '#fast';
+  static const String _cloudLevelSuffix = '#cloud';
+
+  /// URL 级短窗失败记忆：episodeUrl → 层级后缀 → 最近失败时间。
+  final Map<String, Map<String, DateTime>> _levelFailures = {};
 
   /// 透传 WebView 解析日志（详情页解析日志面板用）。
   Stream<String> get onLog => _webviewService.onLog;
@@ -63,7 +86,10 @@ class HybridVideoSourceService implements IVideoSourceService {
     String episodeUrl, {
     required bool useLegacyParser,
     int offset = 0,
-    Duration timeout = const Duration(seconds: 30),
+    // 接口默认超时统一 20s（B7）：与 webview_video_source_service /
+    // video_source_service 的签名默认对齐；实际播放路径由
+    // video_controller 读 SettingsKeys.parseTimeout 设置后显式传入。
+    Duration timeout = const Duration(seconds: 20),
   }) {
     return resolveWithHeaders(
       episodeUrl,
@@ -79,7 +105,7 @@ class HybridVideoSourceService implements IVideoSourceService {
     String episodeUrl, {
     required bool useLegacyParser,
     int offset = 0,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = const Duration(seconds: 20),
     Map<String, String> playbackHeaders = const {},
   }) async {
     final headers = _mergedPlaybackHeaders(playbackHeaders);
@@ -98,6 +124,7 @@ class HybridVideoSourceService implements IVideoSourceService {
             'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
         return _materialize(cached, offset: offset, headers: headers);
       }
+
       // 明确的 4xx：直链已死（签名过期/防盗链），清除并继续走解析
       await _cache.invalidate(episodeUrl);
       MiruLogger()
@@ -107,23 +134,31 @@ class HybridVideoSourceService implements IVideoSourceService {
     // ---- 第 2 级：本地快速静态解析（v1.5.2）----
     // 手机直接 GET 播放页提取（MacCMS 通用结构），0.2~0.8 秒；
     // 出口 IP 与播放一致，拿到的直链没有「云端 IP 被防盗链拒掉」问题。
-    final fastResult = await _fast.resolve(
-      episodeUrl,
-      userAgent: headers['user-agent'],
-      referer: headers['referer'] ?? episodeUrl,
-    );
-    if (fastResult != null) {
-      final verdict = await _probe(fastResult.url, headers);
-      if (verdict != _ProbeVerdict.dead) {
-        await _cache.put(episodeUrl, fastResult);
-        return _materialize(fastResult, offset: offset, headers: headers);
+    // 短窗内刚失败过（或负缓存命中）则跳过本层（B15）。
+    if (!await _shouldSkipLevel(episodeUrl, _fastLevelSuffix)) {
+      final fastResult = await _fast.resolve(
+        episodeUrl,
+        userAgent: headers['user-agent'],
+        referer: headers['referer'] ?? episodeUrl,
+      );
+      if (fastResult != null) {
+        final verdict = await _probe(fastResult.url, headers);
+        if (verdict != _ProbeVerdict.dead) {
+          await _cache.put(episodeUrl, fastResult);
+          _forgetLevelFailures(episodeUrl);
+          return _materialize(fastResult, offset: offset, headers: headers);
+        }
+        MiruLogger()
+            .w('HybridResolver: fast url rejected (dead), falling back');
       }
-      MiruLogger()
-          .w('HybridResolver: fast url rejected (dead), falling back');
+      // 快解失败/被拒：记短窗失败记忆 + 负缓存（TTL 60s），
+      // 解析器翻转重试时不再重跑这一层。
+      await _markLevelFailed(episodeUrl, _fastLevelSuffix);
     }
 
     // ---- 第 3 级：云端解析层 ----
-    if (_cloud.isConfigured) {
+    if (_cloud.isConfigured &&
+        !await _shouldSkipLevel(episodeUrl, _cloudLevelSuffix)) {
       final cloudResult = await _cloud.resolve(
         episodeUrl,
         userAgent: headers['user-agent'],
@@ -135,16 +170,20 @@ class HybridVideoSourceService implements IVideoSourceService {
         // IP）；unknown（超时/网络抖动）放行——mpv 有自己的重试。
         if (verdict != _ProbeVerdict.dead) {
           await _cache.put(episodeUrl, cloudResult);
+          _forgetLevelFailures(episodeUrl);
           return _materialize(cloudResult, offset: offset, headers: headers);
         }
         MiruLogger().w(
             'HybridResolver: cloud url rejected (dead), falling back');
       }
+      await _markLevelFailed(episodeUrl, _cloudLevelSuffix);
     }
 
     // ---- 第 4 级：WebView 嗅探（原有兜底）----
     // WebView 结果来自手机自己的会话，不做探测（v1.3.2 行为）：
     // 探测只会徒增一次 RTT，坏链交给 mpv 打开失败 → 直连兜底 → 换源提示。
+    // 注意：本层不记短窗失败——解析器翻转改变的就是 WebView 的行为，
+    // 重试必须再给它机会。
     final source = await _webviewService.resolve(
       episodeUrl,
       useLegacyParser: useLegacyParser,
@@ -152,6 +191,7 @@ class HybridVideoSourceService implements IVideoSourceService {
       timeout: timeout,
     );
     await _cache.put(episodeUrl, source);
+    _forgetLevelFailures(episodeUrl);
     return _materialize(source, offset: offset, headers: headers);
   }
 
@@ -175,13 +215,18 @@ class HybridVideoSourceService implements IVideoSourceService {
         );
         return;
       }
-      // 本地快解优先（不占 WebView、不等云端），失败再云端
-      var result = await _fast.resolve(
-        episodeUrl,
-        userAgent: headers['user-agent'],
-        referer: headers['referer'] ?? episodeUrl,
-      );
-      if (result == null && _cloud.isConfigured) {
+      // 本地快解优先（不占 WebView、不等云端），失败再云端；
+      // 短窗内刚失败过的层级同样跳过（省电省时，不新增失败标记）
+      var result = await _shouldSkipLevel(episodeUrl, _fastLevelSuffix)
+          ? null
+          : await _fast.resolve(
+              episodeUrl,
+              userAgent: headers['user-agent'],
+              referer: headers['referer'] ?? episodeUrl,
+            );
+      if (result == null &&
+          _cloud.isConfigured &&
+          !await _shouldSkipLevel(episodeUrl, _cloudLevelSuffix)) {
         result = await _cloud.resolve(
           episodeUrl,
           userAgent: headers['user-agent'],
@@ -295,22 +340,70 @@ class HybridVideoSourceService implements IVideoSourceService {
     return headers;
   }
 
+  // -------------------------------------------------------------------------
+  // 短窗失败记忆 + 负缓存（B15）
+  // -------------------------------------------------------------------------
+
+  /// 该层级是否应在本次重试中跳过：内存短窗记忆命中，或负缓存
+  /// （TTL 60s）命中。两级叠加：内存跨不到进程重启，负缓存跨进程，
+  /// TTL 都短，不会把「源暂时抖动」放大成长时间不可用。
+  Future<bool> _shouldSkipLevel(String episodeUrl, String levelSuffix) async {
+    final fails = _levelFailures[episodeUrl];
+    final at = fails?[levelSuffix];
+    if (at != null &&
+        DateTime.now().difference(at) < levelRetryBackoff) {
+      return true;
+    }
+    return _cache.isNegative(episodeUrl + levelSuffix);
+  }
+
+  /// 记一次层级失败（内存 + 负缓存）。
+  Future<void> _markLevelFailed(String episodeUrl, String levelSuffix) async {
+    final fails = _levelFailures.putIfAbsent(episodeUrl, () => {});
+    fails[levelSuffix] = DateTime.now();
+    // 防膨胀：条目过多时清理已过期的（同集 URL 数量有限，正常不会触）
+    if (_levelFailures.length > 256) {
+      final now = DateTime.now();
+      _levelFailures.removeWhere((_, f) => f.values
+          .every((t) => now.difference(t) >= levelRetryBackoff));
+    }
+    try {
+      await _cache.putNegative(episodeUrl + levelSuffix);
+    } catch (_) {
+      // 负缓存写失败不影响主流程
+    }
+  }
+
+  /// 任一层成功后清掉该 URL 的失败记忆。
+  void _forgetLevelFailures(String episodeUrl) {
+    _levelFailures.remove(episodeUrl);
+  }
+
+  // -------------------------------------------------------------------------
+  // 直链可达性三态探测
+  // -------------------------------------------------------------------------
+
   /// 直链可达性三态判定。
   ///
   /// v1.5.0 的二值探测（超时=死链）在源站抖动时会误杀好链：
   /// 缓存命中 → 误判 → 作废缓存 → 全量重新解析（5~30 秒），
   /// 用户观感就是「同一条规则有时顺有时不顺」。v1.5.1 改为：
-  /// - **alive**：2xx（HLS 时额外验证响应体以 #EXTM3U 开头——不少源站
-  ///   对无效直链返回 200 + HTML 错误页，只看状态码会误判活链）；
-  /// - **dead**：明确的 403/404/410——签名过期/防盗链，判死没商量；
+  /// - **alive**：2xx（HLS 时额外验证响应体以 #EXTM3U 开头，校验
+  ///   失败直接判死——不少源站对无效直链返回 200 + HTML 错误页，
+  ///   只看状态码会把错误页当活链缓存 30 分钟反复喂给 mpv，B3）；
+  /// - **dead**：明确的 403/404/410，或「无扩展名直链回 200 但
+  ///   content-type 明确不是视频」（错误页/播放器页伪装，B11）；
   /// - **unknown**：超时/连接失败/5xx——源站慢或抽风，放行给 mpv，
   ///   mpv 的重连自愈（v1.3.1 加固）比我们瞎猜靠谱。
   Future<_ProbeVerdict> _probe(
       String url, Map<String, String> headers) async {
     final isHls = _isHlsUrl(url);
-    final client = HttpClient();
+    // B1：连接阶段必须有硬超时——黑洞主机（SYN 被丢）会挂到 OS 级
+    // ~2 分钟，是「无限转圈」的根因之一。
+    final client = HttpClient()..connectionTimeout = probeConnectTimeout;
     try {
-      final request = await client.getUrl(Uri.parse(url));
+      final request =
+          await client.getUrl(Uri.parse(url)).timeout(probeConnectTimeout);
       headers.forEach(request.headers.set);
       if (!isHls) {
         // MP4 等大文件只取前 1KB；m3u8 索引本身只有几 KB，
@@ -320,21 +413,48 @@ class HybridVideoSourceService implements IVideoSourceService {
       final response = await request.close().timeout(probeTimeout);
       final status = response.statusCode;
       if (isHls && status >= 200 && status < 300) {
-        // 读首块字节校验 #EXTM3U
+        // 读首块字节校验 #EXTM3U：strip BOM/首段空白后必须以 #EXTM3U
+        // 开头，否则按 dead 处理（B3：校验失败返回 unknown 与 alive
+        // 在下游完全等价，等于没校验）。
         final head = await response
             .first
             .timeout(probeTimeout)
             .catchError((_) => <int>[]);
-        final text = String.fromCharCodes(head);
+        var text = utf8.decode(head, allowMalformed: true);
         await response.drain<void>().timeout(probeTimeout).catchError((_) {});
-        if (!text.contains('#EXTM3U')) {
+        if (text.isEmpty) {
+          // 首块没读到（超时/空响应）：无法判定，放行给 mpv
           return _ProbeVerdict.unknown;
+        }
+        if (text.startsWith('\uFEFF')) text = text.substring(1);
+        if (!text.trimLeft().startsWith('#EXTM3U')) {
+          // 声称是 m3u8 的 URL 回了错误页/播放器页：判死，不进缓存
+          return _ProbeVerdict.dead;
         }
         return _ProbeVerdict.alive;
       }
       // 消耗掉 body，复用连接
       await response.drain<void>().timeout(probeTimeout).catchError((_) {});
-      if (status >= 200 && status < 300) return _ProbeVerdict.alive;
+      if (status >= 200 && status < 300) {
+        // 无扩展名直链（如 /play?token=...）只看状态码验不出错误页 200
+        // （B11）：追加 content-type 校验，仅视频/二进制形态算活。
+        // 带视频扩展名的 URL 不做此校验（扩展名已是强信号，避免误杀）。
+        if (!_hasVideoExtension(url)) {
+          final contentType =
+              (response.headers.value(HttpHeaders.contentTypeHeader) ?? '')
+                  .toLowerCase();
+          final looksVideo = contentType.isEmpty ||
+              contentType.startsWith('video/') ||
+              contentType.startsWith('audio/') ||
+              contentType.contains('octet-stream') ||
+              contentType.contains('mpegurl') ||
+              contentType.contains('binary');
+          if (!looksVideo) {
+            return _ProbeVerdict.dead;
+          }
+        }
+        return _ProbeVerdict.alive;
+      }
       if (status == 403 || status == 404 || status == 410) {
         return _ProbeVerdict.dead;
       }
@@ -345,6 +465,16 @@ class HybridVideoSourceService implements IVideoSourceService {
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// 常见视频直链扩展（与 FastVideoSourceResolver 一致）。
+  static final RegExp _videoExtRe = RegExp(
+      r'\.(m3u8|mp4|flv|ts|mkv|mov|webm)(?=$|[?#])',
+      caseSensitive: false);
+
+  bool _hasVideoExtension(String url) {
+    final path = url.split('#').first.split('?').first;
+    return _videoExtRe.hasMatch(path);
   }
 
   bool _isHls(VideoSource source) {

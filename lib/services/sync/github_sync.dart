@@ -449,6 +449,10 @@ class GithubSync {
   /// 上传本地 Hive 盒文件到远端（与 WebDav._updateBox 同语义）。
   Future<void> _updateBox(String boxName) async {
     _requireInitialized();
+    // 先 flush 让 Hive 把内存中的追加完整落盘，缩小与用户写入之间的
+    // 撕裂窗口（盒写入与本读取都在主 isolate，flush 返回后读到的
+    // 是自洽的盒文件）。
+    await _flushBoxBeforeUpload(boxName);
     final directory = await getApplicationSupportDirectory();
     final localFilePath = '${directory.path}/hive/$boxName.hive';
     final localFile = File(localFilePath);
@@ -456,11 +460,40 @@ class GithubSync {
       MiruLogger().w('GithubSync: local box file $boxName.hive missing, skip');
       return;
     }
+    final List<int> bytes;
+    try {
+      bytes = await localFile.readAsBytes();
+    } catch (e, stackTrace) {
+      // 活文件读取失败（与用户写入竞争被撕裂/被系统清理等）：
+      // 跳过本轮上传而非让整个同步崩溃——远端仍是上一次的完整快照，
+      // 下一轮同步会自然重试。
+      MiruLogger().w(
+        'GithubSync: failed to read live box file $boxName.hive, '
+        'skip this round',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return;
+    }
     await _putFile(
       path: '$_dataRoot/$boxName.tmp',
       message: 'miru: $boxName backup',
-      bytes: await localFile.readAsBytes(),
+      bytes: bytes,
     );
+  }
+
+  /// 上传前尽力把对应 Hive 盒的内存写入 flush 到磁盘。
+  Future<void> _flushBoxBeforeUpload(String boxName) async {
+    try {
+      if (boxName == 'collectibles') {
+        await GStorage.collectibles.flush();
+      } else if (boxName == 'collectchanges') {
+        await GStorage.collectChanges.flush();
+      }
+    } catch (e) {
+      // flush 失败不阻塞上传：文件里已有的内容是最后一次成功落盘的状态。
+      MiruLogger().w('GithubSync: flush box $boxName failed', error: e);
+    }
   }
 
   // ---------------------------------------------------------------------------

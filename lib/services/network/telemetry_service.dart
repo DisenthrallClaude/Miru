@@ -38,11 +38,25 @@ class TelemetryService {
       }
       await GStorage.putSetting(SettingsKeys.lastPingDay, today);
 
-      final base = ApiEndpoints.cloudResolverOfficialEndpoint
+      // 心跳跟随端点配置（B13）：用户配了自建 Worker 时打到自建端点
+      // （否则自建端点的活跃统计永远失真，其动态配额算不准）；
+      // 多端点取第一个（与解析请求的优先级一致）。
+      final custom = GStorage.getSetting(SettingsKeys.cloudResolverUrl);
+      final source = custom.trim().isEmpty
+          ? ApiEndpoints.cloudResolverOfficialEndpoint
+          : custom.trim();
+      var base = source
+          .split(RegExp(r'[,\s]+'))
+          .first
+          .trim()
+          .replaceAll(RegExp(r'/resolve$'), '')
           .replaceAll(RegExp(r'/+$'), '');
+      if (!base.startsWith('http://') && !base.startsWith('https://')) {
+        base = 'https://$base';
+      }
       final uid = CloudVideoSourceResolver.instance.uid;
       await _requestPing('$base/ping?uid=$uid');
-      MiruLogger().d('Telemetry: daily ping sent');
+      MiruLogger().d('Telemetry: daily ping sent to $base');
     } catch (e) {
       // 心跳失败完全无所谓（明天再试）
       MiruLogger().d('Telemetry: daily ping failed', error: e);

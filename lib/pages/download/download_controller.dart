@@ -8,6 +8,7 @@ import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/repositories/download_repository.dart';
 import 'package:miru/services/download/background_download_service.dart';
 import 'package:miru/services/download/download_manager.dart';
+import 'package:miru/services/plugin/plugin_cookie_manager.dart';
 import 'package:miru/utils/format.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -40,6 +41,11 @@ abstract class _DownloadController with Store {
 
   final List<_ResolveRequest> _resolveQueue = [];
   final Map<String, VideoSourceResolverLease> _activeResolveLeases = {};
+
+  /// 每个在途解析任务持有的 HybridVideoSourceService（内含独立
+  /// WebView），用于取消时能真正中断 hybrid 的嗅探，而不是只取消
+  /// 池化 worker（worker 的 WebView 并不参与漏斗解析）。
+  final Map<String, HybridVideoSourceService> _activeHybridResolvers = {};
   bool _isBackgroundServiceInitialized = false;
 
   Future<void> init() async {
@@ -150,6 +156,16 @@ abstract class _DownloadController with Store {
         episode.status == DownloadStatus.paused;
     if (isFinalState) {
       _speeds.remove(key);
+      if (episode.status == DownloadStatus.failed &&
+          episode.episodePageUrl.isNotEmpty) {
+        // 下载失败时失效该集的解析缓存：坏直链在缓存 TTL 内会反复
+        // 喂给重试与播放（「重试必失败」循环），失效后自动重新解析。
+        final plugin = _findPlugin(record.pluginName);
+        if (plugin != null) {
+          unawaited(ResolutionResultCache.instance
+              .invalidate(plugin.buildFullUrl(episode.episodePageUrl)));
+        }
+      }
     } else {
       _speeds[key] = speed;
     }
@@ -571,34 +587,73 @@ abstract class _DownloadController with Store {
       MiruLogger().i(
           'DownloadController: resolving video URL for episode ${request.episodeNumber} from $fullUrl');
 
+      // 与播放链路同走 HybridVideoSourceService 五级漏斗：
+      // 解析缓存 → 本地快解 → 云端解析 → WebView 嗅探兜底。
+      // 各级成功都会回写 ResolutionResultCache，「边看边下」共享同一份
+      // 解析成果，慢规则站点批量下载不再每集都顶满嗅探时长。
+      // 每个在途任务持有独立 hybrid 实例（内含独立 WebView），
+      // 并发语义与池化 worker 一致，取消经 [_activeHybridResolvers]。
+      final hybrid = HybridVideoSourceService();
+      _activeHybridResolvers[key] = hybrid;
+
+      // 播放请求头：会话 UA + 插件 Referer + 验证类 Cookie，
+      // 与 WebView 解析 / mpv 播放同一指纹，避免「能播不能下」。
+      final playbackHeaders = await _buildPlaybackHeaders(plugin, fullUrl);
+
+      // 解析超时与播放侧共用同一设置（默认 20 秒，范围 5-120）。
+      final timeoutSeconds =
+          GStorage.getSetting(SettingsKeys.parseTimeout).clamp(5, 120).toInt();
+      final timeout = Duration(seconds: timeoutSeconds);
+
       String? m3u8Url;
+      var resolvedPlaybackHeaders = const <String, String>{};
       try {
         if (lease.isCancelled) {
           throw const VideoSourceCancelledException();
         }
-        final source = await lease.resolve(
-          fullUrl,
-          useLegacyParser: plugin.useLegacyParser,
-          timeout: const Duration(seconds: 30),
-        );
-        m3u8Url = source.url;
+        VideoSource source;
+        try {
+          source = await hybrid.resolveWithHeaders(
+            fullUrl,
+            useLegacyParser: plugin.useLegacyParser,
+            timeout: timeout,
+            playbackHeaders: playbackHeaders,
+          );
+        } on VideoSourceTimeoutException {
+          if (lease.isCancelled) rethrow;
+          // 超时自动换解析器重试一次（与播放链路一致）；快解/云端
+          // 刚失败过会被 hybrid 的短窗失败记忆跳过，重试直接落到
+          // WebView 层的解析器翻转，不重烧已失败层级的时间。
+          source = await hybrid.resolveWithHeaders(
+            fullUrl,
+            useLegacyParser: !plugin.useLegacyParser,
+            timeout: timeout,
+            playbackHeaders: playbackHeaders,
+          );
+        }
+        // 用直链而非本地代理地址：下载要拿的是源站内容本身。
+        m3u8Url = source.directUrl;
+        resolvedPlaybackHeaders = source.playbackHeaders;
       } on VideoSourceTimeoutException {
         if (lease.isCancelled) {
           wasCancelled = true;
         } else {
-          MiruLogger().w('DownloadController: WebView resolution timed out');
+          MiruLogger().w('DownloadController: video resolution timed out');
         }
       } on VideoSourceCancelledException {
         wasCancelled = true;
-        MiruLogger().i('DownloadController: WebView resolution cancelled');
+        MiruLogger().i('DownloadController: video resolution cancelled');
       } catch (e) {
         if (lease.isCancelled) {
           wasCancelled = true;
         } else {
           lease.retire();
           MiruLogger()
-              .e('DownloadController: WebView resolution failed', error: e);
+              .e('DownloadController: video resolution failed', error: e);
         }
+      } finally {
+        _activeHybridResolvers.remove(key);
+        unawaited(hybrid.dispose());
       }
 
       if (wasCancelled || lease.isCancelled) {
@@ -628,7 +683,13 @@ abstract class _DownloadController with Store {
 
       await _startBackgroundServiceIfNeeded();
 
-      final httpHeaders = plugin.buildHttpHeaders();
+      // 解析层确认的源站头（防盗链 referer / UA / Cookie）合并进下载
+      // 请求：插件声明的头优先，解析层补齐缺失项——与播放链路的
+      // 合并顺序一致，否则「探测可达但下载 403」。
+      final httpHeaders = <String, String>{
+        ...resolvedPlaybackHeaders,
+        ...playbackHeaders,
+      };
       bool adBlockerEnabled =
           _repository.getForceAdBlocker() || plugin.adBlocker;
 
@@ -665,6 +726,58 @@ abstract class _DownloadController with Store {
     _processResolveQueue();
   }
 
+  /// 构造与播放链路同源的解析/下载请求头：会话级 UA（与 WebView
+  /// 解析、mpv 播放同一指纹）+ 插件 Referer + 验证类 Cookie。
+  /// 下载不经过 WebView，验证页下发的 clearance/token 类 Cookie
+  /// 必须显式透传，否则「浏览器能播、下载必 403」。
+  Future<Map<String, String>> _buildPlaybackHeaders(
+      Plugin plugin, String fullUrl) async {
+    var cookieHeader = '';
+    try {
+      final uri = Uri.tryParse(fullUrl);
+      if (uri != null && uri.host.isNotEmpty) {
+        final cookies = await PluginCookieManager.instance
+            .loadForRequest(plugin.name, uri);
+        cookieHeader = cookies
+            .map((cookie) => '${cookie.name}=${cookie.value}')
+            .join('; ');
+      }
+    } catch (e) {
+      // Cookie 读取失败不阻塞解析，仅记录
+      MiruLogger().d(
+          'DownloadController: load cookies for ${plugin.name} failed',
+          error: e);
+    }
+    return {
+      ...plugin.buildHttpHeaders(),
+      if (cookieHeader.isNotEmpty) 'cookie': cookieHeader,
+    };
+  }
+
+  /// 重下/插队（已有解析 URL）时的下载请求头：解析缓存中记录的
+  /// 源站头 + 插件声明 + 会话 Cookie，与首次下载保持同一套头。
+  Future<Map<String, String>> _downloadHttpHeadersFor(
+      Plugin plugin, DownloadEpisode episode) async {
+    final fullUrl = episode.episodePageUrl.isEmpty
+        ? ''
+        : plugin.buildFullUrl(episode.episodePageUrl);
+    var resolved = const <String, String>{};
+    if (fullUrl.isNotEmpty) {
+      try {
+        final cached = await ResolutionResultCache.instance.get(fullUrl);
+        if (cached != null) {
+          resolved = cached.playbackHeaders;
+        }
+      } catch (_) {
+        // 缓存读取失败按无缓存处理
+      }
+    }
+    return {
+      ...resolved,
+      ...await _buildPlaybackHeaders(plugin, fullUrl),
+    };
+  }
+
   String _resolveTaskKey(String recordKey, int episodeNumber) =>
       '${recordKey.length}:$recordKey:$episodeNumber';
 
@@ -676,6 +789,7 @@ abstract class _DownloadController with Store {
     _resolveQueue.removeWhere(
         (r) => r.recordKey == recordKey && r.episodeNumber == episodeNumber);
     _activeResolveLeases.remove(key)?.cancel();
+    _activeHybridResolvers.remove(key)?.cancel();
     _resolverPool.cancel(key);
   }
 
@@ -686,6 +800,7 @@ abstract class _DownloadController with Store {
         .toList();
     for (final key in activeKeys) {
       _activeResolveLeases.remove(key)?.cancel();
+      _activeHybridResolvers.remove(key)?.cancel();
       _resolverPool.cancel(key);
     }
   }
@@ -695,7 +810,11 @@ abstract class _DownloadController with Store {
     for (final lease in _activeResolveLeases.values.toList()) {
       lease.cancel();
     }
+    for (final hybrid in _activeHybridResolvers.values.toList()) {
+      hybrid.cancel();
+    }
     _activeResolveLeases.clear();
+    _activeHybridResolvers.clear();
     _resolverPool.cancelAll();
   }
 
@@ -841,7 +960,7 @@ abstract class _DownloadController with Store {
 
       await _startBackgroundServiceIfNeeded();
 
-      final httpHeaders = plugin.buildHttpHeaders();
+      final httpHeaders = await _downloadHttpHeadersFor(plugin, episode);
       bool adBlockerEnabled =
           _repository.getForceAdBlocker() || plugin.adBlocker;
 
@@ -959,7 +1078,7 @@ abstract class _DownloadController with Store {
 
       await _startBackgroundServiceIfNeeded();
 
-      final httpHeaders = plugin.buildHttpHeaders();
+      final httpHeaders = await _downloadHttpHeadersFor(plugin, episode);
       bool adBlockerEnabled =
           _repository.getForceAdBlocker() || plugin.adBlocker;
 

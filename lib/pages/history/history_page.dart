@@ -5,6 +5,7 @@ import 'package:miru/bean/card/bangumi_history_card.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/constants.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -56,9 +57,7 @@ class _HistoryPageState extends State<HistoryPage> {
             TextButton(
               onPressed: () {
                 MiruDialog.dismiss();
-                try {
-                  historyController.clearAll();
-                } catch (_) {}
+                _clearAllHistories();
               },
               child: const Text('确认'),
             ),
@@ -66,6 +65,18 @@ class _HistoryPageState extends State<HistoryPage> {
         );
       },
     );
+  }
+
+  /// clearAll 是 async：之前用同步 try/catch 包裹，
+  /// 异步错误根本捕不到（未 await 就逃逸成未处理异常）。
+  Future<void> _clearAllHistories() async {
+    try {
+      await historyController.clearAll();
+    } catch (e, stackTrace) {
+      MiruLogger()
+          .e('History: clear all histories failed', error: e, stackTrace: stackTrace);
+      MiruDialog.showToast(message: '清除历史记录失败，请重试');
+    }
   }
 
   @override

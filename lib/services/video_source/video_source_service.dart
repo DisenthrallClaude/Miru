@@ -93,7 +93,8 @@ abstract class IVideoSourceService {
   /// [episodeUrl] 集数页面 URL
   /// [useLegacyParser] 是否使用旧版解析器（iframe 监听）
   /// [offset] 播放偏移量（秒）
-  /// [timeout] 解析超时时间
+  /// [timeout] 解析超时时间（签名默认统一 20s，B7；实际播放路径由
+  ///   video_controller 读 SettingsKeys.parseTimeout 设置后显式传入）
   ///
   /// 返回 [VideoSource] 包含解析后的视频 URL 和元数据
   ///
@@ -105,7 +106,7 @@ abstract class IVideoSourceService {
     String episodeUrl, {
     required bool useLegacyParser,
     int offset = 0,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = const Duration(seconds: 20),
   });
 
   /// 取消当前正在进行的解析

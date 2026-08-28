@@ -254,8 +254,11 @@ class CaptchaVerificationService {
   /// 等待验证后的页面加载完成并返回其 HTML。
   /// 验证消失事件可能早于结果页加载完成，因此短暂轮询；
   /// 超时返回空字符串，由上层回落到重新检索。
+  ///
+  /// 窗口 6s（20×300ms）：慢站的验证结果页需要一次完整导航才能
+  /// 出现，3s 收不上 HTML 就回落重搜会白付一次网络往返加解析。
   Future<String> _waitForPageHtml(CaptchaWebviewController controller) async {
-    const maxAttempts = 10;
+    const maxAttempts = 20;
     const interval = Duration(milliseconds: 300);
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       if (_disposed) return '';

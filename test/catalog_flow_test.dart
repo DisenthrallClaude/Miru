@@ -1,5 +1,11 @@
 // 后端链路复扫: 规则仓库目录拉取 + 单条规则安装 (真实网络)
 // 验证 api_endpoints.dart 指向 KazumiRules 后的完整目录流程无回归。
+//
+// 标记 live: 依赖真实网络与 GitHub 可达性，日常回归用
+// `flutter test --exclude-tags live` 跳过本文件。
+@Tags(['live'])
+library;
+
 import 'dart:io';
 
 import 'package:flutter/services.dart';

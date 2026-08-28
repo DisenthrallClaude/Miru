@@ -17,7 +17,10 @@ class CaptchaWebviewInAppWebviewImpl
     _headlessWebView ??= PlatformHeadlessInAppWebView(
       PlatformHeadlessInAppWebViewCreationParams(
         initialSettings: InAppWebViewSettings(
-          userAgent: getRandomUA(),
+          // 与嗅探 WebView / mpv 播放共用会话 UA：clearance 类 Cookie 与
+          // 签发时的 UA 绑定，验证、规则请求、播放三者的 UA 必须一致，
+          // 否则验证通过后换 UA 请求仍会被判定为不同指纹。
+          userAgent: getSessionUA(),
           mediaPlaybackRequiresUserGesture: true,
           cacheEnabled: true,
           blockNetworkImage: false,
@@ -255,6 +258,23 @@ if (!_checkForCaptcha()) {
     );
   }
 
+  /// 仅清除目标站点在 WebView Cookie 仓中的 Cookie。
+  ///
+  /// 原先的 deleteAllCookies() 是进程级清空——Android 的 WebView
+  /// CookieManager 是全局单例，会把嗅探 WebView 里其他站点（含其他
+  /// 插件）的会话 Cookie 一并清掉，验证刚拿到的 clearance 也会在
+  /// dispose 时被连带蒸发。改为按站点精确删除。
+  Future<void> _clearSiteCookies(String url) async {
+    try {
+      final uri = Uri.tryParse(url);
+      if (uri == null || uri.host.isEmpty) return;
+      await PlatformCookieManager(const PlatformCookieManagerCreationParams())
+          .deleteCookies(url: WebUri('${uri.scheme}://${uri.host}/'));
+      logEventController
+          .add('[Captcha WebView] Site cookies cleared: ${uri.host}');
+    } catch (_) {}
+  }
+
   @override
   Future<void> loadPage(String url, String captchaXpath,
       {String? inputXpath}) async {
@@ -264,11 +284,7 @@ if (!_checkForCaptcha()) {
     buttonWasClicked = false;
     _registerHandlers();
     await _addCaptchaUserScript();
-    try {
-      await PlatformCookieManager(const PlatformCookieManagerCreationParams())
-          .deleteAllCookies();
-      logEventController.add('[Captcha WebView] Cookies cleared before load');
-    } catch (_) {}
+    await _clearSiteCookies(url);
     await webviewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
@@ -280,11 +296,7 @@ if (!_checkForCaptcha()) {
     buttonWasClicked = false;
     _registerHandlers();
     await _addButtonClickUserScript(buttonXpath);
-    try {
-      await PlatformCookieManager(const PlatformCookieManagerCreationParams())
-          .deleteAllCookies();
-      logEventController.add('[Captcha WebView] Cookies cleared before load');
-    } catch (_) {}
+    await _clearSiteCookies(url);
     await webviewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
@@ -296,11 +308,7 @@ if (!_checkForCaptcha()) {
     buttonWasClicked = false;
     _registerHandlers();
     await _addCustomScriptUserScript(script);
-    try {
-      await PlatformCookieManager(const PlatformCookieManagerCreationParams())
-          .deleteAllCookies();
-      logEventController.add('[Captcha WebView] Cookies cleared before load');
-    } catch (_) {}
+    await _clearSiteCookies(url);
     await webviewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
@@ -515,10 +523,8 @@ if (!_checkAndClick()) {
     captchaWasFound = false;
     buttonWasClicked = false;
     _handlersRegistered = false;
-    try {
-      PlatformCookieManager(const PlatformCookieManagerCreationParams())
-          .deleteAllCookies();
-    } catch (_) {}
+    // 不再全局清 Cookie：验证得到的 Cookie 是后续规则请求与嗅探 WebView
+    // 的通行证，dispose 时清空会让本次验证白做。
     try {
       captchaImageFoundController.close();
       captchaDisappearedController.close();

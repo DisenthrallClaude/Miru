@@ -41,8 +41,16 @@ class AnimeSeason {
     }
 
     var start = DateTime(year, startMonth, 1);
-    return [start.toString(), end.toString()];
+    // 输出必须是 yyyy-MM-dd 纯日期（F12）：该串作为 air_date 过滤值
+    // 下发后按字符串字典序比较，带 " 00:00:00.000" 的
+    // DateTime.toString() 会让 start 当日条目被排除、end 当日条目被误含。
+    return [_formatDate(start), _formatDate(end)];
   }
+
+  String _formatDate(DateTime dt) =>
+      '${dt.year.toString().padLeft(4, '0')}-'
+      '${dt.month.toString().padLeft(2, '0')}-'
+      '${dt.day.toString().padLeft(2, '0')}';
 
   @override
   String toString() {
@@ -60,5 +68,9 @@ String getSeasonStringByMonth(int month) {
 }
 
 bool isSameSeason(DateTime d1, DateTime d2) {
-  return d1.year == d2.year && (d1.month - d2.month).abs() <= 2;
+  // 与季度选项卡同一套日历季度划分（冬=1-3 月、春=4-6、夏=7-9、
+  // 秋=10-12，见 timeline_page.generateDateTime）。原先的
+  // 「月份差绝对值 ≤2」会把 2 月与 4 月（冬/春）误判同季（F20）。
+  return d1.year == d2.year &&
+      ((d1.month - 1) ~/ 3) == ((d2.month - 1) ~/ 3);
 }

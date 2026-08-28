@@ -47,6 +47,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late int playerArrowKeySkipTime;
   late int playerLogLevel;
   late int playerControllerLayerDisappearTime;
+  late int parseTimeout;
   late bool cloudResolverEnable;
   late bool localMediaCacheEnable;
   late String cloudResolverUrl;
@@ -113,6 +114,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
 
     playerControllerLayerDisappearTime = GStorage.getSetting<int>(
         SettingsKeys.playerControllerLayerDisappearTime);
+    parseTimeout = GStorage.getSetting<int>(SettingsKeys.parseTimeout);
   }
 
   Future<void> resetPlayerSettings() async {
@@ -556,6 +558,26 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                       : '解析搬到边缘节点，多端点并发竞速'),
                   initialValue: cloudResolverEnable,
                 ),
+                SettingsSliderTile(
+                  leading: Icons.timer_outlined,
+                  title: Text('解析超时'),
+                  description: Text(
+                      '解析视频源的等待上限，超时后自动换解析器重试一次；播放与下载共用'),
+                  value: parseTimeout.toDouble(),
+                  min: 5,
+                  max: 120,
+                  divisions: 23,
+                  valueLabel: '$parseTimeout 秒',
+                  onChanged: (value) {
+                    final newParseTimeout = value.toInt();
+                    if (newParseTimeout == parseTimeout) return;
+                    GStorage.putSetting<int>(
+                        SettingsKeys.parseTimeout, newParseTimeout);
+                    setState(() {
+                      parseTimeout = newParseTimeout;
+                    });
+                  },
+                ),
                 SettingsTile(
                   leading: Icons.link_rounded,
                   onPressed: (_) async {
@@ -602,7 +624,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     setState(() {});
                   },
                   title: Text('错误提示'),
-                  description: Text('显示播放器内部错误提示'),
+                  description: Text(
+                      '仅控制播放器错误提示的显示；自动恢复与换源重试不受影响'),
                   initialValue: showPlayerError,
                 ),
                 SettingsTile.switchTile(

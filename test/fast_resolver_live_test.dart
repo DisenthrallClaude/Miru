@@ -1,3 +1,6 @@
+@Tags(['live'])
+library;
+
 // 真实网络集成验证（手动跑：flutter test test/fast_resolver_live_test.dart）
 // 覆盖 v1.5.2 核心场景：静态可解析站直出直链、第三方解析器/JS 站正确降级。
 import 'dart:io';

@@ -16,6 +16,18 @@ class AudioController {
   Future<void>? _initFuture;
   String? _lastMediaItemCacheKey;
   AudioSession? _audioSession;
+
+  // ---------------- 播放状态广播去重（v1.5.3） ----------------
+  // 1Hz 状态泵每秒全量重建 PlaybackState；而系统通知栏按
+  // updatePosition + speed 自行外推进度，播放中的位置变化无需广播。
+  // 仅在语义变化（播放态/处理态/倍速/队列/曲目）、位置跳变（seek）
+  // 或距上次广播超过 30s 兜底时才真正下发，省掉常态化的每秒平台
+  // 通道开销。
+  String? _lastPlaybackStateSignature;
+  DateTime _lastPlaybackStateAt =
+      DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _lastPlaybackPosition = Duration.zero;
+
   StreamSubscription<AudioInterruptionEvent>? _interruptionSubscription;
   StreamSubscription<void>? _becomingNoisySubscription;
   AudioCallback? _onPlay;
@@ -250,6 +262,34 @@ class AudioController {
             ? duration
             : bufferedPosition;
 
+    // 广播去重：语义签名变化、位置跳变（seek 后与外推位置偏差超 2s）
+    // 或超过 30s 兜底刷新时才真正下发 PlaybackState。
+    final signature = [
+      mediaId,
+      playing,
+      processingState.index,
+      speed,
+      queueIndex ?? -1,
+      canSkipToNext,
+      canSkipToPrevious,
+      normalizedPosition <= Duration.zero,
+    ].join('|');
+    final now = DateTime.now();
+    final elapsedSinceBroadcast = now.difference(_lastPlaybackStateAt);
+    final extrapolated = playing
+        ? _lastPlaybackPosition + elapsedSinceBroadcast * speed
+        : _lastPlaybackPosition;
+    final positionJump =
+        (normalizedPosition - extrapolated).abs() > const Duration(seconds: 2);
+    if (signature == _lastPlaybackStateSignature &&
+        !positionJump &&
+        elapsedSinceBroadcast < const Duration(seconds: 30)) {
+      return;
+    }
+    _lastPlaybackStateSignature = signature;
+    _lastPlaybackStateAt = now;
+    _lastPlaybackPosition = normalizedPosition;
+
     handler.updatePlaybackState(
       PlaybackState(
         controls: controls,
@@ -289,6 +329,7 @@ class AudioController {
     if (deactivation.isStale) return;
     _lastMediaItemCacheKey = null;
     _lastAudioSessionActive = null;
+    _lastPlaybackStateSignature = null;
     await _setAudioSessionActive(false);
     if (deactivation.isStale) return;
     _handler?.updatePlaybackState(

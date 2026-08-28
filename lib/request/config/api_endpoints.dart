@@ -31,7 +31,11 @@ class ApiEndpoints {
   static const String pluginShopMirror =
       'https://fastly.jsdelivr.net/gh/Predidit/KazumiRules@main/';
 
-  /// 在线升级（Miru 自己的 GitHub Releases）
+  /// 在线升级（Miru 自己的 GitHub Releases）。
+  ///
+  /// 安全约定（G6）：更新元数据（含 sha256 digest）优先从本直连地址
+  /// 获取，[latestAppMirror] 仅作直连失败后的兜底——避免第三方反代
+  /// 同时把持元数据与安装包构成劫持链。
   static const String latestApp =
       'https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
@@ -62,6 +66,11 @@ class ApiEndpoints {
   /// GitHub API 在国内直连经常被重置；gh-proxy 是社区公共反代，
   /// 可免代理拉到同一份 Releases 数据（实测可用）。
   /// 上游的 `api.miru.fyi` 需要 KAZUMI_APPID/KEY 签名，自建包无法使用。
+  ///
+  /// 仅作直连 [latestApp] 失败后的兜底（G6）：元数据（含 digest）
+  /// 优先取自 api.github.com 直连；安装包经镜像下载后仍按 digest
+  /// 严格校验（auto_updater 对每个下载源都做哈希验证，元数据与
+  /// 安装包可来自不同源）。
   static const String latestAppMirror =
       'https://gh-proxy.com/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
@@ -81,7 +90,11 @@ class ApiEndpoints {
   /// bangumi API
   static const String bangumiAPIDomain = 'https://api.bgm.tv';
 
-  /// Bangumi 鉴权 API
+  /// Bangumi 鉴权 API（历史遗留的第三方镜像域名，**已停用**）。
+  ///
+  /// v1.5.3 起鉴权请求（含收藏写操作 POST）一律走官方 [bangumiAPIDomain]：
+  /// Bearer Token 绝不发给第三方域名——镜像一旦作恶/被入侵即可操作
+  /// 用户 Bangumi 收藏。保留常量仅供历史兼容参考，勿再使用。
   static const String bangumiAuthAPIMirrorDomain = 'https://api.bgmapi.com';
 
   /// 社区讨论区（GitHub Discussions，与上游 Telegram 群无关）

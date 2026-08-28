@@ -7,8 +7,10 @@ import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/request/config/api_endpoints.dart';
-import 'package:miru/utils/dandan_credentials.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
+import 'package:miru/services/video_source/services.dart';
+import 'package:miru/utils/dandan_credentials.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:miru/utils/device.dart';
@@ -98,7 +100,19 @@ class _AboutPageState extends State<AboutPage> {
 
   Future<void> _clearCache() async {
     final Directory libCacheDir = await _getCacheDir();
-    await libCacheDir.delete(recursive: true);
+    // 封面图片缓存可能从未生成（首次使用即点清除），删除前先确认存在，
+    // 否则未 await 的异步异常会逸出到全局错误处理。
+    if (await libCacheDir.exists()) {
+      await libCacheDir.delete(recursive: true);
+    }
+    // 播放加速缓存（解析结果 + 已预取的视频开头数据）一并清理；
+    // 两者的常规入口在「播放设置 → 清除播放加速缓存」。
+    try {
+      await LocalMediaProxy.instance.clearAll();
+      await ResolutionResultCache.instance.clear();
+    } catch (e) {
+      MiruLogger().w('AboutPage: clear playback cache failed', error: e);
+    }
     _getCacheSize();
   }
 
@@ -165,7 +179,8 @@ class _AboutPageState extends State<AboutPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('缓存管理'),
-          content: const Text('缓存为番剧封面, 清除后加载时需要重新下载,确认要清除缓存吗?'),
+          content: const Text(
+              '将清除封面图片缓存与播放加速缓存（解析结果、预取的视频开头数据），清除后相关内容需要重新下载。确认清除吗？'),
           actions: [
             TextButton(
               onPressed: () {
@@ -179,7 +194,7 @@ class _AboutPageState extends State<AboutPage> {
             TextButton(
               onPressed: () async {
                 try {
-                  _clearCache();
+                  await _clearCache();
                 } catch (_) {}
                 MiruDialog.dismiss();
               },
@@ -400,6 +415,7 @@ class _AboutPageState extends State<AboutPage> {
                     _showCacheDialog();
                   },
                   title: Text('清除缓存'),
+                  description: Text('封面图片缓存大小；确认清除时将一并清理播放加速缓存'),
                   value: _cacheSizeMB == -1
                       ? Text('统计中...')
                       : Text('${_cacheSizeMB.toStringAsFixed(2)}MB'),

@@ -222,6 +222,37 @@ class _OnboardingPageState extends State<OnboardingPage> {
     context.navigate(GStorage.getSetting(SettingsKeys.defaultStartupPage));
   }
 
+  /// 退出前弹确认：exit(0) 是不可逆动作，误触不应直接杀进程。
+  void _confirmExit() {
+    MiruDialog.show(
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('退出应用'),
+          content: const Text('尚未完成初始设置，确定要退出吗？'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                MiruDialog.dismiss();
+              },
+              child: Text(
+                '继续设置',
+                style:
+                    TextStyle(color: Theme.of(context).colorScheme.outline),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                MiruDialog.dismiss();
+                exit(0);
+              },
+              child: const Text('退出'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildBottomBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return SafeArea(
@@ -232,7 +263,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
           children: [
             if (currentIndex == 0)
               TextButton(
-                onPressed: () => exit(0),
+                onPressed: _confirmExit,
                 child: Text(
                   '退出',
                   style: TextStyle(color: colorScheme.outline),

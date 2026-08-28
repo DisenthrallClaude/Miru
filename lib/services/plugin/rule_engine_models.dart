@@ -104,8 +104,9 @@ class PreparedRuleRequest {
   final String bodyType;
   final Object? body;
 
-  /// Whether stored plugin cookies are attached to the request. Historically
-  /// only search and API requests send cookies; XPath chapter requests do not.
+  /// Whether stored plugin cookies are attached to the request. Search,
+  /// chapter and API requests all send cookies so a completed captcha
+  /// verification carries over to every subsequent request of the rule.
   final bool includeCookies;
 }
 

@@ -1,6 +1,7 @@
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/request/clients/bangumi_client.dart';
+import 'package:miru/request/core/network_error_mapper.dart';
 import 'package:miru/request/core/network_exception.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/modules/bangumi/bangumi_relation.dart';
@@ -285,8 +286,13 @@ class BangumiApi {
         rawCount: jsonList.length,
       );
     } catch (e) {
-      MiruLogger().e('Network: unknown search problem', error: e);
-      return null;
+      MiruLogger().e('Network: bangumi search failed', error: e);
+      // 契约（FIX-D 依赖）：网络失败必须抛出异常而不是吞成 null——
+      // 搜索页靠异常/非空双契约区分「网络错误」与「无结果」，
+      // 否则网络故障会被渲染成空列表。网络层异常原样上抛，
+      // 响应结构异常归入解析错误，仍走同一异常体系。
+      if (e is NetworkException) rethrow;
+      throw NetworkErrorMapper.parse(e, StackTrace.current);
     }
   }
 
@@ -501,7 +507,7 @@ class BangumiApi {
     try {
       final jsonData = await _client.get(
         ApiEndpoints.formatUrl(
-            ApiEndpoints.bangumiAuthAPIMirrorDomain +
+            ApiEndpoints.bangumiAPIDomain +
                 ApiEndpoints.bangumiUsernameByToken,
             []),
         requiresAuth: true,
@@ -560,7 +566,7 @@ class BangumiApi {
           dynamic jsonData;
           try {
             final url = ApiEndpoints.formatUrl(
-                ApiEndpoints.bangumiAuthAPIMirrorDomain +
+                ApiEndpoints.bangumiAPIDomain +
                     ApiEndpoints.bangumiGetCollection,
                 [resolvedUsername, limit, offset, collectionType.value]);
             jsonData = await _client.get(
@@ -628,7 +634,7 @@ class BangumiApi {
     try {
       await _client.post(
         ApiEndpoints.formatUrl(
-            ApiEndpoints.bangumiAuthAPIMirrorDomain +
+            ApiEndpoints.bangumiAPIDomain +
                 ApiEndpoints.bangumiSetCollection,
             [id]),
         data: data,

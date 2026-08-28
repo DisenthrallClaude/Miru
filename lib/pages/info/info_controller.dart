@@ -212,7 +212,9 @@ abstract class _InfoController with Store {
         return valueA.compareTo(valueB);
       });
     } catch (e) {
-      MiruDialog.showToast(message: '$e');
+      // 排序失败不影响展示（保留原顺序），不把原始异常直接抛给用户
+      MiruLogger().w('InfoController: sort characters failed', error: e);
+      MiruDialog.showToast(message: '角色列表排序失败，已按默认顺序展示');
     }
     MiruLogger().i(
         'InfoController: loaded character list length ${characterList.length}');

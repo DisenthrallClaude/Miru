@@ -5,6 +5,12 @@
 //
 // 与 app 完全同栈: Dart html parser + xpath_selector + dio,
 // 结论可直接作为「内置规则去留」的依据。
+//
+// 标记 live: 依赖真实网络且耗时数分钟，日常回归用
+// `flutter test --exclude-tags live` 跳过本文件。
+@Tags(['live'])
+library;
+
 import 'dart:convert';
 import 'dart:io';
 

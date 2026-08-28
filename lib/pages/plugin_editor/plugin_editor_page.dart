@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:html/parser.dart';
 import 'package:miru/plugins/plugins.dart';
 import 'package:miru/plugins/api_rule_config.dart';
 import 'package:miru/plugins/anti_crawler_config.dart';
@@ -11,6 +12,7 @@ import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/pages/plugin_editor/editor_form_widgets.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/plugin/api_rule_engine.dart';
+import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 
 abstract final class _RuleEditorText {
   static const pageTitle = '规则编辑器';
@@ -893,6 +895,7 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   }
 
   Plugin _buildEditedPlugin() {
+    _validateActiveXPathFields();
     final searchConfig = _buildSearchApiConfig();
     final chapterConfig = _buildChapterApiConfig();
     return Plugin(
@@ -932,6 +935,34 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
         captchaScript: captchaScriptController.text,
       ),
     );
+  }
+
+  /// 保存前对激活模式的 XPath 字段做校验（与运行时同一套
+  /// xpath_selector 解析器）：空字段或语法错误当场拦下，
+  /// 避免坏规则入库后到运行期才炸出类型化异常。
+  void _validateActiveXPathFields() {
+    final probe = parse('<html><body></body></html>').documentElement!;
+    void validate(String label, String expression) {
+      final value = expression.trim();
+      if (value.isEmpty) {
+        throw FormatException('$label不能为空');
+      }
+      try {
+        probe.queryXPath(value);
+      } catch (error) {
+        throw FormatException('$label语法无效：$value（$error）');
+      }
+    }
+
+    if (searchMode == RuleMode.xpath) {
+      validate(_RuleEditorText.searchListXPath, searchListController.text);
+      validate(_RuleEditorText.itemNameXPath, searchNameController.text);
+      validate(_RuleEditorText.itemLinkXPath, searchResultController.text);
+    }
+    if (chapterMode == RuleMode.xpath) {
+      validate(_RuleEditorText.roadListXPath, chapterRoadsController.text);
+      validate(_RuleEditorText.episodeListXPath, chapterResultController.text);
+    }
   }
 
   ApiSearchConfig _buildSearchApiConfig() {

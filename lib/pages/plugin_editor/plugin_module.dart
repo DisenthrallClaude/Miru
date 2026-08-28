@@ -30,7 +30,10 @@ final pluginModule = createModule(
           if (plugin is! Plugin) {
             return const RouteErrorPage(message: '规则测试参数无效，请返回后重试。');
           }
-          return PluginTestPage(plugin: plugin);
+          return PluginTestPage(
+            plugin: plugin,
+            controller: inject<PluginsController>(),
+          );
         },
       )
       ..route(

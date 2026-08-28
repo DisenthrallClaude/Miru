@@ -811,8 +811,7 @@ class _TimelinePageState extends State<TimelinePage>
                         cardHeight: cardHeight,
                         showRating: showRating);
                   },
-                  childCount:
-                      filteredList.isNotEmpty ? filteredList.length : 10,
+                  childCount: filteredList.length,
                 ),
               ),
             ),

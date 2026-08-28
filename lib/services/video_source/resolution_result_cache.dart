@@ -66,6 +66,8 @@ class ResolutionResultCache {
   }
 
   /// 查询未过期的解析结果。命中会顺带刷新 LRU 时间戳。
+  /// 负缓存条目（解析失败标记）不是可用的解析结果，返回 null——
+  /// 查询负标记请用 [isNegative]。
   Future<VideoSource?> get(String episodeUrl) async {
     await _ensureLoaded();
     final entry = _entries[episodeUrl];
@@ -76,6 +78,7 @@ class ResolutionResultCache {
       _scheduleFlush();
       return null;
     }
+    if (entry.isNegative) return null;
     entry.lastUsedAt = now;
     _scheduleFlush();
     return entry.toVideoSource();
@@ -112,6 +115,9 @@ class ResolutionResultCache {
       offset: source.offset,
       format: source.format,
       negative: false,
+      // B10：解析层确认的播放头（防盗链 referer）一并持久化，
+      // 二刷/换集回看/预解析后的播放走缓存时不再丢 referer。
+      playbackHeaders: Map.of(source.playbackHeaders),
       cachedAt: DateTime.now(),
       lastUsedAt: DateTime.now(),
     );
@@ -130,6 +136,7 @@ class ResolutionResultCache {
       offset: 0,
       format: VideoSourceFormat.auto,
       negative: true,
+      playbackHeaders: const {},
       cachedAt: DateTime.now(),
       lastUsedAt: DateTime.now(),
     );
@@ -198,6 +205,7 @@ class _CacheEntry {
     required this.offset,
     required this.format,
     required this.negative,
+    this.playbackHeaders = const {},
     required this.cachedAt,
     required this.lastUsedAt,
   });
@@ -207,6 +215,11 @@ class _CacheEntry {
   final int offset;
   final VideoSourceFormat format;
   final bool negative;
+
+  /// 解析层确认的播放请求头（v1.5.2 新增持久化，B10）。
+  /// 旧缓存文件没有这个字段时反序列化为空表（向后兼容）。
+  final Map<String, String> playbackHeaders;
+
   final DateTime cachedAt;
   DateTime lastUsedAt;
 
@@ -224,6 +237,7 @@ class _CacheEntry {
       offset: offset,
       type: VideoSourceType.online,
       format: format,
+      playbackHeaders: playbackHeaders,
     );
   }
 
@@ -232,6 +246,8 @@ class _CacheEntry {
         'o': offset,
         'f': format.name,
         'n': negative ? 1 : 0,
+        // 仅非空时写入，旧条目体积不变
+        if (playbackHeaders.isNotEmpty) 'p': playbackHeaders,
         'c': cachedAt.millisecondsSinceEpoch,
         'u': lastUsedAt.millisecondsSinceEpoch,
       };
@@ -248,10 +264,19 @@ class _CacheEntry {
         orElse: () => VideoSourceFormat.auto,
       ),
       negative: (json['n'] as num?)?.toInt() == 1,
+      playbackHeaders: _stringMap(json['p']),
       cachedAt: DateTime.fromMillisecondsSinceEpoch(
           (json['c'] as num?)?.toInt() ?? 0),
       lastUsedAt: DateTime.fromMillisecondsSinceEpoch(
           (json['u'] as num?)?.toInt() ?? 0),
     );
+  }
+
+  /// 宽松字符串表反序列化（坏数据宽容处理，别让缓存文件弄崩启动）。
+  static Map<String, String> _stringMap(dynamic v) {
+    if (v is! Map) return const {};
+    final result = v.map((k, e) => MapEntry(k.toString(), e.toString()));
+    result.removeWhere((_, e) => e.isEmpty);
+    return result;
   }
 }

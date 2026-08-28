@@ -34,17 +34,24 @@ class FastVideoSourceResolver {
 
   static final FastVideoSourceResolver instance = FastVideoSourceResolver._();
 
-  /// 单次页面拉取的限时。播放页 HTML 通常 <256KB，慢源 5 秒足够；
-  /// 超时即放弃降级云端（云端从 CF 边缘访问可能更快）。
+  /// 单次页面拉取的限时（响应头阶段）。播放页 HTML 通常 <256KB，
+  /// 慢源 5 秒足够；超时即放弃降级云端（云端从 CF 边缘访问可能更快）。
   static const Duration pageTimeout = Duration(seconds: 5);
 
-  /// 广告/统计域黑名单（与 WebView 嗅探、Worker 保持一致）。
+  /// 响应体读取总限时（B2）：[pageTimeout] 只包住响应头，慢滴流源站
+  /// 可以在 body 阶段无限挂起整条漏斗（iframe 二跳再叠一层）；
+  /// 这里给整段读取一个硬顶，超时取消订阅并放弃。
+  static const Duration bodyTimeout = Duration(seconds: 8);
+
+  /// 广告/统计域黑名单（与 WebView 嗅探、Worker 保持一致；含
+  /// prestrain 的 %2E 编码变体）。
   static const List<String> _adHostHints = [
     'googleads',
     'googlesyndication',
     'adtrafficquality',
     'doubleclick',
     'prestrain.html',
+    'prestrain%2Ehtml',
   ];
 
   /// 常见视频直链扩展。
@@ -175,7 +182,11 @@ class FastVideoSourceResolver {
       if (raw == null) continue;
       final obj = _tryParseJson(raw);
       if (obj == null) continue;
-      final url = obj['url'] ?? obj['link'] ?? '';
+      // url 为空串时回退 link 字段（与 Worker 端 `a.url || a.link` 对齐）
+      final urlField = obj['url'];
+      final url = (urlField is String && urlField.trim().isNotEmpty)
+          ? urlField
+          : obj['link'];
       if (url is! String || url.trim().isEmpty) continue;
       final decoded = _decodeMacUrl(url.trim(), obj['encrypt']);
       if (decoded == null || decoded.isEmpty) continue;
@@ -355,14 +366,59 @@ class FastVideoSourceResolver {
     if (response.statusCode >= 400) {
       throw HttpException('page fetch failed: ${response.statusCode}');
     }
-    // 页面通常 <256KB；封顶 1MB 防御异常大响应
-    final bytes = <int>[];
-    await for (final chunk in response) {
-      bytes.addAll(chunk);
-      if (bytes.length > 1024 * 1024) break;
-    }
+    // 页面通常 <256KB；封顶 1MB 防御异常大响应，且整段读取有总限时
+    final bytes = await _readBodyLimited(response, 1024 * 1024, bodyTimeout);
     // 中文站绝大多数是 UTF-8；GBK 站点正则仍能命中 ASCII 直链
     return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  /// 读取响应体（封顶 [maxBytes]）。总耗时超过 [timeout] 时取消订阅
+  /// 并抛 TimeoutException——取消订阅即可释放连接，由 _http 的
+  /// idleTimeout 兜底回收（B2：慢滴流源站不得挂死第 2 级漏斗）。
+  Future<List<int>> _readBodyLimited(
+      HttpClientResponse response, int maxBytes, Duration timeout) {
+    final bytes = <int>[];
+    final completer = Completer<List<int>>();
+    Timer? timer;
+    StreamSubscription<List<int>>? subscription;
+
+    void settle(Object? error) {
+      if (completer.isCompleted) return;
+      if (error != null) {
+        completer.completeError(error);
+      } else {
+        completer.complete(bytes);
+      }
+    }
+
+    /// 结束读取：先停表、再取消订阅（释放连接）、最后交付结果。
+    void finish(Object? error) {
+      timer?.cancel();
+      timer = null;
+      final pending = subscription?.cancel();
+      subscription = null;
+      if (pending == null) {
+        settle(error);
+      } else {
+        pending.whenComplete(() => settle(error)).catchError((_) {});
+      }
+    }
+
+    timer = Timer(timeout, () {
+      // 触发总限时：取消订阅让连接回到池里，由 idleTimeout 回收
+      finish(TimeoutException('body read exceeded $timeout', timeout));
+    });
+    subscription = response.listen((chunk) {
+      bytes.addAll(chunk);
+      if (bytes.length >= maxBytes) {
+        finish(null);
+      }
+    }, onError: (Object e) {
+      finish(e);
+    }, onDone: () {
+      finish(null);
+    }, cancelOnError: true);
+    return completer.future;
   }
 
   static String? _absolutize(String url, String base) {

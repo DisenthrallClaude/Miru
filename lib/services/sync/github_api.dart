@@ -3,6 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:miru/request/core/dio_factory.dart';
+import 'package:miru/request/core/network_error_mapper.dart';
+import 'package:miru/request/core/network_exception.dart';
 import 'package:miru/services/logging/logger.dart';
 
 /// GitHub REST API 客户端（v3，Personal Access Token 认证）。
@@ -19,27 +22,62 @@ class GithubApi {
   GithubApi({required this.token}) : _dio = _createDio(token);
 
   static const String _baseUrl = 'https://api.github.com';
-  static const Duration _timeout = Duration(seconds: 30);
 
   final String token;
   final Dio _dio;
 
+  /// 走统一网络工厂（F10）：此前自建 Dio 绕过了用户代理设置，
+  /// 国内直连 api.github.com 基本不可达（GitHub 同步在目标用户群
+  /// 大概率不可用），且无重试、无统一错误映射。
+  /// 现在：读用户代理设置（手动代理/Windows 系统代理）、统一超时、
+  /// 幂等 GET 单次自动重试；4xx 仍正常返回供语义分流。
   static Dio _createDio(String token) {
-    return Dio(
-      BaseOptions(
-        baseUrl: _baseUrl,
-        connectTimeout: _timeout,
-        receiveTimeout: _timeout,
+    return DioFactory.createDio(
+      baseUrl: _baseUrl,
+      defaultHeaders: {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
         // GitHub 强制要求 User-Agent，否则 403。
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'Miru-App',
-        },
-        validateStatus: (status) => status != null && status < 500,
-      ),
+        'User-Agent': 'Miru-App',
+      },
+      validateStatus: (status) => status != null && status < 500,
     );
+  }
+
+  /// 网络层异常统一映射（F10）：连接/超时/5xx → NetworkException
+  /// （含中文文案）；GitHub 语义异常（401/404/409/422）在业务层抛出，
+  /// 不经过这里。
+  Future<Response<T>> _get<T>(String path, {Options? options}) async {
+    try {
+      return await _dio.get<T>(path, options: options);
+    } on DioException catch (e) {
+      throw await NetworkErrorMapper.mapException(e);
+    }
+  }
+
+  Future<Response<T>> _post<T>(String path, {Object? data}) async {
+    try {
+      return await _dio.post<T>(path, data: data);
+    } on DioException catch (e) {
+      throw await NetworkErrorMapper.mapException(e);
+    }
+  }
+
+  Future<Response<T>> _put<T>(String path, {Object? data}) async {
+    try {
+      return await _dio.put<T>(path, data: data);
+    } on DioException catch (e) {
+      throw await NetworkErrorMapper.mapException(e);
+    }
+  }
+
+  Future<Response<T>> _delete<T>(String path, {Object? data}) async {
+    try {
+      return await _dio.delete<T>(path, data: data);
+    } on DioException catch (e) {
+      throw await NetworkErrorMapper.mapException(e);
+    }
   }
 
   GithubApi._withDio(this.token, this._dio);
@@ -59,7 +97,7 @@ class GithubApi {
     required String repo,
     required String path,
   }) async {
-    final response = await _dio.get<String>(
+    final response = await _get<String>(
       '/repos/$owner/$repo/contents/$path',
       options: Options(
         headers: {'Accept': 'application/vnd.github.raw'},
@@ -83,7 +121,7 @@ class GithubApi {
     required String repo,
     required String path,
   }) async {
-    final response = await _dio.get<dynamic>(
+    final response = await _get<dynamic>(
       '/repos/$owner/$repo/contents/$path',
     );
     if (response.statusCode == 404) {
@@ -107,7 +145,7 @@ class GithubApi {
     required String path,
   }) async {
     final normalized = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
-    final response = await _dio.get<dynamic>(
+    final response = await _get<dynamic>(
       '/repos/$owner/$repo/contents/$normalized',
     );
     if (response.statusCode == 404) {
@@ -147,7 +185,7 @@ class GithubApi {
     if (sha != null) {
       body['sha'] = sha;
     }
-    final response = await _dio.put<dynamic>(
+    final response = await _put<dynamic>(
       '/repos/$owner/$repo/contents/$path',
       data: body,
     );
@@ -209,7 +247,7 @@ class GithubApi {
     if (meta == null) {
       return;
     }
-    final response = await _dio.delete<dynamic>(
+    final response = await _delete<dynamic>(
       '/repos/$owner/$repo/contents/$path',
       data: {'message': message, 'sha': meta.sha},
     );
@@ -221,7 +259,7 @@ class GithubApi {
 
   /// 获取当前 Token 持有者信息。Token 无效抛 [GithubAuthException]。
   Future<GithubUser> getUser() async {
-    final response = await _dio.get<dynamic>('/user');
+    final response = await _get<dynamic>('/user');
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw GithubAuthException('Token 无效或已过期');
     }
@@ -239,7 +277,7 @@ class GithubApi {
     required String owner,
     required String repo,
   }) async {
-    final response = await _dio.get<dynamic>('/repos/$owner/$repo');
+    final response = await _get<dynamic>('/repos/$owner/$repo');
     if (response.statusCode == 404) {
       return null;
     }
@@ -256,7 +294,7 @@ class GithubApi {
   /// 注意：fine-grained PAT 若未授予 Administration 写权限会失败，
   /// 失败时引导用户手动在网页上创建。
   Future<GithubRepoInfo> createPrivateRepo({required String name}) async {
-    final response = await _dio.post<dynamic>(
+    final response = await _post<dynamic>(
       '/user/repos',
       data: {
         'name': name,
@@ -383,6 +421,10 @@ class GithubApiException implements IOException {
 
 /// 日志辅助：统一异常文案。
 String describeGithubError(Object error) {
+  if (error is NetworkException) {
+    // F10：网络层异常已统一映射，直接用友好文案。
+    return error.message;
+  }
   if (error is GithubAuthException) {
     return error.message;
   }

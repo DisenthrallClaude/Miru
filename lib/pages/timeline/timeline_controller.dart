@@ -93,19 +93,25 @@ abstract class _TimelineController with Store {
     isTimeOut = false;
     bangumiCalendar.clear();
     var time = 0;
-    const maxTime = 4;
+    // 页数上限提高 + 整页为空时提前终止：当季条目超过 80 条
+    // 不再被静默截断；小季度也不会多打空页请求。
+    const maxTime = 10;
     const limit = 20;
     var resBangumiCalendar = List.generate(7, (_) => <BangumiItem>[]);
     try {
-      for (time = 0; time < maxTime; time++) {
+      while (time < maxTime) {
         final offset = time * limit;
         var newList = await BangumiApi.getCalendarBySearch(
             AnimeSeason(selectedDate).toSeasonStartAndEnd(), limit, offset);
+        var fetchedCount = 0;
         for (int i = 0; i < resBangumiCalendar.length; ++i) {
+          fetchedCount += newList[i].length;
           resBangumiCalendar[i].addAll(newList[i]);
         }
         bangumiCalendar.clear();
         bangumiCalendar.addAll(resBangumiCalendar);
+        if (fetchedCount == 0) break; // 整页为空：已到尽头
+        time++;
       }
     } catch (e) {
       isLoading = false;

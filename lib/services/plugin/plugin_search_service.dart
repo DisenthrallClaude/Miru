@@ -17,11 +17,20 @@ class PluginSearchService {
 
   final InfoController infoController;
   final PluginsController pluginsController;
-  final RuleCancelToken _cancelToken = RuleCancelToken();
+
+  /// 单条规则搜索的应用层超时。
+  ///
+  /// dio 只有连接 12s + 接收 12s（接收是数据间隔而非总时长）且幂等
+  /// 重试一次，单条规则最坏 ~48s 才报错，慢规则会拖住整轮全量搜索的
+  /// 进度条。这里给每条规则统一加上 10s 预算，超时计入健康失败。
+  static const Duration perPluginTimeout = Duration(seconds: 10);
 
   /// Per-plugin sessions so a replacement query (alias/manual search)
   /// invalidates the write-back of the still-running previous one.
   final Map<String, AsyncSessionOwner> _querySessions = {};
+
+  /// 在途请求的取消令牌：全局 cancel 或单条超时都能精确取消对应请求。
+  final List<RuleCancelToken> _activeTokens = [];
   bool _isCancelled = false;
 
   Future<void> querySource(String keyword, String pluginName) async {
@@ -97,12 +106,16 @@ class PluginSearchService {
     final session = _querySessions
         .putIfAbsent(plugin.name, AsyncSessionOwner.new)
         .begin();
+    final cancelToken = RuleCancelToken();
+    _activeTokens.add(cancelToken);
     try {
-      final result = await plugin.queryBangumi(
-        keyword,
-        shouldRethrow: true,
-        cancelToken: _cancelToken,
-      );
+      final result = await plugin
+          .queryBangumi(
+            keyword,
+            shouldRethrow: true,
+            cancelToken: cancelToken,
+          )
+          .timeout(perPluginTimeout);
       if (_isCancelled || session.isStale) return;
       infoController.pluginSearchStatus[plugin.name] =
           PluginSearchStatus.success;
@@ -111,9 +124,21 @@ class PluginSearchService {
         unawaited(PluginHealthTracker.instance.recordSuccess(plugin.name));
       }
       infoController.pluginSearchResponseList.add(result);
+    } on TimeoutException {
+      // 超时后取消底层请求，避免它继续占用连接打站点。
+      cancelToken.cancel('search timeout');
+      if (_isCancelled || session.isStale) return;
+      MiruLogger().w(
+        'PluginSearchService: search timeout for ${plugin.name}',
+      );
+      infoController.pluginSearchStatus[plugin.name] =
+          PluginSearchStatus.error;
+      unawaited(PluginHealthTracker.instance.recordFailure(plugin.name));
     } catch (error) {
       if (_isCancelled || session.isStale) return;
       _handleSearchError(plugin, error);
+    } finally {
+      _activeTokens.remove(cancelToken);
     }
   }
 
@@ -143,6 +168,9 @@ class PluginSearchService {
 
   void cancel() {
     _isCancelled = true;
-    _cancelToken.cancel();
+    for (final token in _activeTokens) {
+      if (!token.isCancelled) token.cancel('search cancelled');
+    }
+    _activeTokens.clear();
   }
 }

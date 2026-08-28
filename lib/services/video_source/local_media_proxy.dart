@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:miru/services/logging/logger.dart';
@@ -49,6 +50,17 @@ class LocalMediaProxy {
   /// [hasUsableCache] 的 HLS 判定阈值：至少这么多分片已落盘。
   static const int usableHlsSegments = 2;
 
+  /// 回源连接超时（B4）：黑洞源站（SYN 被丢）不得把 mpv 的代理请求
+  /// 无限期挂住——mpv 侧表现为「一直转圈」。
+  static const Duration originConnectTimeout = Duration(seconds: 8);
+
+  /// 回源响应头超时（B4）：连接建立后源站必须在这个时间内开始回包。
+  static const Duration originHeaderTimeout = Duration(seconds: 15);
+
+  /// 回源数据流 chunks 间隔超时（B4）：流式播放中连续这么久没有新数据
+  /// 视为源站死掉，断开让 mpv 走直连兜底/重连。
+  static const Duration originChunkTimeout = Duration(seconds: 30);
+
   /// 计量网络检查钩子：由外部接线（避免本文件依赖平台插件，便于单测）。
   static bool Function() isMeteredCheck = () => false;
 
@@ -94,9 +106,14 @@ class LocalMediaProxy {
   }
 
   String _randomSecret() {
-    final rnd = DateTime.now().microsecondsSinceEpoch;
-    return (rnd ^ (rnd << 17) ^ (rnd >> 13)).toRadixString(16).padLeft(8, '0');
+    // 加密随机（旧版时间戳异或可预测；回环+随机端口已缓解，这里再加固）
+    final rnd = Random.secure();
+    return List.generate(8, (_) => rnd.nextInt(16).toRadixString(16)).join();
   }
+
+  /// 回源 HTTP 客户端：连接阶段有硬超时（B4）。
+  HttpClient _originClient() =>
+      HttpClient()..connectionTimeout = originConnectTimeout;
 
   Future<void> shutdown() async {
     final server = _server;
@@ -194,29 +211,53 @@ class LocalMediaProxy {
     if (await file.exists() && await file.length() >= mp4PrefetchBytes) {
       return; // 已预取过
     }
-    // 播放 tee 正在写同一文件时不抢写（截断+追加并存会写坏缓存；
-    // tee 本身就在填缓存，等它写满即可）
-    if (_writing.contains(token)) {
+    // 写盘全程持锁（B5）：与播放 tee 互斥，防止并发截断/追加写坏缓存。
+    // 持锁期间 mpv 的 tee 会自动放弃写盘（正常转发不受影响），预取
+    // 完成后释放。拿不到锁说明 tee 正在填缓存，让它写即可。
+    if (!_writing.add(token)) {
       return;
     }
-    final client = HttpClient();
+    final client = _originClient();
     try {
+      // 从已有缓存的末尾续拉（追加语义），已有部分不重复下载
+      final existing =
+          (await file.exists()) ? await file.length() : 0;
+      if (existing >= mp4PrefetchBytes) return;
       final request = await client
           .getUrl(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
+          .timeout(originConnectTimeout);
       headers.forEach(request.headers.set);
       request.headers
-          .set(HttpHeaders.rangeHeader, 'bytes=0-${mp4PrefetchBytes - 1}');
+          .set(HttpHeaders.rangeHeader, 'bytes=$existing-${mp4PrefetchBytes - 1}');
       final response =
-          await request.close().timeout(const Duration(seconds: 8));
-      if (response.statusCode != 206 && response.statusCode != 200) {
+          await request.close().timeout(originHeaderTimeout);
+      FileMode writeMode;
+      int writeOffset;
+      if (response.statusCode == HttpStatus.partialContent) {
+        // 206：必须确实从 existing 开始（Content-Range 可解析且匹配），
+        // 否则字节错位，放弃（B12 同款校验）
+        final start = _contentRangeStart(response);
+        if (start == null || start != existing) return;
+        writeMode = existing > 0 ? FileMode.append : FileMode.write;
+        writeOffset = existing;
+      } else if (response.statusCode == HttpStatus.ok) {
+        // 200 全量：从 0 开始重写（截断模式，仍持写锁，无并发风险）
+        writeMode = FileMode.write;
+        writeOffset = 0;
+      } else {
         return;
       }
       final total =
           _totalFromContentRange(response) ?? _totalFromContentLength(response);
-      await _writeStreamLimited(file, response, mp4PrefetchBytes);
+      await _writeStreamLimited(
+        file,
+        response.timeout(originChunkTimeout),
+        mp4PrefetchBytes - writeOffset,
+        mode: writeMode,
+      );
       await _writeMeta(token, url, headers, isHls: false, total: total);
     } finally {
+      _writing.remove(token);
       client.close(force: true);
     }
   }
@@ -318,17 +359,32 @@ class LocalMediaProxy {
     final segToken = _tokenFor(url);
     final segFile = File('${_cacheDir!.path}/seg_$segToken.bin');
     if (await segFile.exists()) return;
-    final client = HttpClient();
+    if (_writing.contains(segToken)) return; // tee 正在写同一分片
+    final client = _originClient();
     try {
       final request = await client
           .getUrl(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
+          .timeout(originConnectTimeout);
       headers.forEach(request.headers.set);
       final response =
-          await request.close().timeout(const Duration(seconds: 8));
+          await request.close().timeout(originHeaderTimeout);
       if (response.statusCode != 200) return;
-      await _writeStreamLimited(
-          segFile, response, 32 * 1024 * 1024);
+      // 写盘前拿互斥锁（B5）：tee 可能刚好开始写同一分片；拿到锁后
+      // 再复查一次文件存在性（tee 可能已写完）。
+      if (!_writing.add(segToken)) return;
+      try {
+        if (await segFile.exists()) return;
+        await _writeStreamLimited(
+            segFile, response.timeout(originChunkTimeout), 32 * 1024 * 1024);
+      } catch (_) {
+        // 写了一半的分片不能当完整缓存用：删掉
+        try {
+          if (await segFile.exists()) await segFile.delete();
+        } catch (_) {}
+        rethrow;
+      } finally {
+        _writing.remove(segToken);
+      }
     } catch (_) {
       // 单片失败不影响其它片
     } finally {
@@ -354,12 +410,18 @@ class LocalMediaProxy {
       return;
     }
 
-    final client = HttpClient();
+    final client = _originClient();
     IOSink? sink;
+    // 是否由本次请求持有写锁：finally 只释放自己持有的，
+    // 避免误释放并发预取的锁（预取写盘期间也注册 _writing）。
+    var holdingWriteLock = false;
     try {
-      final upstream = await client.getUrl(Uri.parse(srcUrl));
+      final upstream = await client
+          .getUrl(Uri.parse(srcUrl))
+          .timeout(originConnectTimeout);
       _forwardHeaders(request, registration).forEach(upstream.headers.set);
-      final response = await upstream.close();
+      final response =
+          await upstream.close().timeout(originHeaderTimeout);
       if (response.statusCode != 200) {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
@@ -368,10 +430,11 @@ class LocalMediaProxy {
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType('video', 'mp2t');
       // 分片小（几 MB），边转发边落盘；已被别人在写时只透传
-      if (_writing.add(token)) {
+      holdingWriteLock = _writing.add(token);
+      if (holdingWriteLock) {
         sink = segFile.openWrite();
       }
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(originChunkTimeout)) {
         request.response.add(chunk);
         sink?.add(chunk);
       }
@@ -380,9 +443,15 @@ class LocalMediaProxy {
       sink = null;
     } catch (_) {
       await sink?.close().catchError((_) {});
+      if (holdingWriteLock) {
+        // 半截分片不能当完整缓存用：删掉，下次请求重新回源
+        try {
+          if (await segFile.exists()) await segFile.delete();
+        } catch (_) {}
+      }
       rethrow;
     } finally {
-      _writing.remove(token);
+      if (holdingWriteLock) _writing.remove(token);
       client.close(force: true);
     }
   }
@@ -422,8 +491,10 @@ class LocalMediaProxy {
     final requestedStart = range?.start ?? 0;
     final requestedEnd = range?.end; // null = 开放区间（到文件尾）
 
-    final client = HttpClient();
+    final client = _originClient();
     IOSink? teeSink;
+    // 本次请求是否持有写锁：只释放自己持有的（见 _serveSegment）
+    var holdingWriteLock = false;
     try {
       if (cachedLen > 0 && requestedStart < cachedLen) {
         // ---- 区间与磁盘缓存有交集 ----
@@ -459,11 +530,14 @@ class LocalMediaProxy {
         final total = meta!.total!;
 
         // 4) 开放区间且总长已知：磁盘 + 上游流式拼接为一个连续 206
-        final upstream = await client.getUrl(Uri.parse(srcUrl));
+        final upstream = await client
+            .getUrl(Uri.parse(srcUrl))
+            .timeout(originConnectTimeout);
         forwardHeaders.forEach(upstream.headers.set);
         upstream.headers
             .set(HttpHeaders.rangeHeader, 'bytes=$cachedLen-');
-        final response = await upstream.close();
+        final response =
+            await upstream.close().timeout(originHeaderTimeout);
         if (response.statusCode != HttpStatus.partialContent) {
           // 上游不接受 Range（返回 200 全量）。
           // 请求从 0 开始时可以退化为 200 透传（字节对齐）；
@@ -488,10 +562,11 @@ class LocalMediaProxy {
         await request.response
             .addStream(cacheFile.openRead(requestedStart, diskEnd + 1));
         // 上游部分：从 cachedLen 开始正好接在缓存末尾，可 tee
-        if (cachedLen < mp4PrefetchBytes && _writing.add(token)) {
+        holdingWriteLock = cachedLen < mp4PrefetchBytes && _writing.add(token);
+        if (holdingWriteLock) {
           teeSink = cacheFile.openWrite(mode: FileMode.append);
         }
-        await for (final chunk in response) {
+        await for (final chunk in response.timeout(originChunkTimeout)) {
           request.response.add(chunk);
           if (teeSink != null) {
             if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
@@ -499,6 +574,7 @@ class LocalMediaProxy {
             } else {
               await teeSink.close();
               teeSink = null;
+              holdingWriteLock = false;
               _writing.remove(token);
             }
           }
@@ -516,7 +592,7 @@ class LocalMediaProxy {
       await teeSink?.close().catchError((_) {});
       rethrow;
     } finally {
-      _writing.remove(token);
+      if (holdingWriteLock) _writing.remove(token);
       client.close(force: true);
     }
   }
@@ -536,14 +612,19 @@ class LocalMediaProxy {
     int cachedLen,
   ) async {
     IOSink? teeSink;
+    // 本次请求是否持有写锁：只释放自己持有的（见 _serveSegment）
+    var holdingWriteLock = false;
     try {
-      final upstream = await client.getUrl(Uri.parse(srcUrl));
+      final upstream = await client
+          .getUrl(Uri.parse(srcUrl))
+          .timeout(originConnectTimeout);
       forwardHeaders.forEach(upstream.headers.set);
       if (range != null) {
         upstream.headers.set(
             HttpHeaders.rangeHeader, 'bytes=$requestedStart-${range.end ?? ''}');
       }
-      final response = await upstream.close();
+      final response =
+          await upstream.close().timeout(originHeaderTimeout);
       if (response.statusCode != 206 && response.statusCode != 200) {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
@@ -569,14 +650,22 @@ class LocalMediaProxy {
         request.response.headers
             .set(HttpHeaders.contentLengthHeader, contentLength);
       }
-      // 只在「正好接在缓存末尾的顺序读」时 tee 写盘（保证字节连续）
-      final canTee = requestedStart == cachedLen &&
+      // 只在「正好接在缓存末尾的顺序读」时 tee 写盘（保证字节连续）。
+      // B12：上游必须确实回 206 且从 requestedStart 开始——上游忽略
+      // Range 回 200 全量时，从字节 0 开始的整个 body 会被追加到
+      // cachedLen 处，直接污染缓存（不 tee 只是丢一次缓存机会，
+      // tee 错了是永久损坏）。
+      final upstreamStart = _contentRangeStart(response);
+      final canTee = response.statusCode == HttpStatus.partialContent &&
+          upstreamStart == requestedStart &&
+          requestedStart == cachedLen &&
           cachedLen < mp4PrefetchBytes &&
           _writing.add(token);
       if (canTee) {
         teeSink = cacheFile.openWrite(mode: FileMode.append);
+        holdingWriteLock = true;
       }
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(originChunkTimeout)) {
         request.response.add(chunk);
         if (teeSink != null) {
           if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
@@ -584,6 +673,7 @@ class LocalMediaProxy {
           } else {
             await teeSink.close();
             teeSink = null;
+            holdingWriteLock = false;
             _writing.remove(token);
           }
         }
@@ -595,7 +685,7 @@ class LocalMediaProxy {
       await teeSink?.close().catchError((_) {});
       rethrow;
     } finally {
-      _writing.remove(token);
+      if (holdingWriteLock) _writing.remove(token);
     }
   }
 
@@ -624,9 +714,12 @@ class LocalMediaProxy {
     File cacheFile,
     String token,
   ) async {
-    final upstream = await client.getUrl(Uri.parse(srcUrl));
+    final upstream = await client
+        .getUrl(Uri.parse(srcUrl))
+        .timeout(originConnectTimeout);
     forwardHeaders.forEach(upstream.headers.set);
-    final response = await upstream.close();
+    final response =
+        await upstream.close().timeout(originHeaderTimeout);
     if (response.statusCode != 200 && response.statusCode != 206) {
       request.response.statusCode = HttpStatus.badGateway;
       await request.response.close();
@@ -634,11 +727,14 @@ class LocalMediaProxy {
     }
     request.response.statusCode = HttpStatus.ok;
     IOSink? teeSink;
+    // 本次请求是否持有写锁：只释放自己持有的（见 _serveSegment）
+    var holdingWriteLock = false;
     try {
-      if (cacheFile.lengthSync() == 0 && _writing.add(token)) {
+      holdingWriteLock = cacheFile.lengthSync() == 0 && _writing.add(token);
+      if (holdingWriteLock) {
         teeSink = cacheFile.openWrite();
       }
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(originChunkTimeout)) {
         request.response.add(chunk);
         if (teeSink != null) {
           if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
@@ -646,6 +742,7 @@ class LocalMediaProxy {
           } else {
             await teeSink.close();
             teeSink = null;
+            holdingWriteLock = false;
             _writing.remove(token);
           }
         }
@@ -656,7 +753,7 @@ class LocalMediaProxy {
       await teeSink?.close().catchError((_) {});
       rethrow;
     } finally {
-      _writing.remove(token);
+      if (holdingWriteLock) _writing.remove(token);
     }
   }
 
@@ -690,15 +787,20 @@ class LocalMediaProxy {
   /// 拉取清单文本。
   Future<String?> _fetchPlaylistText(
       String url, Map<String, String> headers) async {
-    final client = HttpClient();
+    final client = _originClient();
     try {
-      final request = await client.getUrl(Uri.parse(url));
+      final request = await client
+          .getUrl(Uri.parse(url))
+          .timeout(originConnectTimeout);
       headers.forEach(request.headers.set);
-      final response = await request.close();
+      final response =
+          await request.close().timeout(originHeaderTimeout);
       if (response.statusCode != 200) return null;
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in response) {
+      // 清单只有几 KB，但同样要有停表：慢滴流源站不得挂死清单请求
+      await for (final chunk in response.timeout(originChunkTimeout)) {
         builder.add(chunk);
+        if (builder.length > 2 * 1024 * 1024) break; // 防御异常大响应
       }
       return utf8.decode(builder.takeBytes(), allowMalformed: true);
     } catch (_) {
@@ -935,9 +1037,22 @@ class LocalMediaProxy {
     return int.tryParse(value);
   }
 
+  /// 解析 Content-Range 的起始字节（"bytes N-M/T" 里的 N）。
+  /// tee/追加写盘前用它校验上游确实从请求的偏移开始（B12）。
+  int? _contentRangeStart(HttpClientResponse response) {
+    final value = response.headers.value(HttpHeaders.contentRangeHeader);
+    if (value == null) return null;
+    final match = RegExp(r'^bytes\s+(\d+)-').firstMatch(value.trim());
+    return match == null ? null : int.parse(match.group(1)!);
+  }
+
+  /// 写入流到文件（封顶 [limit] 字节）。[mode] 默认截断；预取续拉
+  /// 已有部分缓存时传 [FileMode.append]（B5：模式必须与请求的
+  /// Range 起点匹配，否则追加语义错位会写坏缓存）。
   Future<void> _writeStreamLimited(
-      File file, Stream<List<int>> stream, int limit) async {
-    final sink = file.openWrite();
+      File file, Stream<List<int>> stream, int limit,
+      {FileMode mode = FileMode.write}) async {
+    final sink = file.openWrite(mode: mode);
     var written = 0;
     try {
       await for (final chunk in stream) {

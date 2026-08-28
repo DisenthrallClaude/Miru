@@ -61,6 +61,27 @@ class BBCodeBgm {
   int id;
 
   BBCodeBgm({required this.id});
+
+  /// bgm 系表情图（(bgmN) 语法）的 CDN 地址。
+  ///
+  /// 分段规则：11/23 是动图（bgm/{id}.gif）；其余 1-23 为
+  /// bgm/{id}.png；24-32 映射 tv/0{id-23}.gif（一位数补零）；
+  /// 33 及以上映射 tv/{id-23}.gif。
+  ///
+  /// 历史版本用连续 if 且末行无条件覆盖，导致 id≤23 全部请求
+  /// tv/负数.gif 必 404（渲染成「.」），此处改为互斥分支（F7）。
+  static String smileUrl(int id) {
+    if (id == 11 || id == 23) {
+      return 'https://bangumi.tv/img/smiles/bgm/$id.gif';
+    }
+    if (id < 24) {
+      return 'https://bangumi.tv/img/smiles/bgm/$id.png';
+    }
+    if (id < 33) {
+      return 'https://bangumi.tv/img/smiles/tv/0${id - 23}.gif';
+    }
+    return 'https://bangumi.tv/img/smiles/tv/${id - 23}.gif';
+  }
 }
 
 class BBCodeMusume {

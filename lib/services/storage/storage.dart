@@ -28,10 +28,29 @@ class GStorage {
   static late Box<DownloadRecord> downloads;
 
   /// 推荐页信息流的本地缓存（含置顶清单），避免每次启动都重新联网。
+  ///
+  /// 冷启动优化：懒开盒（见 [ensureFeedCachesOpen]），就绪前请经
+  /// [popularCacheOrNull] 守卫访问（未就绪 = 无缓存，页面自然回退联网）；
+  /// 直接访问需确保盒已就绪。
   static late Box<BangumiItem> popularCache;
 
   /// 时间表的本地缓存，按季度失效（见 SettingsKeys.calendarCacheSeason）。
+  /// 懒开盒，同 [popularCache]。
   static late Box<BangumiItem> calendarCache;
+
+  static Box<BangumiItem>? _popularCache;
+  static Box<BangumiItem>? _calendarCache;
+  static Future<void>? _feedCachesOpen;
+
+  /// 懒加载守卫：缓存盒尚未就绪时返回 null（调用方按「无缓存」处理）。
+  static Box<BangumiItem>? get popularCacheOrNull => _popularCache;
+
+  /// 时间表缓存盒的懒加载守卫，同 [popularCacheOrNull]。
+  static Box<BangumiItem>? get calendarCacheOrNull => _calendarCache;
+
+  /// 确保推荐/时间表缓存盒已打开（幂等；冷启动时已后台触发）。
+  static Future<void> ensureFeedCachesOpen() =>
+      _feedCachesOpen ??= _openFeedCaches();
 
   /// Hive directory path, initialized during init()
   static String? _hivePath;
@@ -116,6 +135,7 @@ class GStorage {
         timestamp ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000),
       );
       await collectChanges.put(change.id, change);
+      await _trimCollectChangesLocked();
       await collectChanges.flush();
       return change;
     });
@@ -129,8 +149,28 @@ class GStorage {
         _nextCollectChangeId = change.id;
       }
       await collectChanges.put(change.id, change);
+      await _trimCollectChangesLocked();
       await collectChanges.flush();
     });
+  }
+
+  /// collectchanges 保留上限：append-only 变更日志的无上界增长防线
+  /// （多设备重度用户长期累积会让每次 WebDAV 全量上传越来越重）。
+  /// 收藏全量状态在 collectibles 盒里，日志截断不丢状态。
+  static const int maxCollectChanges = 500;
+
+  /// 裁剪变更日志：保留最新的 [maxCollectChanges] 条。
+  /// 必须在写队列内调用。键为秒级时间戳（或更大）的自增 id，
+  /// 升序即时间序；个别非 int 键（理论上不存在）不参与裁剪。
+  static Future<void> _trimCollectChangesLocked() async {
+    final ids = collectChanges.keys.whereType<int>().toList()..sort();
+    if (ids.length <= maxCollectChanges) return;
+    final victims =
+        ids.take(ids.length - maxCollectChanges).toList(growable: false);
+    if (victims.isEmpty) return;
+    await collectChanges.deleteAll(victims);
+    MiruLogger().i(
+        'GStorage: trimmed ${victims.length} collect changes (cap $maxCollectChanges)');
   }
 
   /// Put a collectible using the same write queue
@@ -154,18 +194,60 @@ class GStorage {
 
     Hive.registerAdapters();
 
-    // Open each box with automatic recovery on corruption
-    favorites = await _openBoxSafe<BangumiItem>('favorites');
-    collectibles = await _openBoxSafe<CollectedBangumi>('collectibles');
-    histories = await _openBoxSafe<History>('histories');
-    _setting = await _openBoxSafe<dynamic>('setting');
-    collectChanges =
-        await _openBoxSafe<CollectedBangumiChange>('collectchanges');
-    shieldList = await _openBoxSafe<String>('shieldList');
-    searchHistory = await _openBoxSafe<SearchHistory>('searchHistory');
-    downloads = await _openBoxSafe<DownloadRecord>('downloads');
-    popularCache = await _openBoxSafe<BangumiItem>('popularCache');
-    calendarCache = await _openBoxSafe<BangumiItem>('calendarCache');
+    // 冷启动优化：八个首屏必需盒并行打开（此前逐个 await，启动耗时
+    // 为各盒耗时之和，现在是最大值）。favorites 为废弃盒，但启动期
+    // 迁移（migrateCollect）仍会读它，保留预开（见仓库审阅 E-冷启动）。
+    final favoritesFuture = _openBoxSafe<BangumiItem>('favorites');
+    final collectiblesFuture = _openBoxSafe<CollectedBangumi>('collectibles');
+    final historiesFuture = _openBoxSafe<History>('histories');
+    final settingFuture = _openBoxSafe<dynamic>('setting');
+    final collectChangesFuture =
+        _openBoxSafe<CollectedBangumiChange>('collectchanges');
+    final shieldListFuture = _openBoxSafe<String>('shieldList');
+    final searchHistoryFuture = _openBoxSafe<SearchHistory>('searchHistory');
+    final downloadsFuture = _openBoxSafe<DownloadRecord>('downloads');
+
+    // 非首屏缓存盒（推荐页/时间表）：后台懒开，不阻塞启动；
+    // 就绪前 FeedCache 走守卫路径按「无缓存」处理，页面回退联网。
+    unawaited(ensureFeedCachesOpen());
+
+    favorites = await favoritesFuture;
+    collectibles = await collectiblesFuture;
+    histories = await historiesFuture;
+    _setting = await settingFuture;
+    collectChanges = await collectChangesFuture;
+    shieldList = await shieldListFuture;
+    searchHistory = await searchHistoryFuture;
+    downloads = await downloadsFuture;
+
+    // 存量膨胀的变更日志在后台裁剪一次（此前 append-only 无上界）。
+    // 必须在 collectChanges 盒就绪后入队（写队列闭包立即开始执行）。
+    unawaited(_runCollectChangesWriteExclusive(() async {
+      try {
+        await _trimCollectChangesLocked();
+      } catch (e) {
+        MiruLogger().w(
+            'GStorage: startup trim collect changes failed', error: e);
+      }
+    }));
+  }
+
+  /// 后台打开推荐/时间表缓存盒。失败不崩启动：缓存视为缺失，
+  /// FeedCache 守卫路径自然回退联网。
+  static Future<void> _openFeedCaches() async {
+    try {
+      final popularFuture = _openBoxSafe<BangumiItem>('popularCache');
+      final calendarFuture = _openBoxSafe<BangumiItem>('calendarCache');
+      final popular = await popularFuture;
+      final calendar = await calendarFuture;
+      _popularCache = popular;
+      _calendarCache = calendar;
+      popularCache = popular;
+      calendarCache = calendar;
+    } catch (e) {
+      MiruLogger()
+          .e('GStorage: feed cache boxes failed to open', error: e);
+    }
   }
 
   /// Open a Hive box with automatic recovery on corruption.
@@ -371,6 +453,7 @@ class GStorage {
         for (var change in mergeResult.changes) {
           await collectChanges.put(change.id, change);
         }
+        await _trimCollectChangesLocked();
         await collectChanges.flush();
       } catch (e) {
         await collectibles.clear();

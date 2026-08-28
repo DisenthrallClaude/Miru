@@ -53,11 +53,6 @@ class SettingsKeys {
     'auto-safe',
     group: SettingGroup.player,
   );
-  static const searchEnhanceEnable = SettingKey<bool>(
-    _SettingBoxKey.searchEnhanceEnable,
-    true,
-    group: SettingGroup.misc,
-  );
   static const autoUpdate = SettingKey<bool>(
     _SettingBoxKey.autoUpdate,
     true,
@@ -67,11 +62,6 @@ class SettingsKeys {
     'checkPluginUpdateOnStartup',
     true,
     group: SettingGroup.update,
-  );
-  static const alwaysOntop = SettingKey<bool>(
-    _SettingBoxKey.alwaysOntop,
-    false,
-    group: SettingGroup.misc,
   );
   static const defaultPlaySpeed = SettingKey<double>(
     _SettingBoxKey.defaultPlaySpeed,
@@ -97,11 +87,6 @@ class SettingsKeys {
     _SettingBoxKey.arrowKeySkipTime,
     10,
     group: SettingGroup.player,
-  );
-  static const danmakuEnhance = SettingKey<bool>(
-    _SettingBoxKey.danmakuEnhance,
-    true,
-    group: SettingGroup.danmaku,
   );
   static const danmakuBorder = SettingKey<bool>(
     _SettingBoxKey.danmakuBorder,
@@ -267,11 +252,6 @@ class SettingsKeys {
   static const defaultStartupPage = SettingKey<String>(
     _SettingBoxKey.defaultStartupPage,
     '/tab/popular/',
-    group: SettingGroup.interface,
-  );
-  static const isWideScreen = SettingKey<bool>(
-    _SettingBoxKey.isWideScreen,
-    false,
     group: SettingGroup.interface,
   );
   /// 远程公告频控状态：JSON 对象 {公告id: "关闭日期 yyyy-MM-dd"}。
@@ -610,9 +590,10 @@ class SettingsKeys {
     group: SettingGroup.player,
   );
   /// 视频源解析超时（秒）。超时后会自动换用另一种解析器重试一次。
+  /// 默认 20s 与解析服务层签名默认对齐（B7）；播放与下载链路共用。
   static const parseTimeout = SettingKey<int>(
     'parseTimeout',
-    15,
+    20,
     group: SettingGroup.player,
   );
   /// 云端解析加速：自建/自定义 Worker 地址。
@@ -655,16 +636,13 @@ class SettingsKeys {
   static final List<SettingKey<Object?>> all = [
     hAenable,
     hardwareDecoder,
-    searchEnhanceEnable,
     autoUpdate,
     checkPluginUpdateOnStartup,
-    alwaysOntop,
     defaultPlaySpeed,
     defaultShortcutForwardPlaySpeed,
     defaultAspectRatioType,
     buttonSkipTime,
     arrowKeySkipTime,
-    danmakuEnhance,
     danmakuBorder,
     danmakuBorderSize,
     danmakuOpacity,
@@ -698,7 +676,6 @@ class SettingsKeys {
     enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
-    isWideScreen,
     announcementDismissState,
     announcementCache,
     updateIgnoredVersion,
@@ -786,15 +763,12 @@ class SettingsKeys {
 class _SettingBoxKey {
   static const String hAenable = 'hAenable',
       hardwareDecoder = 'hardwareDecoder',
-      searchEnhanceEnable = 'searchEnhanceEnable',
       autoUpdate = 'autoUpdate',
-      alwaysOntop = 'alwaysOntop',
       defaultPlaySpeed = 'defaultPlaySpeed',
       defaultShortcutForwardPlaySpeed = 'defaultShortcutForwardPlaySpeed',
       defaultAspectRatioType = 'defaultAspectRatioType',
       buttonSkipTime = 'buttonSkipTime',
       arrowKeySkipTime = 'arrowKeySkipTime',
-      danmakuEnhance = 'danmakuEnhance',
       danmakuBorder = 'danmakuBorder',
       danmakuBorderSize = 'danmakuBorderSize',
       danmakuOpacity = 'danmakuOpacity',
@@ -828,9 +802,6 @@ class _SettingBoxKey {
       enableBangumiProxy = 'enableBangumiProxy',
       enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
-
-      /// Deprecated
-      isWideScreen = 'isWideScreen',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
       webDavEnableCollect = 'webDavEnableCollect',

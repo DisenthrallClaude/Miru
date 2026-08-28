@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/dialog/update_dialog.dart';
@@ -13,7 +14,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:miru/utils/device.dart';
 import 'package:miru/utils/date_time.dart';
-import 'package:miru/utils/crypto.dart';
 import 'package:miru/utils/version.dart';
 
 /// 安装类型枚举
@@ -78,13 +78,17 @@ String getUpdateDownloadUrlFromAsset(Map<String, dynamic>? asset) {
   if (asset == null) {
     return '';
   }
-  final mirrorUrl = asset['mirror_download_url'] as String? ?? '';
-  if (mirrorUrl.isNotEmpty) {
-    return mirrorUrl;
-  }
+  // 只信任 GitHub API 的 browser_download_url；不消费镜像响应里
+  // 可能被注入的 mirror_download_url 等非标字段——那等于允许被篡改的
+  // 元数据把下载重定向到任意地址，绕开可信镜像前缀
+  // （updateDownloadMirrorPrefixes）。镜像需求已由 _downloadUrlCandidates
+  // 用显式前缀实现，非标字段没有任何正当用途。
   return asset['browser_download_url'] as String? ?? '';
 }
 
+/// 取 Release 资产的 sha256 digest（GitHub API 均带 `sha256:` 前缀）。
+/// 返回空串表示该资产未提供 digest，调用方应按「跳过校验」处理，
+/// 而不是拿空串与实际哈希比较（那会把「无校验」变成「必失败」）。
 String getUpdateFileHashFromAsset(Map<String, dynamic> asset) {
   final digest = asset['digest'] as String? ?? '';
   if (digest.isNotEmpty && digest.startsWith('sha256:')) {
@@ -533,7 +537,11 @@ class AutoUpdater {
               ),
               const SizedBox(height: 12),
               Text(
-                '安装过程中应用将会退出',
+                // 桌面端安装后进程退出；Android 只拉起系统安装器，
+                // 应用本身不退出，文案不能误导用户。
+                Platform.isAndroid
+                    ? '点击「立即安装」后由系统安装器接管安装流程'
+                    : '安装过程中应用将会退出',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.error,
                   fontSize: 12,
@@ -601,6 +609,11 @@ class AutoUpdater {
   /// 因此下载前先并发探测「镜像 + 直连」的可达性（Range 0-0 小请求，
   /// 2.5 秒超时），谁先应答就用谁下载；探测全失败则按候选顺序硬试。
   /// 下载中途网络错误也会自动切换下一个候选源重试。
+  ///
+  /// 完整性链路：元数据（Release json）与 APK 允许来自不同源，
+  /// 但只要元数据带 digest，这里就会对下载结果强制校验；
+  /// _installUpdate 只会处理本方法校验通过后返回的文件，
+  /// 因此 digest 校验是安装前的硬关口，镜像换源不会绕过它。
   Future<String> _downloadFile(
       String url, String version, String expectedHash) async {
     final fileName = _getFileNameFromUrl(url, version);
@@ -614,8 +627,10 @@ class AutoUpdater {
     if (await file.exists()) {
       try {
         //使用哈希验证文件完整性
-        final localHash = await calculateFileHash(file);
-        if (localHash == expectedHash) {
+        final localHash = await _sha256File(file);
+        // 资产未提供 digest 时无法验证：跳过校验直接复用本地文件
+        // （重新下载同样无法验证，只会白耗一次流量）。
+        if (expectedHash.isEmpty || localHash == expectedHash) {
           // 文件已存在且哈希匹配，直接返回
           MiruLogger().i(
               'Update: file already exists and hash verified, skipping download: $filePath');
@@ -657,13 +672,18 @@ class AutoUpdater {
           },
         );
 
-        // 下载完成后验证文件哈希
-        final downloadedHash = await calculateFileHash(file);
-        if (downloadedHash != expectedHash) {
+        // 下载完成后验证文件哈希（安装前的强制关口：换源重试不会
+        // 跳过这一步，见方法注释）。
+        final downloadedHash = await _sha256File(file);
+        if (expectedHash.isNotEmpty && downloadedHash != expectedHash) {
           // 哈希不匹配，删除文件并抛出异常
           await file.delete();
           throw Exception(
               '文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
+        }
+        if (expectedHash.isEmpty) {
+          MiruLogger().w(
+              'Update: asset has no sha256 digest, skip integrity verification');
         }
         MiruLogger()
             .i('Update: file downloaded from $candidate and hash verified');
@@ -745,8 +765,11 @@ class AutoUpdater {
   void _installUpdate(
       String filePath, InstallationType installationType) async {
     try {
-      // 显示准备退出的提示
-      MiruDialog.showToast(message: '准备安装更新，应用即将退出...');
+      // 显示准备退出的提示（Android 不退出，只拉起系统安装器）
+      MiruDialog.showToast(
+          message: Platform.isAndroid
+              ? '准备安装更新，正在拉起系统安装器...'
+              : '准备安装更新，应用即将退出...');
 
       await Future.delayed(const Duration(seconds: 2));
 
@@ -852,4 +875,27 @@ class AutoUpdater {
     }
     return 'Miru-$version$extension';
   }
+}
+
+/// 收集分块哈希最终结果的极简 Sink。
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
+}
+
+/// 分块流式 sha256：更新包动辄几十 MB，整文件读入内存会在低端机上
+/// 造成同等大小的内存尖峰，这里按流分块喂给哈希器。
+Future<String> _sha256File(File file) async {
+  final sink = _DigestSink();
+  final input = sha256.startChunkedConversion(sink);
+  await for (final chunk in file.openRead()) {
+    input.add(chunk);
+  }
+  input.close();
+  return sink.value.toString();
 }

@@ -128,11 +128,34 @@ class WebDav {
   }
 
   Future<void> _updateBox(String boxName) async {
+    // 先 flush 让 Hive 把内存中的追加完整落盘，缩小与用户写入之间的
+    // 撕裂窗口（与 GithubSync._updateBox 同策略）。
+    try {
+      if (boxName == 'collectibles') {
+        await GStorage.collectibles.flush();
+      } else if (boxName == 'collectchanges') {
+        await GStorage.collectChanges.flush();
+      }
+    } catch (e) {
+      MiruLogger().w('WebDav: flush box $boxName failed', error: e);
+    }
     var directory = await getApplicationSupportDirectory();
     final localFilePath = '${directory.path}/hive/$boxName.hive';
     final tempFilePath = '${webDavLocalTempDirectory.path}/$boxName.tmp';
     final webDavPath = '$_syncRootPath/$boxName.tmp';
-    await File(localFilePath).copy(tempFilePath);
+    try {
+      await File(localFilePath).copy(tempFilePath);
+    } catch (e, stackTrace) {
+      // 活文件复制失败（与用户写入竞争被撕裂/被系统清理等）：
+      // 跳过本轮上传而非让整个同步崩溃——远端仍是上一次的完整快照，
+      // 下一轮同步会自然重试。
+      MiruLogger().w(
+        'WebDav: failed to copy live box file $boxName.hive, skip this round',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return;
+    }
     await _publishRemoteFile(
       sourceFilePath: tempFilePath,
       destinationPath: webDavPath,
