@@ -114,11 +114,14 @@ class WebViewVideoSourceService implements IVideoSourceService {
           ? VideoSourceFormat.hls
           : event.format;
 
+      // 网络层嗅探捕获的请求头（Referer/Cookie，阶段 0 / §1.5）：
+      // 随结果带给播放层，防盗链 CDN 不再因丢 Referer 拒播。
       return VideoSource(
         url: event.url,
         offset: event.offset,
         type: VideoSourceType.online,
         format: format,
+        playbackHeaders: event.headers ?? const {},
       );
     } catch (e) {
       if (e is VideoSourceCancelledException) {

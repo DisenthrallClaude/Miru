@@ -14,6 +14,9 @@ typedef VideoParserEvent = ({
   String url,
   int offset,
   VideoSourceFormat format,
+  /// 网络层嗅探捕获的请求头（Referer/Origin/Cookie，阶段 0 / §1.5）：
+  /// 供播放头使用；JS 钩子路径没有头（null）。
+  Map<String, String>? headers,
 });
 
 abstract class VideoWebviewController<T> {
@@ -52,11 +55,13 @@ abstract class VideoWebviewController<T> {
   void notifyVideoSourceResolved(
     String url, {
     VideoSourceFormat format = VideoSourceFormat.auto,
+    Map<String, String>? headers,
   }) {
     _videoParserEventController.add((
       url: url,
       offset: offset,
       format: format,
+      headers: headers,
     ));
   }
 

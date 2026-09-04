@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.5.3-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.5.3/Miru-1.5.3-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.0/Miru-1.6.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,23 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.5.3（本次）
+### 1.6.0（本次）
+
+> 安装包：[Releases v1.6.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.0)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**播放链路全面升级：秒开、稳开、换集秒切。**
+
+- **解析改对冲竞速，不再逐级排队**：本地快解、云端解析、WebView 嗺探不再串行等待（最坏叠加近一分钟），而是分层梯队同时推进——快解 0.6 秒无果云端自动接力，1.5 秒无果 WebView 自动接力，任何一路先拿到可用直链就立即开播，其余全部让路。任何路径硬上限 12 秒，绝无「永远转圈」。
+- **快解候选并发验证**：一次解析出的多个候选直链不再逐个试（最坏 6 秒），改为 3 路并发验证取最快可用者，最快 1.5 秒内出结果。
+- **换集秒切**：播放器实例常驻复用（换集不再销毁重建，省 300~900ms 黑屏），换集时解析与停流并行进行；代理滑窗预取始终领先播放头 4 个分片，快进回看不卡顿。
+- **线路健康一自了然**：进播放页后台自动摸底各线路可用性与延迟（不打扰源站、结果持久化 10 分钟），换线路菜单直接显示 ⚡+毫秒徽标，死线路一眼避开；无播放历史时自动优先健康线路。
+- **签名感知缓存**：带过期签名的 CDN 直链按 URL 里的真实剩余寿命缓存（分钟级到期就分钟级失效），不再一律 30 分钟——过期直链提前重新解析，转圈卡顿减少。
+- **起播参数分级**：起播阶段小缓冲快出首帧，首帧稳定后自动拉高到 120 秒大缓冲；分片级自动重试重连，网络抖动不再直接报错。
+- 另含代理 token 防碰撞升级（80 位哈希）、缓存目录迁移防系统清理、WebView 资源嗅探强化等数十项底层加固。详细设计见 `docs/plans/05-playback-fast-path.md`。
+
+### 1.5.3
 
 > 安装包：[Releases v1.5.3](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.3)
 >

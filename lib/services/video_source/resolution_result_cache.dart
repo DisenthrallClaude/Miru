@@ -29,6 +29,13 @@ class ResolutionResultCache {
   /// 负缓存（解析失败标记）有效期：防止短时间内反复打失败的源。
   static const Duration negativeTtl = Duration(seconds: 60);
 
+  /// host 级「提取失败」负缓存 TTL（阶段 0 / §1.3）：该站静态结构
+  /// 解不了，同站所有集都跳过快解层，10 分钟后重试（站点可能换结构）。
+  static const Duration extractFailedTtl = Duration(minutes: 10);
+
+  /// URL 级「探测判死」负缓存 TTL（阶段 0 / §1.3）：仅影响本集。
+  static const Duration probeDeadTtl = Duration(minutes: 5);
+
   /// 最多保留的条目数（LRU 淘汰）。
   static const int maxEntries = 400;
 
@@ -107,7 +114,8 @@ class ResolutionResultCache {
   }
 
   /// 写入解析成功结果。
-  Future<void> put(String episodeUrl, VideoSource source) async {
+  Future<void> put(String episodeUrl, VideoSource source,
+      {Duration? ttl}) async {
     await _ensureLoaded();
     _entries[episodeUrl] = _CacheEntry(
       episodeUrl,
@@ -115,6 +123,9 @@ class ResolutionResultCache {
       offset: source.offset,
       format: source.format,
       negative: false,
+      // 阶段 2 / §2.4：签名感知 TTL——带 exp 的 CDN 直链按 URL 里
+      // 剩余寿命存（clamp 1min~6h），不带签名时缺省 30min。
+      positiveTtl: ttl ?? ResolutionResultCache.ttl,
       // B10：解析层确认的播放头（防盗链 referer）一并持久化，
       // 二刷/换集回看/预解析后的播放走缓存时不再丢 referer。
       playbackHeaders: Map.of(source.playbackHeaders),
@@ -126,16 +137,20 @@ class ResolutionResultCache {
   }
 
   /// 写入解析失败标记（负缓存）。
-  Future<void> putNegative(String episodeUrl) async {
+  /// [ttl]：分级 TTL（阶段 0 / §1.3）；缺省为通用 [negativeTtl]。
+  /// 已有**正条目**时拒绝覆盖（成功结果不该被失败标记顶掉；
+  /// 负条目重复标记同样跳过——TTL 从首次标记起算即可）。
+  Future<void> putNegative(String episodeUrl, {Duration? ttl}) async {
     await _ensureLoaded();
     final existing = _entries[episodeUrl];
-    if (existing != null && existing.isNegative) return;
+    if (existing != null) return;
     _entries[episodeUrl] = _CacheEntry(
       episodeUrl,
       videoUrl: '',
       offset: 0,
       format: VideoSourceFormat.auto,
       negative: true,
+      negativeTtl: ttl ?? negativeTtl,
       playbackHeaders: const {},
       cachedAt: DateTime.now(),
       lastUsedAt: DateTime.now(),
@@ -205,6 +220,8 @@ class _CacheEntry {
     required this.offset,
     required this.format,
     required this.negative,
+    this.negativeTtl = ResolutionResultCache.negativeTtl,
+    this.positiveTtl = ResolutionResultCache.ttl,
     this.playbackHeaders = const {},
     required this.cachedAt,
     required this.lastUsedAt,
@@ -215,6 +232,13 @@ class _CacheEntry {
   final int offset;
   final VideoSourceFormat format;
   final bool negative;
+
+  /// 负条目的分级 TTL（阶段 0 / §1.3；正条目忽略本字段）。
+  final Duration negativeTtl;
+
+  /// 正条目的签名感知 TTL（阶段 2 / §2.4；负条目忽略本字段）。
+  /// 旧缓存文件没有这个字段时反序列化为默认 30min（向后兼容）。
+  final Duration positiveTtl;
 
   /// 解析层确认的播放请求头（v1.5.2 新增持久化，B10）。
   /// 旧缓存文件没有这个字段时反序列化为空表（向后兼容）。
@@ -227,8 +251,7 @@ class _CacheEntry {
 
   bool isExpired(DateTime now) {
     final age = now.difference(cachedAt);
-    return negative ? age > ResolutionResultCache.negativeTtl
-        : age > ResolutionResultCache.ttl;
+    return negative ? age > negativeTtl : age > positiveTtl;
   }
 
   VideoSource toVideoSource() {
@@ -246,6 +269,11 @@ class _CacheEntry {
         'o': offset,
         'f': format.name,
         'n': negative ? 1 : 0,
+        if (negative && negativeTtl != ResolutionResultCache.negativeTtl)
+          'nt': negativeTtl.inSeconds,
+        // §2.4：仅非缺省时写入正条目 TTL，旧条目体积不变。
+        if (!negative && positiveTtl != ResolutionResultCache.ttl)
+          'pt': positiveTtl.inSeconds,
         // 仅非空时写入，旧条目体积不变
         if (playbackHeaders.isNotEmpty) 'p': playbackHeaders,
         'c': cachedAt.millisecondsSinceEpoch,
@@ -255,6 +283,9 @@ class _CacheEntry {
   static _CacheEntry? fromJson(String key, Map<String, dynamic> json) {
     final videoUrl = json['v'] as String?;
     if (videoUrl == null) return null;
+    final negative = (json['n'] as num?)?.toInt() == 1;
+    final rawNt = (json['nt'] as num?)?.toInt();
+    final rawPt = (json['pt'] as num?)?.toInt();
     return _CacheEntry(
       key,
       videoUrl: videoUrl,
@@ -263,7 +294,13 @@ class _CacheEntry {
         (f) => f.name == (json['f'] as String?),
         orElse: () => VideoSourceFormat.auto,
       ),
-      negative: (json['n'] as num?)?.toInt() == 1,
+      negative: negative,
+      negativeTtl: negative && rawNt != null && rawNt > 0
+          ? Duration(seconds: rawNt)
+          : ResolutionResultCache.negativeTtl,
+      positiveTtl: !negative && rawPt != null && rawPt > 0
+          ? Duration(seconds: rawPt)
+          : ResolutionResultCache.ttl,
       playbackHeaders: _stringMap(json['p']),
       cachedAt: DateTime.fromMillisecondsSinceEpoch(
           (json['c'] as num?)?.toInt() ?? 0),

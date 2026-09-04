@@ -81,6 +81,14 @@ class VideoSourceCancelledException implements Exception {
       'VideoSourceCancelledException: Resolution was cancelled';
 }
 
+/// 解析层级失败的分级（阶段 0 / §1.3）——决定负缓存的写法：
+/// - [extractFailed]：页面拿到了但提不出候选（该站静态结构解不了），
+///   写 **host 级**负缓存（同站所有集都跳过该层）；
+/// - [network]：传输层失败（超时/连接错误），**不写负缓存**——
+///   网络抖动不应放大成整层跳过；
+/// - [probeDead]：候选直链被探测判死，写 **URL 级**负缓存（仅影响本集）。
+enum LevelFailureKind { extractFailed, network, probeDead }
+
 /// 视频源解析服务接口
 ///
 /// 抽象视频源的获取方式，支持多种实现：

@@ -98,10 +98,26 @@ abstract class _PlayerPlaybackController with Store {
   // 不改动解码器、渲染器、音频输出等任何已验证路径。
 
   /// 前向缓冲目标（mpv 默认 10s，弱网源不够用）。
+  /// 播放稳定后（buffer ≥ 15s 且 playing）由
+  /// [_maybePromoteBuffering] 从起播值提升到这里的稳定值。
   static const String _cacheSecsNetwork = '120';
 
   /// demuxer 预读窗口（mpv 默认 1s，CDN 慢时极易卡顿）。
+  /// 同上，稳定后提升。
   static const String _readaheadSecsNetwork = '10';
+
+  /// 起播阶段前向缓冲（§1.7）：mpv 默认 10s，大窗口会拖慢出画。
+  static const String _cacheSecsStartup = '10';
+
+  /// 起播阶段 demuxer 预读窗口（§1.7）：起播后首帧优先。
+  static const String _readaheadSecsStartup = '3';
+
+  /// 缓冲提升阈值：首帧后 buffer 达到这个值且 playing 时把
+  /// cache-secs/readahead 拉高到稳定值（仅执行一次，每集重置）。
+  static const Duration _bufferPromoteThreshold = Duration(seconds: 15);
+
+  /// 本集是否已执行过缓冲提升。
+  bool _bufferPromoted = false;
 
   /// 单集自动恢复上限，防止死链循环重开。
   static const int _maxAutoRecoveries = 2;
@@ -297,13 +313,15 @@ abstract class _PlayerPlaybackController with Store {
       }
       try {
         final pp = player.platform as NativePlayer;
+        // 恢复值跟随当前阶段（§1.7）：未提升前回到起播值，
+        // 已提升回到稳定值——后台回来不会越级拉大缓冲。
         await pp.setProperty('cache-secs',
-            wanted ? '0' : (isLocalPlayback() ? '36000' : _cacheSecsNetwork));
+            wanted ? '0' : (isLocalPlayback() ? '36000' : _currentCacheSecs));
         if (!isCurrentPlayer(player)) {
           return;
         }
         await pp.setProperty('demuxer-readahead-secs',
-            wanted ? '0' : (isLocalPlayback() ? '1' : _readaheadSecsNetwork));
+            wanted ? '0' : (isLocalPlayback() ? '1' : _currentReadaheadSecs));
       } catch (e) {
         MiruLogger().w(
           'PlayerController: failed to ${wanted ? 'suspend' : 'resume'} demuxer prefetch',
@@ -369,6 +387,41 @@ abstract class _PlayerPlaybackController with Store {
     } catch (_) {}
   }
 
+  /// 当前阶段应使用的 cache-secs（§1.7）。
+  String get _currentCacheSecs =>
+      _bufferPromoted ? _cacheSecsNetwork : _cacheSecsStartup;
+
+  /// 当前阶段应使用的 demuxer-readahead-secs（§1.7）。
+  String get _currentReadaheadSecs =>
+      _bufferPromoted ? _readaheadSecsNetwork : _readaheadSecsStartup;
+
+  /// 播放稳定后的缓冲提升（§1.7）：首个 buffer ≥ 15s 且 playing 的
+  /// 时刻把 cache-secs/readahead 从起播值拉到稳定值，仅执行一次。
+  /// 挂起期间（后台/计量网绪）不执行，恢复后由后续 buffer 事件再触发。
+  void _maybePromoteBuffering(Player player, Duration value) {
+    if (_bufferPromoted) return;
+    if (_prefetchSuspendWanted) return;
+    if (value < _bufferPromoteThreshold) return;
+    if (!playerPlaying) return;
+    if (isLocalPlayback()) return;
+    if (!isCurrentPlayer(player)) return;
+    _bufferPromoted = true;
+    unawaited(_prefetchWrites.run(() async {
+      if (!isCurrentPlayer(player)) return;
+      try {
+        final pp = player.platform as NativePlayer;
+        await pp.setProperty('cache-secs', _cacheSecsNetwork);
+        if (!isCurrentPlayer(player)) return;
+        await pp.setProperty(
+            'demuxer-readahead-secs', _readaheadSecsNetwork);
+        MiruLogger()
+            .i('PlayerController: buffer promoted (cache-secs=120, readahead=10)');
+      } catch (e) {
+        MiruLogger().w('PlayerController: buffer promote failed', error: e);
+      }
+    }));
+  }
+
   @action
   void resetForInit() {
     playing = false;
@@ -382,6 +435,7 @@ abstract class _PlayerPlaybackController with Store {
     _directVideoUrl = null;
     _effectiveUrl = null;
     _directFallbackAttempted = false;
+    _bufferPromoted = false;
   }
 
   /// 设置秒开链路的直连兑底地址（由 PlayerController.init 传入）。
@@ -567,32 +621,41 @@ abstract class _PlayerPlaybackController with Store {
     return false;
   }
 
-  Future<Player?> createVideoController(
-    Map<String, String> httpHeaders,
+  // ---------------------------------------------------------------------------
+  // 单例装配（阶段 1 / §2.1）：ensurePlayer（幂等）+ openMedia（每集）
+  // ---------------------------------------------------------------------------
+
+  /// 确保播放器内核就绪（幂等，§2.1）。
+  ///
+  /// 视频页生命周期内只创建一次 Player + VideoController：
+  /// - Player：debug 挂钩、demuxer-cache-dir、af/ao、http-proxy、音轨、
+  ///   错误监听与播放态流订阅（订阅随实例注册一次，[softStop] 不取消）；
+  /// - VideoController：渲染器选择（gpu-next/gpu/mediacodec_embed）+ 纹理。
+  ///
+  /// 换集只调 [openMedia]（同实例 open），纹理常驻不再黑屏，
+  /// 300~900ms 的实例重建 + 全量属性重下发只付一次。
+  /// 渲染/解码设置在创建期读取——修改需重进视频页生效（§2.1(c)）。
+  /// 真正销毁只在 [stop]（离开视频页 / beginShutdown）。
+  Future<Player?> ensurePlayer(
     bool adBlockerEnabled, {
     required bool Function() canInstall,
-    int offset = 0,
-    VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
-    startOffset = offset;
-    // 新一集开始：自动恢复计数与错误时间戳归零。
-    _recoveryCount = 0;
-    _lastRecoveryAt = null;
-    _lastStreamErrorAt = null;
-    _lastHttpHeaders = httpHeaders;
-    superResolutionMode = SuperResolutionMode.fromStorageValue(
-      GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
-    );
+    // 幂等：实例常驻（换集软停后直接复用）
+    final existing = _ownedPlayer;
+    if (existing != null) {
+      return existing.player;
+    }
+    if (!canInstall()) {
+      return null;
+    }
+
+    // 渲染/解码设置在创建期读取一次
     hAenable = GStorage.getSetting(SettingsKeys.hAenable);
     androidEnableOpenSLES =
         GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
     hardwareDecoder = GStorage.getSetting(SettingsKeys.hardwareDecoder);
-    autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
 
-    if (!canInstall()) {
-      return null;
-    }
     final candidate = _OwnedPlayer(
       Player(
         configuration: PlayerConfiguration(
@@ -623,13 +686,10 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       var pp = player.platform as NativePlayer;
-      // 装配属性并行下发（v1.5.3）：以下都是 open 之前互不依赖的全局
-      // 选项，media-kit 按请求 id 逐条应答，Future.wait 把十几个串行
-      // 平台通道往返压成一批（典型省 50-150ms）；竞态守卫在批次末复查。
-      //
-      // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下减轻内存压力
-      // media-kit 内部硬盘缓存目录按照 Linux 配置，这导致该功能在其他平台上被损坏
-      // 该设置可以在所有平台上正确启用双重缓存
+      // 装配属性并行下发：open 之前互不依赖的全局选项，Future.wait 把
+      // 十几个串行平台通道往返压成一批（典型省 50-150ms）。
+      // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下
+      // 减轻内存压力；demuxer-cache-dir 按平台正确启用双重缓存。
       await Future.wait([
         getPlayerTempPathCached()
             .then((path) => pp.setProperty("demuxer-cache-dir", path)),
@@ -673,9 +733,6 @@ abstract class _PlayerPlaybackController with Store {
         superResolutionMode = SuperResolutionMode.off;
       }
 
-      // SDK 版本查询的 await 之后紧邻复查（v1.5.3）：stop() 若已插入，
-      // 不能再为已 dispose 的 player 创建 VideoController——否则纹理
-      // 绑死在死实例上，黑屏直到下一次 init 才被清理。
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
@@ -732,8 +789,8 @@ abstract class _PlayerPlaybackController with Store {
 
       // 播放态直通（v1.5.3）：buffering/playing 直接订阅 mpv 流，转圈
       // spinner 随真实状态即时翻转；1Hz 轮询保留给历史持久化等低频
-      // 任务。若 spinner 只靠轮询驱动，首帧渲染完成后转圈平均还会
-      // 盖住画面 ~500ms（轮询粒度上限 1s）。
+      // 任务。buffer 流同步更新可观察量并驱动缓冲提升（§1.7）。
+      // §2.1：订阅随实例注册一次，softStop 不取消（实例常驻）。
       _playbackStateSubscriptions.addAll([
         player.stream.buffering.listen((value) {
           if (!isCurrentPlayer(player)) return;
@@ -747,71 +804,14 @@ abstract class _PlayerPlaybackController with Store {
             playing = value;
           }
         }),
+        player.stream.buffer.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (buffer != value) {
+            buffer = value;
+          }
+          _maybePromoteBuffering(player, value);
+        }),
       ]);
-
-      if (superResolutionMode != SuperResolutionMode.off) {
-        await setShader(superResolutionMode, player: player);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-      }
-
-      // 起播码率判定放宽（v1.5.3）：格式标注链并不可靠——云端解析器
-      // 仅 Worker 明确回 hls 才标注、解析缓存默认 auto，未标注的
-      // .m3u8 master playlist 会回落 mpv 默认 hls-bitrate=max：选最高
-      // 码率变体，弱网下首帧要等好几秒，正是「拿得到直链却迟迟不出
-      // 画面」的头号元凶。这里与 hybrid 解析服务的宽松判定对齐。
-      if (_isHlsPlayback(videoSourceFormat, videoUrl())) {
-        // 取首个流（通常是站点推荐的默认清晰度）起播最快，
-        // 中途仍可手动切清晰度。
-        await Future.wait([
-          pp.setProperty('demuxer-lavf-format', 'hls'),
-          pp.setProperty('hls-bitrate', 'no'),
-        ]);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-      }
-
-      // 网络流稳定性参数（本地文件零开销，跳过）：
-      // 1) ffmpeg HTTP 自动重连：连接被重置/超时后由 libavformat 原地重连，
-      //    正常播放完全无感知；这是 mpv 社区处理不稳定 HLS 的标准配置。
-      // 2) 前向缓冲与预读窗口：给弱网 CDN 留足余量，磁盘缓存有
-      //    demuxer-max-bytes 上限兜底，不会无界增长。
-      // 3) 连接超时（v1.5.2）：mpv 默认 60 秒——坏链要等一分钟才报错，
-      //    用户体验是「卡死」。10 秒足够覆盖慢源握手，失败后自动
-      //    直连重开/换源的链路能更快接管。
-      // 4) 起播探测上限（秒开）：mpv 默认对 HLS 的 avformat 探测最长可
-      //    达数秒，封顶 2 秒 + 5MB 后首帧出画明显提前；对 HLS/MP4 直链
-      //    的流识别精度绰绰有余。
-      if (!isLocalPlayback()) {
-        await Future.wait([
-          pp.setProperty('stream-lavf-o',
-              'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5'),
-          pp.setProperty('network-timeout', '10'),
-          pp.setProperty('cache-secs', _cacheSecsNetwork),
-          pp.setProperty('demuxer-readahead-secs', _readaheadSecsNetwork),
-          pp.setProperty('demuxer-lavf-analyzeduration', '2'),
-          pp.setProperty('demuxer-lavf-probesize', '5242880'),
-        ]);
-        if (!isCurrentPlayer(player)) {
-          return await _discardIfNotCurrent(candidate);
-        }
-      }
-
-      _effectiveUrl = videoUrl();
-      await player.open(
-        Media(videoUrl(),
-            start: Duration(seconds: offset), httpHeaders: httpHeaders),
-        play: autoPlay,
-      );
-      if (!isCurrentPlayer(player)) {
-        return await _discardIfNotCurrent(candidate);
-      }
-
-      if (cachePolicy.networkForced) {
-        MiruDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
-      }
 
       return player;
     } catch (error, stackTrace) {
@@ -823,6 +823,152 @@ abstract class _PlayerPlaybackController with Store {
       await candidate.dispose();
       Error.throwWithStackTrace(error, stackTrace);
     }
+  }
+
+  /// 换集软停（§2.1）：player.stop() 不 dispose，Player/VideoController
+  /// 与纹理常驻，观察量复位；流订阅保留（实例还活着）。
+  /// 真正销毁只在 [stop]（离开视频页）。
+  Future<void> softStop() async {
+    final player = mediaPlayer;
+    if (player == null) {
+      return;
+    }
+    try {
+      await player.stop();
+    } catch (_) {}
+    playing = false;
+    loading = true;
+    isBuffering = true;
+    completed = false;
+    currentPosition = Duration.zero;
+    buffer = Duration.zero;
+    duration = Duration.zero;
+  }
+
+  /// 每集打开（§2.1）：只做随集变化的装配——恢复计数/播放头、超分、
+  /// HLS 属性、起播期网络参数（§1.7）→ open。
+  /// [httpHeaders] 经 Media.httpHeaders 传给 mpv（http-header-fields）。
+  Future<Player?> openMedia(
+    Player player, {
+    required Map<String, String> httpHeaders,
+    int offset = 0,
+    VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
+  }) async {
+    if (!isCurrentPlayer(player)) {
+      return null;
+    }
+    startOffset = offset;
+    // 新一集开始：自动恢复计数与错误时间戳归零。
+    _recoveryCount = 0;
+    _lastRecoveryAt = null;
+    _lastStreamErrorAt = null;
+    _lastHttpHeaders = httpHeaders;
+    autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
+    superResolutionMode = SuperResolutionMode.fromStorageValue(
+      GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
+    );
+
+    var pp = player.platform as NativePlayer;
+
+    // 超分随集重设（off 分支负责清掉上一集的 shader）
+    await setShader(superResolutionMode, player: player);
+    if (!isCurrentPlayer(player)) {
+      return null;
+    }
+
+    // 起播码率判定放宽（v1.5.3 语义保留，随集重设）：
+    // 未标注的 .m3u8 master playlist 会回落 mpv 默认 hls-bitrate=max，
+    // 弱网下首帧要等好几秒——与 hybrid 解析服务的宽松判定对齐。
+    if (_isHlsPlayback(videoSourceFormat, videoUrl())) {
+      // 取首个流（站点推荐清晰度）起播最快，中途仍可手动切清晰度。
+      await Future.wait([
+        pp.setProperty('demuxer-lavf-format', 'hls'),
+        pp.setProperty('hls-bitrate', 'no'),
+      ]);
+      if (!isCurrentPlayer(player)) {
+        return null;
+      }
+    } else {
+      // 上一集强制过 hls 时恢复自动探测（空值 = mpv 默认自动识别）
+      try {
+        await pp.setProperty('demuxer-lavf-format', '');
+      } catch (_) {}
+    }
+
+    // 网络流稳定性参数（§1.7，「先快出画，稳了再拉大缓冲」）：
+    // 每集重设——promote 会把值拉高，换集必须回落到起播值。
+    // 1) demuxer-lavf-o：HTTP 持久连接 + 分片级重试（seg_max_retry/
+    //    max_reload 是 HLS 丢片自愈的核心）；
+    // 2) stream-lavf-o：连接层重连 + 10s 超时（timeout 单位微秒）；
+    // 3) 探测降载：probe-info=nostreams + analyzeduration=1s +
+    //    probesize=1MB——起播前的流识别时间大幅压缩；
+    // 4) 起播阶段小缓冲（cache-secs=10/readahead=3），首帧后由
+    //    _maybePromoteBuffering 提升到 120/10；
+    // 5) cache-pause-initial=no：缓冲未满也直接出画；
+    // 6) video-sync=audio：音频主时钟，减少起播期丢帧重同步。
+    if (!isLocalPlayback()) {
+      await Future.wait([
+        pp.setProperty('demuxer-lavf-o',
+            'http_persistent=1,http_multiple=1,http_seekable=0,'
+            'seg_max_retry=3,max_reload=5,'
+            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
+        pp.setProperty('stream-lavf-o',
+            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3,'
+            'timeout=10000000'),
+        pp.setProperty('demuxer-lavf-probe-info', 'nostreams'),
+        pp.setProperty('demuxer-lavf-analyzeduration', '1'),
+        pp.setProperty('demuxer-lavf-probesize', '1048576'),
+        pp.setProperty('network-timeout', '8'),
+        pp.setProperty('cache-pause-initial', 'no'),
+        pp.setProperty('cache-pause-wait', '0.5'),
+        pp.setProperty('cache-secs', _cacheSecsStartup),
+        pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
+        pp.setProperty('video-sync', 'audio'),
+      ]);
+      if (!isCurrentPlayer(player)) {
+        return null;
+      }
+    }
+    // 换集重置缓冲提升标记（§1.7）：每集都从起播值重新开始爬坡
+    _bufferPromoted = false;
+
+    _effectiveUrl = videoUrl();
+    await player.open(
+      Media(videoUrl(),
+          start: Duration(seconds: offset), httpHeaders: httpHeaders),
+      play: autoPlay,
+    );
+    if (!isCurrentPlayer(player)) {
+      return null;
+    }
+
+    if (cachePolicy.networkForced) {
+      MiruDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
+    }
+
+    return player;
+  }
+
+  /// 首集装配入口（PlayerController.init 调用）：ensurePlayer + openMedia。
+  /// 返回 null 表示装配被取消（会话过期/页面关闭）。
+  Future<Player?> createVideoController(
+    Map<String, String> httpHeaders,
+    bool adBlockerEnabled, {
+    required bool Function() canInstall,
+    int offset = 0,
+    VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
+  }) async {
+    final player =
+        await ensurePlayer(adBlockerEnabled, canInstall: canInstall);
+    if (player == null) {
+      return null;
+    }
+    return openMedia(
+      player,
+      httpHeaders: httpHeaders,
+      offset: offset,
+      videoSourceFormat: videoSourceFormat,
+    );
   }
 
   Future<void> setShader(SuperResolutionMode mode, {Player? player}) async {

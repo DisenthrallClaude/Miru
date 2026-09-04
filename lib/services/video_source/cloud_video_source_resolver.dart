@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:hive_ce/hive.dart';
 import 'package:miru/request/clients/download_http_client.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/request/core/network_exception.dart';
@@ -37,13 +38,16 @@ class CloudVideoSourceResolver {
   static final CloudVideoSourceResolver instance =
       CloudVideoSourceResolver._();
 
-  static const Duration perEndpointTimeout = Duration(seconds: 4);
+  static const Duration perEndpointTimeout = Duration(milliseconds: 2500);
 
   /// 熔断阈值：连续失败这么多次的端点打开熔断。
   static const int circuitThreshold = 3;
 
   /// 熔断时长：打开后这么长时间内直接跳过该端点，到期半开试探。
   static const Duration circuitOpenDuration = Duration(minutes: 5);
+
+  /// warmUp 健康探测限时（§1.4）。
+  static const Duration warmUpTimeout = Duration(milliseconds: 1500);
 
   final DownloadHttpClient _client = DownloadHttpClient.instance;
 
@@ -53,11 +57,99 @@ class CloudVideoSourceResolver {
   /// 端点缓存：设置变更后调用 [invalidateEndpoints] 失效。
   List<Uri>? _endpoints;
 
-  /// 端点健康（内存态，进程重启即清）：endpoint → 连续失败数/熔断时刻。
+  /// 端点健康（持久化到 Hive `cloud_resolver_health`，§1.4）：
+  /// endpoint → 连续失败数/熔断时刻。进程重启后熔断状态保留——
+  /// 之前每次冷启动要重新交 3×4s 的「学费」才熔断，大陆用户尤甚。
   final Map<String, _EndpointHealth> _endpointHealth = {};
+
+  /// 健康盒懒加载状态：null = 未加载，false = 加载失败（退化为内存态）。
+  bool? _healthLoaded;
+
+  Future<void> _ensureHealthLoaded() async {
+    if (_healthLoaded != null) return;
+    try {
+      final box = await Hive.openBox('cloud_resolver_health');
+      final data = box.get('health');
+      if (data is Map) {
+        data.forEach((key, value) {
+          if (key is String && value is Map) {
+            final failures = (value['f'] as num?)?.toInt() ?? 0;
+            final openedAt = (value['o'] as num?)?.toInt();
+            if (failures > 0) {
+              _endpointHealth[key] = _EndpointHealth()
+                ..consecutiveFailures = failures
+                ..openedAt = openedAt != null && openedAt > 0
+                    ? DateTime.fromMillisecondsSinceEpoch(openedAt)
+                    : null;
+            }
+          }
+        });
+      }
+      _healthLoaded = true;
+    } catch (_) {
+      _healthLoaded = false; // Hive 不可用：退化为内存态（行为=旧版）
+    }
+  }
+
+  Future<void> _persistHealth() async {
+    if (_healthLoaded != true) return;
+    try {
+      final box = await Hive.openBox('cloud_resolver_health');
+      final payload = <String, dynamic>{
+        for (final e in _endpointHealth.entries)
+          e.key: {
+            'f': e.value.consecutiveFailures,
+            'o': e.value.openedAt?.millisecondsSinceEpoch ?? 0,
+          },
+      };
+      await box.put('health', payload);
+    } catch (_) {
+      // 持久化失败不影响内存态熔断
+    }
+  }
 
   void invalidateEndpoints() {
     _endpoints = null;
+  }
+
+  /// 启动预热（§1.4）：对所有端点并发 GET /health（1.5s 超时），
+  /// 失败直接计入熔断（大陆 workers.dev 不可达的端点在第一次播放
+  /// 之前就被熔断，不再交「首次播放白付 4s」的税）。
+  /// 在 main.dart 启动流程末尾 unawaited 调用。
+  Future<void> warmUp() async {
+    await _ensureHealthLoaded();
+    // 熔断过滤（与正式解析同口径）：已熔断端点不再探测。
+    final targets =
+        endpoints.where((e) => !_isCircuitOpen(e)).toList(growable: false);
+    if (targets.isEmpty) return;
+    final results = await Future.wait(
+      targets.map((endpoint) async {
+        try {
+          final uri = endpoint.replace(path: '/health');
+          await _client.getPlain(
+            uri.toString(),
+            receiveTimeout: warmUpTimeout,
+          ).timeout(warmUpTimeout);
+          _recordEndpointSuccess(endpoint);
+          return true;
+        } catch (e) {
+          final failureClass = _classifyFailure(e);
+          // 传输层/服务器故障才计熔断（与正式解析同一口径）
+          if (failureClass == 'timeout' ||
+              failureClass == 'connect-error' ||
+              failureClass == 'bad-certificate' ||
+              failureClass.startsWith('http-5')) {
+            _recordEndpointFailure(endpoint);
+          }
+          return false;
+        }
+      }),
+      eagerError: false,
+    );
+    await _persistHealth();
+    final ok = results.where((r) => r).length;
+    MiruLogger().i(
+        'CloudResolver: warmUp done ($ok/${targets.length} endpoints alive)');
   }
 
   /// 是否已配置云端解析（开关开 + 至少一个端点）。
@@ -115,15 +207,32 @@ class CloudVideoSourceResolver {
     return _endpoints = parsed;
   }
 
-  /// 请求云端解析。返回 null 表示「不可用/失败/未配置」，
+  /// 请求云端解析。返回 null 表示「不可用/失败/未配置」；
   /// 调用方应降级本地解析；绝不抛异常。
   Future<VideoSource?> resolve(
     String episodeUrl, {
     String? userAgent,
     String? referer,
   }) async {
-    if (episodeUrl.isEmpty) return null;
-    // 熔断过滤：连续失败的端点短窗内不再请求（省 4s×N 延迟税）
+    final report = await resolveWithReport(episodeUrl,
+        userAgent: userAgent, referer: referer);
+    return report.source;
+  }
+
+  /// 带失败分类的解析入口（阶段 0 / §1.3）：
+  /// [CloudResolveReport.source] 为 null 时 [CloudResolveReport.failureClass]
+  /// 携带本次「最常见」的失败分类（timeout / extract-failed / http-429 …），
+  /// 供 hybrid 层做分级负缓存决策。
+  Future<CloudResolveReport> resolveWithReport(
+    String episodeUrl, {
+    String? userAgent,
+    String? referer,
+  }) async {
+    if (episodeUrl.isEmpty) {
+      return const CloudResolveReport(null, null);
+    }
+    await _ensureHealthLoaded();
+    // 熔断过滤：连续失败的端点短窗内不再请求（省 2.5s×N 延迟税）
     final targets =
         endpoints.where((e) => !_isCircuitOpen(e)).toList(growable: false);
     if (targets.isEmpty) {
@@ -131,26 +240,38 @@ class CloudVideoSourceResolver {
         MiruLogger()
             .w('CloudResolver: all endpoints circuit-open, skipping cloud');
       }
-      return null;
+      return const CloudResolveReport(null, 'circuit-open');
     }
 
+    final failures = <String>[];
     final result = await _race(
       targets.map((endpoint) => _resolveFromEndpoint(
             endpoint,
             episodeUrl,
             userAgent: userAgent,
             referer: referer,
+            onFailure: failures.add,
           )),
     );
     if (result == null) {
       // 各端点的失败原因已在 _resolveFromEndpoint 里分类记录（B14）
       MiruLogger().w(
           'CloudResolver: all ${targets.length} endpoint(s) failed for $episodeUrl');
-      return null;
+      // 端点全部同因时取该原因；混合原因时优先传输层（网络语义）
+      var failureClass = failures.isNotEmpty ? failures.first : 'error';
+      if (failures.contains('timeout') ||
+          failures.contains('connect-error')) {
+        failureClass = failures.contains('connect-error') &&
+                !failures.contains('timeout')
+            ? 'connect-error'
+            : 'timeout';
+      }
+      return CloudResolveReport(null, failureClass);
     }
     MiruLogger().i(
         'CloudResolver: resolved via ${result.$2} in ${result.$3}ms: ${result.$1.url}');
-    return result.$1;
+    await _persistHealth();
+    return CloudResolveReport(result.$1, null);
   }
 
   /// 健康检查（设置页「测试连接」用）：返回最快应答的端点，全挂返回 null。
@@ -192,6 +313,7 @@ class CloudVideoSourceResolver {
 
   void _recordEndpointSuccess(Uri endpoint) {
     _endpointHealth.remove(endpoint.toString());
+    unawaited(_persistHealth());
   }
 
   void _recordEndpointFailure(Uri endpoint) {
@@ -202,6 +324,7 @@ class CloudVideoSourceResolver {
     if (health.consecutiveFailures >= circuitThreshold) {
       health.openedAt ??= DateTime.now();
     }
+    unawaited(_persistHealth());
   }
 
   /// 失败分类（可观测性，B14）：超时 / 连接失败 / HTTP 状态（含 429
@@ -266,6 +389,7 @@ class CloudVideoSourceResolver {
     String episodeUrl, {
     String? userAgent,
     String? referer,
+    void Function(String failureClass)? onFailure,
   }) async {
     final started = DateTime.now();
     try {
@@ -317,6 +441,7 @@ class CloudVideoSourceResolver {
       // 失败分类记日志（B14）+ 熔断计数（B6），异常继续向上抛给 _race 吞掉
       final elapsed = DateTime.now().difference(started).inMilliseconds;
       final failureClass = _classifyFailure(e);
+      onFailure?.call(failureClass);
       MiruLogger().w('CloudResolver: endpoint ${endpoint.host} failed in '
           '${elapsed}ms ($failureClass)');
       // 熔断只计传输层/服务端故障（timeout、连接错误、证书、5xx）。
@@ -337,10 +462,21 @@ class CloudVideoSourceResolver {
   }
 }
 
-/// 端点健康状态（内存态，仅本进程有效）。
+/// 端点健康状态（持久化于 Hive `cloud_resolver_health`，§1.4）。
 class _EndpointHealth {
   int consecutiveFailures = 0;
 
   /// 熔断打开时刻；null = 未熔断（只是累计失败数）。
   DateTime? openedAt;
+}
+
+/// 云端解析结果报告（阶段 0 / §1.3）：source + 失败分类。
+class CloudResolveReport {
+  const CloudResolveReport(this.source, this.failureClass);
+
+  final VideoSource? source;
+
+  /// 全端点失败时的分类（timeout / connect-error / extract-failed /
+  /// http-429-quota / circuit-open …）；成功时为 null。
+  final String? failureClass;
 }

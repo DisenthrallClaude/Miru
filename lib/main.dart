@@ -12,6 +12,7 @@ import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/network/proxy_manager.dart';
 import 'package:miru/services/network/system_proxy_service.dart';
 import 'package:miru/services/network/telemetry_service.dart';
+import 'package:miru/services/video_source/cloud_video_source_resolver.dart';
 import 'package:miru/services/video_source/local_media_proxy.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -46,6 +47,9 @@ void main() async {
     // 匿名活跃心跳（每日一次，fire-and-forget，失败静默）：
     // 为云端解析层的动态配额提供「当日活跃人数」输入
     unawaited(TelemetryService.instance.dailyPing());
+    // 云端解析端点启动预热（阶段 0 / §1.4）：1.5s 健康探测把不可达
+    // 端点提前熔断，首次播放不再白付 2.5s×N 延迟税。
+    unawaited(CloudVideoSourceResolver.instance.warmUp());
   } catch (e) {
     // Log the error for debugging (if logger is available)
     debugPrint('Storage initialization failed: $e');

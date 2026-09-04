@@ -8,6 +8,7 @@ import 'package:miru/pages/video/danmaku_send_sheet.dart';
 import 'package:miru/pages/video/video_playback_args.dart';
 import 'package:miru/pages/history/history_controller.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/video_source/road_health.dart';
 import 'package:miru/pages/player/player_item.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -74,6 +75,9 @@ class _VideoPageState extends State<VideoPage>
   int visibleRoad = 0;
   bool _tabBodyTargetVisible = true;
   int _tabBodyAnimationRun = 0;
+
+  /// 阶段 3 / §3.3：线路下标 → 健康快照（菜单徽标）。
+  Map<int, RoadHealth> _roadHealth = {};
 
   late final bool disableAnimations;
 
@@ -199,6 +203,10 @@ class _VideoPageState extends State<VideoPage>
     }
     visibleRoad = videoPageController.selectedEpisode.road;
 
+    // 阶段 3 / §3.3：进页后台摸线路健康（徽标 + 自动选路用）。
+    // fire-and-forget，永不阻塞首播。
+    _probeRoadHealth();
+
     _logSubscription = videoPageController.logStream.listen((log) {
       if (mounted) {
         setState(() {
@@ -210,14 +218,63 @@ class _VideoPageState extends State<VideoPage>
       }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) {
         return;
+      }
+      // 阶段 3 / §3.3 自动选路：仅「无播放历史」时依据已持久化的健康分
+      // 换线路（有历史尊重历史；无新鲜数据时保持默认——不等待本次
+      // 探测，首播永远优先）。
+      if (!videoPageController.isOfflineMode &&
+          widget.args is OnlineVideoPlaybackArgs &&
+          videoPageController.roadList.length > 1) {
+        final names = videoPageController.roadList.map((r) => r.name).toList();
+        final best = await RoadHealthTracker.instance.bestRoadIndex(
+          names,
+          videoPageController.currentPlugin.name,
+        );
+        final current = videoPageController.selectedEpisode.road;
+        if (best != current && best < videoPageController.roadList.length) {
+          videoPageController.resetEpisodeState(
+            episode: videoPageController.selectedEpisode.episode,
+            road: best,
+          );
+          visibleRoad = best;
+          MiruLogger().i('VideoPage: auto-selected road $best'
+              ' (${names[best]}) by health score');
+        }
       }
       changeEpisode(videoPageController.selectedEpisode.episode,
           currentRoad: videoPageController.selectedEpisode.road,
           offset: videoPageController.historyOffset);
     });
+  }
+
+  /// 阶段 3 / §3.3：后台探测线路健康，刷新菜单徽标。
+  void _probeRoadHealth() {
+    if (videoPageController.isOfflineMode ||
+        videoPageController.roadList.isEmpty) {
+      return;
+    }
+    final pluginName = videoPageController.currentPlugin.name;
+    final roads = videoPageController.roadList
+        .map((r) => (r.name, r.data))
+        .toList(growable: false);
+    unawaited(
+      RoadHealthTracker.instance.probeAll(roads, pluginName).then((_) async {
+        final fresh = <int, RoadHealth>{};
+        for (var i = 0; i < videoPageController.roadList.length; i++) {
+          final health = await RoadHealthTracker.instance
+              .healthOf(pluginName, videoPageController.roadList[i].name);
+          if (health != null) fresh[i] = health;
+        }
+        if (mounted) {
+          setState(() {
+            _roadHealth = fresh;
+          });
+        }
+      }).catchError((_) {}),
+    );
   }
 
   @override
@@ -909,13 +966,28 @@ class _VideoPageState extends State<VideoPage>
                   constraints: BoxConstraints(minWidth: 112),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text(
-                      videoPageController.roadList[i].name,
-                      style: TextStyle(
-                        color: i == visibleRoad
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            videoPageController.roadList[i].name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: i == visibleRoad
+                                  ? Theme.of(context).colorScheme.primary
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        // 阶段 3 / §3.3：线路健康徽标（未知不显示，
+                        // 不猜疑未探测的线路）。
+                        if (_roadHealth[i] != null)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: _RoadHealthBadge(health: _roadHealth[i]!),
+                          ),
+                      ],
                     ),
                   ),
                 ),
@@ -1218,6 +1290,49 @@ class _VideoPageState extends State<VideoPage>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 线路健康徽标（阶段 3 / §3.3）：
+/// - 存活：⚡ + 延迟（ms，快线路绿色、慢线路琥珀）；
+/// - 死亡：☁ 断连图标（红）。
+/// 未知线路不渲染本组件（不猜疑未探测的线路）。
+class _RoadHealthBadge extends StatelessWidget {
+  const _RoadHealthBadge({required this.health});
+
+  final RoadHealth health;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (!health.ok) {
+      return Icon(
+        Icons.cloud_off_outlined,
+        size: 14,
+        color: scheme.error,
+        semanticLabel: '线路不可用',
+      );
+    }
+    // 800ms 以内算快（秒开目标的一半），超过显示琥珀色提醒。
+    final fast = health.latencyMs <= 800;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.bolt_rounded,
+          size: 14,
+          color: fast ? Colors.greenAccent.shade400 : Colors.amber.shade300,
+          semanticLabel: '线路健康',
+        ),
+        Text(
+          '${health.latencyMs}ms',
+          style: TextStyle(
+            fontSize: 11,
+            color: fast ? Colors.greenAccent.shade400 : Colors.amber.shade300,
+          ),
+        ),
+      ],
     );
   }
 }

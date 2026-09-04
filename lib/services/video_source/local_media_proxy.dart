@@ -4,8 +4,11 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/services/storage/storage.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// 本地媒体代理：秒开链路的「数据层」。
 ///
@@ -38,11 +41,11 @@ class LocalMediaProxy {
   /// HLS 预取分片数：约 1~2 分钟内容，起播 + 快进回看都够用。
   static const int hlsPrefetchSegments = 6;
 
-  /// 磁盘缓存条目上限（一个条目 ≈ 一集）。
-  static const int maxEntries = 10;
+  /// 磁盘缓存条目上限（一个条目 ≈ 一集）。§2.2(c)：10→16。
+  static const int maxEntries = 16;
 
-  /// 磁盘缓存总大小上限（含分片）。
-  static const int maxTotalBytes = 160 * 1024 * 1024;
+  /// 磁盘缓存总大小上限（含分片）。§2.2(c)：160MB→256MB。
+  static const int maxTotalBytes = 256 * 1024 * 1024;
 
   /// [hasUsableCache] 的 MP4 判定阈值：缓存开头至少这么多字节才值得走代理。
   static const int usableMp4Bytes = 1024 * 1024;
@@ -58,8 +61,21 @@ class LocalMediaProxy {
   static const Duration originHeaderTimeout = Duration(seconds: 15);
 
   /// 回源数据流 chunks 间隔超时（B4）：流式播放中连续这么久没有新数据
-  /// 视为源站死掉，断开让 mpv 走直连兜底/重连。
-  static const Duration originChunkTimeout = Duration(seconds: 30);
+  /// 视为源站死掉。§2.2(e)：30s→15s——分片只有几 MB，15s 无数据即判死。
+  static const Duration originChunkTimeout = Duration(seconds: 15);
+
+  /// 分片预取滑窗长度（§2.2(e)）：始终领先播放头 N 片。
+  static const int segmentPrefetchAhead = 4;
+
+  /// 分片预取并发（§2.2(e)）。
+  static const int segmentPrefetchConcurrency = 3;
+
+  /// 分片失败重试退避梯度（§2.2(e)）：200/600/1500ms。
+  static const List<Duration> segmentRetryBackoffs = [
+    Duration(milliseconds: 200),
+    Duration(milliseconds: 600),
+    Duration(milliseconds: 1500),
+  ];
 
   /// 计量网络检查钩子：由外部接线（避免本文件依赖平台插件，便于单测）。
   static bool Function() isMeteredCheck = () => false;
@@ -75,8 +91,106 @@ class LocalMediaProxy {
   /// token → 改写后的 m3u8 清单（会话内复用，避免重复拉取+改写）。
   final Map<String, String> _rewrittenManifests = {};
 
+  /// 外部注入的清单原文（seed，阶段 0 / §1.2）：解析层探测时已经拉到
+  /// 过 m3u8 文本，代理直接复用，避免二次拉取同一 URL。
+  /// 上限 [maxManifestSeeds] 条，注入时淘汰最旧的。
+  final Map<String, _ManifestSeed> _manifestSeeds = {};
+
+  static const int maxManifestSeeds = 32;
+
   /// 每个 token 的写盘互斥（避免并发 tee 写坏文件）。
   final Set<String> _writing = {};
+
+  /// 分片预取事件流（§2.2(f)）：播放层订阅做精确错误决策
+  /// （403/404 → 换候选；timeout → 原地重开）。
+  final StreamController<ProxyEvent> _eventsController =
+      StreamController<ProxyEvent>.broadcast();
+
+  /// 代理事件流：segmentOk / segmentFail / upstream4xx / upstream5xx / timeout。
+  Stream<ProxyEvent> get events => _eventsController.stream;
+
+  void _emitEvent(String token, ProxyEventKind kind,
+      {int? status, Duration? elapsed}) {
+    if (_eventsController.isClosed) return;
+    _eventsController.add(ProxyEvent(
+      token: token,
+      kind: kind,
+      status: status,
+      elapsed: elapsed ?? Duration.zero,
+    ));
+  }
+
+  // -------------------------------------------------------------------------
+  // 滑窗预取器（§2.2(e)）
+  // -------------------------------------------------------------------------
+
+  /// 最近被播放请求命中的分片序号 = 播放头。
+  int _playheadSegmentIndex = -1;
+  List<String> _manifestSegments = const [];
+  Map<String, String> _manifestHeaders = const {};
+  Future<void>? _prefetchWindowTask;
+
+  /// 分片被播放请求命中时刷新播放头并调度滑窗预取。
+  void _touchPlayhead(int index, List<String> segments,
+      Map<String, String> headers) {
+    if (index < 0) return;
+    _playheadSegmentIndex = index;
+    _manifestSegments = segments;
+    _manifestHeaders = headers;
+    // 已有窗口任务在跑：它收尾时按最新播放头再起一轮，这里不叠加
+    _prefetchWindowTask ??=
+        _runPrefetchWindow().whenComplete(() => _prefetchWindowTask = null);
+  }
+
+  /// 滑窗预取（§2.2(e)）：始终领先播放头 [segmentPrefetchAhead] 片，
+  /// 并发 [segmentPrefetchConcurrency]，每片失败按
+  /// [segmentRetryBackoffs] 退避重试。后台跑，不阻塞分片响应。
+  Future<void> _runPrefetchWindow() async {
+    if (isMeteredCheck()) return;
+    // 50ms 去抖：快速连续命中多个分片时只按最后一个起跑
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    final segments = _manifestSegments;
+    final headers = _manifestHeaders;
+    final head = _playheadSegmentIndex;
+    if (segments.isEmpty || head < 0) return;
+
+    final targets = <int>[];
+    for (var i = head + 1;
+        i < segments.length && i <= head + segmentPrefetchAhead;
+        i++) {
+      targets.add(i);
+    }
+    if (targets.isEmpty) return;
+
+    var cursor = 0;
+    Future<void> worker() async {
+      while (true) {
+        final i = cursor++;
+        if (i >= targets.length) return;
+        await _fetchSegmentWithRetry(segments[targets[i]], headers);
+      }
+    }
+
+    await Future.wait(
+      List.generate(
+        segmentPrefetchConcurrency.clamp(1, targets.length),
+        (_) => worker(),
+      ),
+    );
+  }
+
+  /// 单分片带退避重试（§2.2(e)）：200/600/1500ms 三梯度，全失败上报事件。
+  Future<void> _fetchSegmentWithRetry(
+      String url, Map<String, String> headers) async {
+    for (var attempt = 0; attempt <= segmentRetryBackoffs.length; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(segmentRetryBackoffs[attempt - 1]);
+      }
+      final ok = await _fetchSegmentToCache(url, headers, emitEvents: true);
+      if (ok) return;
+    }
+    _emitEvent(_tokenFor(url), ProxyEventKind.segmentFail);
+  }
 
   bool get isEnabled =>
       GStorage.getSetting(SettingsKeys.localMediaCacheEnable);
@@ -113,9 +227,19 @@ class LocalMediaProxy {
   }
 
   Future<Directory> _createCacheDir() async {
-    final dir = Directory('${Directory.systemTemp.path}/miru_media_proxy');
-    await dir.create(recursive: true);
-    return dir;
+    // §2.2(c)：systemTemp 会被系统磁盘压力清理（Android 的 cache 清理
+    // 杀手最爱扫这里），迁到应用支持目录持久化。
+    try {
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory('${base.path}/media_cache');
+      await dir.create(recursive: true);
+      return dir;
+    } catch (_) {
+      // 路径服务不可用（极端场景）：退回 systemTemp，行为同旧版。
+      final dir = Directory('${Directory.systemTemp.path}/miru_media_proxy');
+      await dir.create(recursive: true);
+      return dir;
+    }
   }
 
   String _randomSecret() {
@@ -124,9 +248,45 @@ class LocalMediaProxy {
     return List.generate(8, (_) => rnd.nextInt(16).toRadixString(16)).join();
   }
 
-  /// 回源 HTTP 客户端：连接阶段有硬超时（B4）。
-  HttpClient _originClient() =>
-      HttpClient()..connectionTimeout = originConnectTimeout;
+  /// 回源 HTTP 连接池（阶段 0 / §1.6）：共享单例，连接复用、禁止逐请求
+  /// close——首帧前对同一 CDN 的 3 次 DNS+TCP+TLS 握手从此变为 1 次。
+  HttpClient get _originClient => SharedHttpClient.io;
+
+  /// 外部注入清单原文（探测阶段已拉到的 m3u8 文本）。
+  /// [url] 必须是探测时的原始地址（与后续 fetch 的 key 一致）。
+  Future<void> seedManifest(
+      String url, String text, Map<String, String> headers) async {
+    if (!url.startsWith('http') || text.trimLeft().isEmpty) return;
+    if (!text.trimLeft().startsWith('#EXTM3U')) return;
+    try {
+      if (_manifestSeeds.length >= maxManifestSeeds) {
+        _manifestSeeds.remove(_manifestSeeds.keys.first);
+      }
+      _manifestSeeds[url] = _ManifestSeed(
+        text: text,
+        headers: Map.of(headers),
+        at: DateTime.now(),
+      );
+    } catch (_) {}
+  }
+
+  /// 清单 seed 是否仍新鲜（超过 [seedTtl] 的探测文本不再复用，
+  /// 防止签名过期的清单被长期喂养）。
+  static const Duration seedTtl = Duration(minutes: 5);
+
+  _ManifestSeed? _takeSeed(String url) {
+    final seed = _manifestSeeds[url];
+    if (seed == null) return null;
+    if (DateTime.now().difference(seed.at) > seedTtl) {
+      _manifestSeeds.remove(url);
+      return null;
+    }
+    return seed;
+  }
+
+  /// token → 改写后清单的分片序列（滑窗预取器用：当前请求分片序号
+  /// 即播放头）。§2.2(e)。
+  final Map<String, List<String>> _segmentsByToken = {};
 
   Future<void> shutdown() async {
     final server = _server;
@@ -135,7 +295,13 @@ class LocalMediaProxy {
     _starting = null;
     _registrations.clear();
     _rewrittenManifests.clear();
+    _manifestSeeds.clear();
+    _segmentsByToken.clear();
+    _playheadSegmentIndex = -1;
     await server?.close(force: true);
+    if (!_eventsController.isClosed) {
+      await _eventsController.close();
+    }
   }
 
   /// 判断该直链是否已有「可用的」磁盘缓存：
@@ -150,7 +316,7 @@ class LocalMediaProxy {
     if (!videoUrl.startsWith('http')) return false;
     try {
       final token = _tokenFor(videoUrl);
-      final meta = await _readMeta(token);
+      final meta = await _readMeta(token, expectUrl: videoUrl);
       if (meta == null) return false;
       if (!isHls) {
         final f = File('${_cacheDir!.path}/$token.bin');
@@ -232,7 +398,7 @@ class LocalMediaProxy {
     if (!_writing.add(token)) {
       return;
     }
-    final client = _originClient();
+    final client = _originClient;
     try {
       // 从已有缓存的末尾续拉（追加语义），已有部分不重复下载
       final existing =
@@ -273,7 +439,6 @@ class LocalMediaProxy {
       await _writeMeta(token, url, headers, isHls: false, total: total);
     } finally {
       _writing.remove(token);
-      client.close(force: true);
     }
   }
 
@@ -317,6 +482,11 @@ class LocalMediaProxy {
         case 'seg':
           await _serveSegment(request, token);
           break;
+        case 'key':
+        case 'map':
+          // §2.2(d)：KEY/MAP 透传（注册头带上）
+          await _servePassthrough(request, token);
+          break;
         default:
           request.response.statusCode = HttpStatus.notFound;
           await request.response.close();
@@ -351,8 +521,11 @@ class LocalMediaProxy {
       }
       text = built.manifest;
       _rewrittenManifests[token] = text;
-      // 首次播放：后台把前几片补进缓存（与 mpv 的分片请求并行，互不阻塞）
-      unawaited(_prefetchSegmentsQuietly(built.segmentUrls, headers));
+      _segmentsByToken[token] = built.segmentUrls;
+      // 首次播放：滑窗预取器从第 0 片起步（后续由 mpv 的分片请求
+      // 推进播放头，§2.2(e)）；带重试退避，不再是单发即弃。
+      unawaited(_touchPlayheadAndPrefetch(
+          -1, built.segmentUrls, headers, warmStart: true));
     }
     request.response.statusCode = HttpStatus.ok;
     request.response.headers.contentType =
@@ -361,21 +534,34 @@ class LocalMediaProxy {
     await request.response.close();
   }
 
-  Future<void> _prefetchSegmentsQuietly(
-      List<String> segmentUrls, Map<String, String> headers) async {
-    if (isMeteredCheck()) return;
-    for (final url in segmentUrls.take(hlsPrefetchSegments)) {
-      await _fetchSegmentToCache(url, headers);
+  /// 清单到达时热启动预取：把前 hlsPrefetchSegments 片交重试器，
+  /// 同时把播放头初始化在 0（mpv 即将请求第 0 片）。
+  Future<void> _touchPlayheadAndPrefetch(int index, List<String> segments,
+      Map<String, String> headers,
+      {bool warmStart = false}) async {
+    _manifestSegments = segments;
+    _manifestHeaders = headers;
+    if (warmStart) {
+      if (isMeteredCheck()) return;
+      _playheadSegmentIndex = 0;
+      for (final url in segments.take(hlsPrefetchSegments)) {
+        unawaited(_fetchSegmentWithRetry(url, headers));
+      }
+      return;
     }
+    _touchPlayhead(index, segments, headers);
   }
 
-  Future<void> _fetchSegmentToCache(
-      String url, Map<String, String> headers) async {
+  /// 单分片拉取落盘。返回是否成功（§2.2(e)：重试器依据返回值
+  /// 退避；[emitEvents] 时向上报事件流）。
+  Future<bool> _fetchSegmentToCache(String url, Map<String, String> headers,
+      {bool emitEvents = false}) async {
     final segToken = _tokenFor(url);
     final segFile = File('${_cacheDir!.path}/seg_$segToken.bin');
-    if (await segFile.exists()) return;
-    if (_writing.contains(segToken)) return; // tee 正在写同一分片
-    final client = _originClient();
+    if (await segFile.exists()) return true;
+    if (_writing.contains(segToken)) return false; // tee 正在写同一分片
+    final started = DateTime.now();
+    final client = _originClient;
     try {
       final request = await client
           .getUrl(Uri.parse(url))
@@ -383,14 +569,30 @@ class LocalMediaProxy {
       headers.forEach(request.headers.set);
       final response =
           await request.close().timeout(originHeaderTimeout);
-      if (response.statusCode != 200) return;
+      if (response.statusCode != 200) {
+        if (emitEvents) {
+          _emitEvent(
+            segToken,
+            response.statusCode >= 500
+                ? ProxyEventKind.upstream5xx
+                : ProxyEventKind.upstream4xx,
+            status: response.statusCode,
+          );
+        }
+        return false;
+      }
       // 写盘前拿互斥锁（B5）：tee 可能刚好开始写同一分片；拿到锁后
       // 再复查一次文件存在性（tee 可能已写完）。
-      if (!_writing.add(segToken)) return;
+      if (!_writing.add(segToken)) return false;
       try {
-        if (await segFile.exists()) return;
+        if (await segFile.exists()) return true;
         await _writeStreamLimited(
             segFile, response.timeout(originChunkTimeout), 32 * 1024 * 1024);
+        if (emitEvents) {
+          _emitEvent(segToken, ProxyEventKind.segmentOk,
+              elapsed: DateTime.now().difference(started));
+        }
+        return true;
       } catch (_) {
         // 写了一半的分片不能当完整缓存用：删掉
         try {
@@ -401,13 +603,16 @@ class LocalMediaProxy {
         _writing.remove(segToken);
       }
     } catch (_) {
-      // 单片失败不影响其它片
-    } finally {
-      client.close(force: true);
+      if (emitEvents) {
+        _emitEvent(segToken, ProxyEventKind.timeout);
+      }
+      return false;
     }
   }
 
   /// HLS 分片：磁盘命中直接回；否则回源全量透传并落盘。
+  /// 命中/回源时同步推进滑窗预取器播放头（§2.2(e)）；
+  /// 回源非 200 时 502 + X-Miru-Upstream-Status 携带上游状态码（§2.2(e)）。
   Future<void> _serveSegment(HttpRequest request, String token) async {
     final registration = _registrations[token];
     final srcUrl = registration?.url ?? _srcFromQuery(request);
@@ -416,6 +621,9 @@ class LocalMediaProxy {
       await request.response.close();
       return;
     }
+    // 推进滑窗预取器：当前分片序号 = 播放头（§2.2(e)）
+    _advancePlayheadForSegment(token, srcUrl, request, registration);
+
     final segFile = File('${_cacheDir!.path}/seg_$token.bin');
     // 正在写入的半截分片不能当完整段返回（读侧可见性，B5 补漏）：
     // serve tee / 后台预取持锁写盘期间，文件已存在但内容不完整。
@@ -425,14 +633,16 @@ class LocalMediaProxy {
       request.response.headers.contentType = ContentType('video', 'mp2t');
       await request.response.addStream(segFile.openRead());
       await request.response.close();
+      _emitEvent(token, ProxyEventKind.segmentOk);
       return;
     }
 
-    final client = _originClient();
+    final client = _originClient;
     IOSink? sink;
     // 是否由本次请求持有写锁：finally 只释放自己持有的，
     // 避免误释放并发预取的锁（预取写盘期间也注册 _writing）。
     var holdingWriteLock = false;
+    final started = DateTime.now();
     try {
       final upstream = await client
           .getUrl(Uri.parse(srcUrl))
@@ -442,7 +652,17 @@ class LocalMediaProxy {
           await upstream.close().timeout(originHeaderTimeout);
       if (response.statusCode != 200) {
         request.response.statusCode = HttpStatus.badGateway;
+        // §2.2(e)：上游状态码随 502 带回，播放层可精确决策
+        request.response.headers.set('X-Miru-Upstream-Status',
+            '${response.statusCode}');
         await request.response.close();
+        _emitEvent(
+          token,
+          response.statusCode >= 500
+              ? ProxyEventKind.upstream5xx
+              : ProxyEventKind.upstream4xx,
+          status: response.statusCode,
+        );
         return;
       }
       request.response.statusCode = HttpStatus.ok;
@@ -459,7 +679,9 @@ class LocalMediaProxy {
       await request.response.close();
       await sink?.close();
       sink = null;
-    } catch (_) {
+      _emitEvent(token, ProxyEventKind.segmentOk,
+          elapsed: DateTime.now().difference(started));
+    } catch (e) {
       await sink?.close().catchError((_) {});
       if (holdingWriteLock) {
         // 半截分片不能当完整缓存用：删掉，下次请求重新回源
@@ -467,10 +689,65 @@ class LocalMediaProxy {
           if (await segFile.exists()) await segFile.delete();
         } catch (_) {}
       }
+      _emitEvent(token, ProxyEventKind.timeout);
       rethrow;
     } finally {
       if (holdingWriteLock) _writing.remove(token);
-      client.close(force: true);
+    }
+  }
+
+  /// 用分片清单定位当前请求分片的序号，推进滑窗预取器（§2.2(e)）。
+  void _advancePlayheadForSegment(String token, String srcUrl,
+      HttpRequest request, _ProxyRegistration? registration) {
+    final segments = _segmentsByToken[token];
+    if (segments == null || segments.isEmpty) return;
+    final index = segments.indexOf(srcUrl);
+    if (index < 0) return;
+    final headers = _forwardHeaders(request, registration);
+    _touchPlayhead(index, segments, headers);
+  }
+
+  /// KEY/MAP 透传（§2.2(d)）：回源拉取并流式转发（不落盘——密钥/init
+  /// 段极小且经常按会话轮换）。上游非 200 → 502 + X-Miru-Upstream-Status。
+  Future<void> _servePassthrough(HttpRequest request, String token) async {
+    final srcUrl = _srcFromQuery(request);
+    if (srcUrl == null) {
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+      return;
+    }
+    final registration = _registrations[token];
+    final headers = _forwardHeaders(request, registration);
+    final client = _originClient;
+    try {
+      final upstream = await client
+          .getUrl(Uri.parse(srcUrl))
+          .timeout(originConnectTimeout);
+      headers.forEach(upstream.headers.set);
+      final response =
+          await upstream.close().timeout(originHeaderTimeout);
+      if (response.statusCode != 200) {
+        request.response.statusCode = HttpStatus.badGateway;
+        request.response.headers.set('X-Miru-Upstream-Status',
+            '${response.statusCode}');
+        await request.response.close();
+        return;
+      }
+      request.response.statusCode = HttpStatus.ok;
+      final contentType = response.headers
+          .value(HttpHeaders.contentTypeHeader);
+      if (contentType != null) {
+        request.response.headers.set(
+            HttpHeaders.contentTypeHeader, contentType);
+      }
+      await request.response.addStream(
+          response.timeout(originChunkTimeout));
+      await request.response.close();
+    } catch (_) {
+      try {
+        request.response.statusCode = HttpStatus.badGateway;
+        await request.response.close();
+      } catch (_) {}
     }
   }
 
@@ -497,7 +774,7 @@ class LocalMediaProxy {
       return;
     }
     final forwardHeaders = _forwardHeaders(request, registration);
-    final meta = await _readMeta(token);
+    final meta = await _readMeta(token, expectUrl: srcUrl);
     final cacheFile = File('${_cacheDir!.path}/$token.bin');
     final cachedLen =
         await cacheFile.exists() ? await cacheFile.length() : 0;
@@ -509,7 +786,7 @@ class LocalMediaProxy {
     final requestedStart = range?.start ?? 0;
     final requestedEnd = range?.end; // null = 开放区间（到文件尾）
 
-    final client = _originClient();
+    final client = _originClient;
     IOSink? teeSink;
     // 本次请求是否持有写锁：只释放自己持有的（见 _serveSegment）
     var holdingWriteLock = false;
@@ -618,7 +895,6 @@ class LocalMediaProxy {
       rethrow;
     } finally {
       if (holdingWriteLock) _writing.remove(token);
-      client.close(force: true);
     }
   }
 
@@ -799,6 +1075,8 @@ class LocalMediaProxy {
       resolved.manifest,
       resolved.baseUrl,
       _segmentProxyUrlFor,
+      // §2.2(d)：KEY/MAP 走代理透传（注册头带上，防盗链不再 403）
+      attributeUrlFor: _attributeProxyUrlFor,
     );
     return _BuiltManifest(manifest: rewritten, segmentUrls: segmentUrls);
   }
@@ -809,10 +1087,39 @@ class LocalMediaProxy {
         '?u=${Uri.encodeComponent(absSegmentUrl)}';
   }
 
-  /// 拉取清单文本。
+  /// §2.2(d)：EXT-X-KEY 的 URI（加密密钥）→ 代理 `/key/<token>`。
+  String _keyProxyUrlFor(String absUri) {
+    final token = _tokenFor(absUri);
+    return 'http://127.0.0.1:$port/$_secret/key/$token'
+        '?u=${Uri.encodeComponent(absUri)}';
+  }
+
+  /// §2.2(d)：EXT-X-MAP 的 URI（init 分段）→ 代理 `/map/<token>`。
+  String _mapProxyUrlFor(String absUri) {
+    final token = _tokenFor(absUri);
+    return 'http://127.0.0.1:$port/$_secret/map/$token'
+        '?u=${Uri.encodeComponent(absUri)}';
+  }
+
+  /// KEY/MAP 属性 URI 的统一改写入口（§2.2(d)）：按行分流——
+  /// EXT-X-KEY → /key/，EXT-X-MAP → /map/，其余 URI 属性绝对化直连。
+  String _attributeProxyUrlFor(String line, String absUri) {
+    if (line.startsWith('#EXT-X-KEY')) return _keyProxyUrlFor(absUri);
+    if (line.startsWith('#EXT-X-MAP')) return _mapProxyUrlFor(absUri);
+    return absUri;
+  }
+
+  /// 拉取清单文本。探测阶段 seed 过的清单直接复用（不再二次拉取）。
   Future<String?> _fetchPlaylistText(
       String url, Map<String, String> headers) async {
-    final client = _originClient();
+    final seed = _takeSeed(url);
+    if (seed != null) return seed.text;
+    return _fetchPlaylistTextRemote(url, headers);
+  }
+
+  Future<String?> _fetchPlaylistTextRemote(
+      String url, Map<String, String> headers) async {
+    final client = _originClient;
     try {
       final request = await client
           .getUrl(Uri.parse(url))
@@ -830,8 +1137,6 @@ class LocalMediaProxy {
       return utf8.decode(builder.takeBytes(), allowMalformed: true);
     } catch (_) {
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -854,19 +1159,48 @@ class LocalMediaProxy {
       }
     }
     if (childUriLine == null) return null;
-    final childUrl = absolutizeUrl(childUriLine, url);
-    if (childUrl == null) return null;
-    final child = await _fetchPlaylistText(childUrl, headers);
-    if (child == null) return null;
-    return _ResolvedManifest(manifest: child, baseUrl: childUrl);
+    var currentUrl = url;
+    var currentManifest = manifest;
+    // §2.2(d)：多级清单（主→子→孙）逐级跟进，最多 3 级防深递归。
+    for (var level = 0; level < 3; level++) {
+      final childUrl = absolutizeUrl(childUriLine!, currentUrl);
+      if (childUrl == null) return null;
+      final child = await _fetchPlaylistText(childUrl, headers);
+      if (child == null) return null;
+      currentUrl = childUrl;
+      currentManifest = child;
+      // 子清单仍是多码率清单 → 继续跟进下一级
+      final childLines = child.split('\n');
+      String? next;
+      for (var i = 0; i < childLines.length && next == null; i++) {
+        if (!childLines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+        for (var j = i + 1; j < childLines.length; j++) {
+          final l = childLines[j].trim();
+          if (l.isNotEmpty && !l.startsWith('#')) {
+            next = l;
+            break;
+          }
+        }
+      }
+      if (next == null) {
+        return _ResolvedManifest(manifest: currentManifest, baseUrl: currentUrl);
+      }
+      childUriLine = next;
+    }
+    return null;
   }
 
-  /// 改写清单：分片 → 代理 /seg/；KEY/MAP 的 URI → 绝对地址（mpv 直连）。
+  /// 改写清单：分片 → 代理 /seg/；KEY/MAP 的 URI → 绝对地址；
+  /// 传入 [attributeUrlFor] 时（§2.2(d)）KEY/MAP 也改写为代理
+  /// `/key/<token>` 与 `/map/<token>`（带注册头透传，防盗链 CDN 不再因
+  /// mpv 直连丢 Referer 而 403）。EXT-X-DISCONTINUITY / BYTERANGE
+  /// 等其余行原样保留。
   String rewriteManifest(
     String manifest,
     String baseUrl,
-    String Function(String absSegmentUrl) segmentUrlFor,
-  ) {
+    String Function(String absSegmentUrl) segmentUrlFor, {
+    String Function(String line, String absUri)? attributeUrlFor,
+  }) {
     final out = <String>[];
     for (final rawLine in manifest.split('\n')) {
       final line = rawLine.trimRight();
@@ -875,7 +1209,11 @@ class LocalMediaProxy {
         continue;
       }
       if (line.startsWith('#')) {
-        out.add(rewriteAttributeUris(line, baseUrl));
+        if (attributeUrlFor != null) {
+          out.add(rewriteAttributeUris(line, baseUrl, attributeUrlFor));
+        } else {
+          out.add(rewriteAttributeUris(line, baseUrl));
+        }
         continue;
       }
       final abs = absolutizeUrl(line, baseUrl);
@@ -896,12 +1234,15 @@ class LocalMediaProxy {
     return urls;
   }
 
-  /// EXT-X-KEY / EXT-X-MAP 行里的 URI 属性改为绝对地址。
-  String rewriteAttributeUris(String line, String baseUrl) {
+  /// EXT-X-KEY / EXT-X-MAP 行里的 URI 属性改为绝对地址；
+  /// 传入 [uriFor] 时改为代理地址（§2.2(d)）。
+  String rewriteAttributeUris(String line, String baseUrl,
+      [String Function(String line, String absUri)? uriFor]) {
     if (!line.contains('URI="')) return line;
     return line.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (m) {
       final abs = absolutizeUrl(m.group(1)!, baseUrl);
-      return 'URI="${abs ?? m.group(1)}"';
+      if (abs == null) return m.group(0)!;
+      return 'URI="${uriFor != null ? uriFor(line, abs) : abs}"';
     });
   }
 
@@ -926,13 +1267,13 @@ class LocalMediaProxy {
     } catch (_) {}
   }
 
-  Future<_ProxyMeta?> _readMeta(String token) async {
+  Future<_ProxyMeta?> _readMeta(String token, {String? expectUrl}) async {
     try {
       final file = File('${_cacheDir!.path}/$token.meta');
       if (!await file.exists()) return null;
       final data = json.decode(await file.readAsString());
       if (data is! Map<String, dynamic>) return null;
-      return _ProxyMeta(
+      final meta = _ProxyMeta(
         url: data['u'] as String? ?? '',
         total: (data['t'] as num?)?.toInt(),
         segTokens: (data['s'] as List?)
@@ -940,9 +1281,26 @@ class LocalMediaProxy {
                 .toList(growable: false) ??
             const [],
       );
+      // §2.2(b)：token 碰撞防御——meta 记录的原始 URL 与期望不符时
+      // 视为未命中并删除该条目（两个 URL 同 hash 的极端场景）。
+      if (expectUrl != null && meta.url.isNotEmpty && meta.url != expectUrl) {
+        await invalidateTokenFiles(token);
+        return null;
+      }
+      return meta;
     } catch (_) {
       return null;
     }
+  }
+
+  /// 删除某 token 的全部缓存产物（meta / 数据文件）。
+  Future<void> invalidateTokenFiles(String token) async {
+    try {
+      for (final name in ['$token.meta', '$token.bin', 'seg_$token.bin']) {
+        final f = File('${_cacheDir!.path}/$name');
+        if (await f.exists()) await f.delete();
+      }
+    } catch (_) {}
   }
 
   /// LRU 清理：meta 条目数超限删最旧条目；目录总大小超限删最旧文件。
@@ -1097,12 +1455,14 @@ class LocalMediaProxy {
   }
 
   String _tokenFor(String url) {
-    var h = 0x811c9dc5;
-    for (var i = 0; i < url.length; i++) {
-      h ^= url.codeUnitAt(i);
-      h = (h * 0x01000193) & 0x7fffffff;
-    }
-    return h.toRadixString(16);
+    // §2.2(b)：sha1 前 10 字节 hex（20 字符）。旧 32 位 FNV 在 400 条
+    // 缓存规模下碰撞概率已不可忽视；80 位 token + meta URL 比对
+    //（_readMeta expectUrl）把碰撞后果也消掉。
+    final digest = sha1.convert(utf8.encode(url));
+    return digest.bytes
+        .take(10)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
   }
 }
 
@@ -1155,6 +1515,64 @@ class _BuiltManifest {
 
   final String manifest;
   final List<String> segmentUrls;
+}
+
+/// 外部注入的清单原文（探测阶段 seed，阶段 0 / §1.2）。
+class _ManifestSeed {
+  _ManifestSeed({required this.text, required this.headers, required this.at});
+
+  final String text;
+  final Map<String, String> headers;
+  final DateTime at;
+}
+
+/// 代理回源事件种类（§2.2(f)）：播放层据此做精确错误决策——
+/// 4xx 换候选线路、timeout 原地重开，不再一律弹「播放失败」。
+enum ProxyEventKind {
+  /// 分片回源成功（含滑窗预取）。
+  segmentOk,
+
+  /// 分片重试梯度全部失败（200/600/1500ms 后仍不可用）。
+  segmentFail,
+
+  /// 上游 4xx（403/404 等鉴权失败或链接失效）→ 应换候选。
+  upstream4xx,
+
+  /// 上游 5xx（源站故障）→ 可重试或换候选。
+  upstream5xx,
+
+  /// 连接/响应头/数据流超时（黑洞源站）。
+  timeout,
+}
+
+/// 代理回源事件（§2.2(f)）：[LocalMediaProxy.events] 广播流的载荷。
+///
+/// 播放层用 [token] 对应当前集的代理 URL 判定归属；[status] 仅
+/// upstream4xx / upstream5xx 事件携带；[elapsed] 为本次回源耗时
+///（segmentOk 携带，用于观测源站健康度）。
+class ProxyEvent {
+  const ProxyEvent({
+    required this.token,
+    required this.kind,
+    this.status,
+    this.elapsed = Duration.zero,
+  });
+
+  /// 代理 token（注册表 key，非源 URL）。
+  final String token;
+
+  /// 事件种类。
+  final ProxyEventKind kind;
+
+  /// 上游 HTTP 状态码（仅 4xx/5xx 事件）。
+  final int? status;
+
+  /// 本次回源耗时。
+  final Duration elapsed;
+
+  @override
+  String toString() =>
+      'ProxyEvent($token, $kind, status: $status, ${elapsed.inMilliseconds}ms)';
 }
 
 class _CacheEntryInfo {

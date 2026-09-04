@@ -7,7 +7,10 @@
 // 其余场景：纯磁盘命中 / 有界跨界（mpv 重连形态）/ 开放区间合并 /
 // 源站不理睬 Range 的退化透传 / hasUsableCache 阈值。
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -107,8 +110,9 @@ void main() {
     await LocalMediaProxy.instance
         .prefetch(url, isHls: false, headers: const {});
     // 删掉 meta 模拟「有缓存数据但总长未知」（prefetch 没跑成、
-    // 只有 tee 写过盘的场景）
-    final cacheDir = Directory('${Directory.systemTemp.path}/miru_media_proxy');
+    // 只有 tee 写过盘的场景）。§2.2(c) 缓存目录随实现迁到
+    // getApplicationSupportDirectory（上方 mock → /tmp/miru_proxy_test）。
+    final cacheDir = Directory('/tmp/miru_proxy_test/media_cache');
     final metaFile = File('${cacheDir.path}/${fnvToken(url)}.meta');
     expect(await metaFile.exists(), isTrue,
         reason: 'prefetch 应已写入 meta');
@@ -296,12 +300,12 @@ void main() {
   });
 }
 
-/// 与 LocalMediaProxy._tokenFor 相同的 FNV 哈希（测试用镜像）。
+/// 与 LocalMediaProxy._tokenFor 相同的 sha1 前 10 字节 hex（§2.2(b)，
+/// 测试用镜像；旧 FNV 已随碰撞风险升级而替换）。
 String fnvToken(String url) {
-  var h = 0x811c9dc5;
-  for (var i = 0; i < url.length; i++) {
-    h ^= url.codeUnitAt(i);
-    h = (h * 0x01000193) & 0x7fffffff;
-  }
-  return h.toRadixString(16);
+  final digest = sha1.convert(utf8.encode(url));
+  return digest.bytes
+      .take(10)
+      .map((b) => b.toRadixString(16).padLeft(2, '0'))
+      .join();
 }

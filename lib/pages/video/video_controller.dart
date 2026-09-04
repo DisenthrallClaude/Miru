@@ -526,7 +526,11 @@ abstract class _VideoPageController with Store implements Disposable {
     playerController.danmaku.finishDanmakuLoad();
     _videoSourceService?.cancel();
 
-    await playerController.stop();
+    // §2.1(e)：解析先行（网络 I/O 先跑），软停与之并行。
+    // 旧链路「await 全量销毁 → 再解析」把 mpv 实例重建 300~900ms
+    // 与解析耗时串行叠加，是换集慢的主因；软停保留实例与纹理，
+    // 新集 init 时 ensurePlayer 幂等复用，解析网络耗时与复位重叠。
+    unawaited(playerController.softStop());
     if (session.isStale) {
       return;
     }
@@ -715,32 +719,15 @@ abstract class _VideoPageController with Store implements Disposable {
           .clamp(5, 120)
           .toInt();
       final Duration timeout = Duration(seconds: timeoutSeconds);
-      VideoSource source;
-      try {
-        source = await _videoSourceService!.resolveWithHeaders(
-          url,
-          useLegacyParser: currentPlugin.useLegacyParser,
-          offset: offset,
-          timeout: timeout,
-          playbackHeaders: playbackHeaders,
-        );
-      } on VideoSourceTimeoutException {
-        unawaited(PluginHealthTracker.instance
-            .recordFailure(currentPlugin.name));
-        // 超时后自动换另一种解析器重试一次，而不是直接把失败甩给用户。
-        if (session.isStale) {
-          return;
-        }
-        MiruLogger().w(
-            'VideoPageController: resolve timed out, retrying with ${currentPlugin.useLegacyParser ? 'standard' : 'legacy'} parser');
-        source = await _videoSourceService!.resolveWithHeaders(
-          url,
-          useLegacyParser: !currentPlugin.useLegacyParser,
-          offset: offset,
-          timeout: timeout,
-          playbackHeaders: playbackHeaders,
-        );
-      }
+      // 超时不再翻转解析器重试（阶段 0 / §1.5）——脚本已两套全量常驻
+      // 注入，翻转只是原样重跑白付一轮超时；直接把超时交给兜底换源。
+      final source = await _videoSourceService!.resolveWithHeaders(
+        url,
+        useLegacyParser: currentPlugin.useLegacyParser,
+        offset: offset,
+        timeout: timeout,
+        playbackHeaders: playbackHeaders,
+      );
 
       if (session.isStale) {
         return;
@@ -804,12 +791,14 @@ abstract class _VideoPageController with Store implements Disposable {
         _playbackSessions.cancel();
       }
     } on VideoSourceTimeoutException {
-      // 健康度已在内层超时分支记录过，这里不再重复计数，
-      // 否则一次用户可感知的失败会被计两次，健康度过快拉黑。
+      // 翻转解析器重试已删除（阶段 0）：超时健康度在这层记录（此前由
+      // 内层翻转分支负责，避免双计数——现在只有这一处）。
+      unawaited(
+          PluginHealthTracker.instance.recordFailure(currentPlugin.name));
       if (session.isStale) {
         return;
       }
-      // 换解析器重试已失败，自动切换备选源；无候选才报错。
+      // 超时直接切换备选源；无候选才报错。
       final switched = await _switchToFallbackSource(
         session: session,
         playerController: playerController,

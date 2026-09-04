@@ -192,12 +192,10 @@ class PlayerController implements Disposable {
     playback.buttonSkipTime = GStorage.getSetting(SettingsKeys.buttonSkipTime);
     playback.arrowKeySkipTime =
         GStorage.getSetting(SettingsKeys.arrowKeySkipTime);
-    // 上游 changeEpisode 在 init 前必然已 stop()（两个调用点皆然）。
-    // 此处再走全量释放（audio_service setActive + 音量 UI 恢复等
-    // 3-4 个平台通道往返）纯属重复，还会把音频会话 active 状态
-    // 翻转一遍。只保留兜底性的播放内核复位：无实例时零开销。
+    // §2.1：播放内核单例常驻——换集只软停（实例/纹理/订阅保留），
+    // 全量销毁只在离开视频页（beginShutdown）。无实例时零开销。
     try {
-      await playback.stop();
+      await playback.softStop();
     } catch (_) {}
     if (initialization.isStale) {
       return false;
@@ -439,6 +437,14 @@ class PlayerController implements Disposable {
   Future<void> stop() async {
     _initializations.cancel();
     await _releasePlaybackResources();
+  }
+
+  /// 换集软停（§2.1）：取消在途初始化会话 + 复位播放内核（不销毁
+  /// Player/VideoController/纹理）。旧实例继续常驻，新集 init 时
+  /// ensurePlayer 幂等复用，换集不再黑屏重建。
+  Future<void> softStop() async {
+    _initializations.cancel();
+    await playback.softStop();
   }
 
   Future<Uint8List?> screenshot({String format = 'image/jpeg'}) async {
