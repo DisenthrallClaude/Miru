@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.0-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.0/Miru-1.6.0-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.1/Miru-1.6.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,21 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.6.0（本次）
+### 1.6.1（本次）
+
+> 安装包：[Releases v1.6.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.1)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**全新液态玻璃开屏 + 首启动一步到位。**
+
+- **液态玻璃欢迎屏**：首次启动换上「液态玻璃」开屏——巨大的玻璃穹顶坐在屏幕底缘，上滑把它推向屏中，一路折射身后的云海/星空并缩成 + 按钮；落定后贴纸从按钮的玻璃里升起结成羽流，标题文案以对焦扫入的方式展开，底部浮现「直接进入」。
+- **白天/黑夜双主题**：白天（Sky）是循环云海视频背景 + 旅行贴纸，玻璃呈日间灰调，送回时贴纸下坠再上浮淡出；黑夜（Astro）是星空与地平光晕，玻璃呈蓝白夜色，贴纸被卷入星尘漩涡坠入核心。按系统昼夜自动选择。
+- **一步进入，不再逐步确认**：免责声明、更新来源、网络镜像、规则安装四步选择全部移除——进入即默认全部同意：镜像开关自动启用、规则目录自动拉取并逐条安装（日漫/失效源仍留给设置页按需安装），装完直达首页。
+- **双入口**：CTA「直接进入」直接完成初始化；也可以点「通过 GitHub 进入」打开项目仓库后同样进入。
+- 玻璃光影与动效参数一比一移植自开源项目 [Appllama/liquid-glass-screens](https://github.com/Appllama/liquid-glass-screens)（GPL-3.0，与 Miru 同协议），文案与字标替换为 Miru 语境；含 13 项物理引擎回归测试，全量 261 项测试通过。
+
+### 1.6.0
 
 > 安装包：[Releases v1.6.0](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.0)
 >
