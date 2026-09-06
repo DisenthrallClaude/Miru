@@ -419,7 +419,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
   // ── 贴纸层（透镜之下，被玻璃真实折射） ────────────────────────────────────
 
   bool get _realLens =>
-      _shadersReady && LiquidGlassShaders.isBackdropLensSupported;
+      LiquidGlassShaders.isBackdropLensSupported;
 
   Widget _buildStickers() {
     return AnimatedBuilder(

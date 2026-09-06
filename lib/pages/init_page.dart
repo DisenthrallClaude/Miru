@@ -86,10 +86,10 @@ class _InitPageState extends State<InitPage> {
     if (GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch) &&
         mounted) {
       context.navigate('/onboarding');
-      // 云同步错峰启动同样要跑（回访用户可能已配置同步）；
-      // 首屏导航后 4s 触发，不影响玻璃页渲染。
-      unawaited(_delayedCloudSyncInit());
       await initFutures;
+      // 云同步错峰启动：计时从 init 完成后起算（4s 后触发），
+      // 避免慢机上 Hive 写锁与插件 init 竞争；导航已先行，不影响玻璃页。
+      unawaited(_delayedCloudSyncInit());
       StartupGate.markPluginsReady();
       // 后续动作（更新检查/公告）由 OnboardingPage 的进入动作接管。
       return;

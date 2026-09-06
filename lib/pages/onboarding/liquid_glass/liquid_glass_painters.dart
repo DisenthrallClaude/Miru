@@ -125,10 +125,10 @@ class GlassSpherePainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.8);
     canvas.drawCircle(c, R * 0.985, rimPaint);
 
-    // ── 右上 sheen：一段亮弧（峰值 ~1 点钟，对齐 glass.frg 的
-    // up = normalize(0.30, -0.95)）+ 一片内侧漫射。v1.6.3 修正了
-    // 首版左右镜像的错误（sweep 顺时针从 3 点钟起算：1 点钟 = 300°
-    // = stop 0.833）。──
+    // ── 右上 sheen：一段亮弧（峰值 ≈12:35，对齐 glass.frg 的
+    // up = normalize(0.30, -0.95)，原版注释「brightest toward one
+    // o'clock」）+ 一片内侧漫射。v1.6.3 修正了首版左右镜像的错误
+    //（sweep 顺时针从 3 点钟起算：288° = stop 0.80）。──
     final sheenRect = Rect.fromCircle(center: c, radius: R);
     final sheenSweep = ui.Gradient.sweep(
       c,
@@ -137,7 +137,10 @@ class GlassSpherePainter extends CustomPainter {
         const ui.Color(0x66FFFFFF),
         const ui.Color(0x00FFFFFF),
       ],
-      const [0.58, 0.833, 0.97],
+      // 峰值 0.80 = 288° = 时钟 12:35，对齐 glass.frg 的
+      // up = normalize(0.30, -0.95)（原版注释「brightest toward one
+      // o'clock」）；色带边缘 0.58/0.97 关于顶部对称。
+      const [0.58, 0.80, 0.97],
       TileMode.clamp,
     );
     final sheenPaint = Paint()
@@ -152,7 +155,7 @@ class GlassSpherePainter extends CustomPainter {
     // 内侧右上漫射高光（1 点钟方向，同 sheen 峰值）。
     final innerPaint = Paint()
       ..shader = ui.Gradient.radial(
-        Offset(c.dx + R * 0.30, c.dy - R * 0.32),
+        Offset(c.dx + R * 0.32, c.dy - R * 0.36),
         R * 0.75,
         [
           const ui.Color(0x2EFFFFFF),
@@ -388,7 +391,8 @@ class LensPainter extends CustomPainter {
     final sloshY = controller.sloshY * R * 0.10;
 
     // sampler 索引 0；浮点 uniforms 从 0 开始。
-    shader.setImageSampler(0, img);
+    // 线性采样（默认 FilterQuality.none 是最近邻，放大折射会出阶梯）。
+    shader.setImageSampler(0, img, filterQuality: FilterQuality.medium);
     shader.setFloat(0, img.width.toDouble());
     shader.setFloat(1, img.height.toDouble());
     shader.setFloat(2, orbX * dpr);

@@ -125,8 +125,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
   ///
   /// 不重跑首次安装（规则已就绪、设置已同意）；只等后台初始化完成
   ///（StartupGate，秒级放行）后进入默认页。
+  bool _entering = false;
+
   Future<void> _enterFromSplash({bool viaGithub = false}) async {
-    if (autoSetupMessage != null) return; // 防重复点击。
+    if (_entering || autoSetupMessage != null) return; // 防重复点击。
+    _entering = true;
     if (viaGithub) {
       unawaited(_openRepository());
     }
