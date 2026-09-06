@@ -7,7 +7,6 @@
 //  以及深夜窗口对浅色设置的强制覆盖（用户需求：23 点后一律黑色版本）。
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
