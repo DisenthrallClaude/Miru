@@ -58,6 +58,11 @@ class _InitPageState extends State<InitPage> {
   }
 
   Future<void> _initializeApp() async {
+    // v1.6.3：从 initState 同步段发起的 async 函数在首个 await 前不能
+    // 导航（flutter_modular 的 navigate 会同步 setState，触发
+    // 「setState() called during build」断言）。先让出一帧。
+    await Future<void>.delayed(Duration.zero);
+
     _migrateStorage();
     _loadShaders();
     _loadDanmakuShield();
@@ -116,6 +121,14 @@ class _InitPageState extends State<InitPage> {
       // 初始化已在上面 await 完成——玻璃页里点「直接进入」即可进入主界面。
       context.navigate('/onboarding');
       return;
+    }
+
+    // v1.6.3 迁移：v1.6.2 及之前的升级用户没有 onboardingDone 标志。
+    // 走到这里说明引导早已完成——一次性补写，防止之后用户在设置里开
+    // 「每次启动显示开屏」时被误判为首启动（重跑自动安装、覆盖
+    // 用户已改过的自动更新/镜像等设置、返回键弹退出确认）。
+    if (!GStorage.getSetting(SettingsKeys.onboardingDone)) {
+      unawaited(GStorage.putSetting(SettingsKeys.onboardingDone, true));
     }
 
     if (!mounted) {

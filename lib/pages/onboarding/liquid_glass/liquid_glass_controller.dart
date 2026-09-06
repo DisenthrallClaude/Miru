@@ -29,9 +29,15 @@ class LiquidGlassController extends ChangeNotifier {
     _sy = height / 874;
     r0 = 245 * _sx;
     cy0 = height;
-    r1 = 44 * _sx;
+    // v1.6.3：宽屏/横屏钳制——球体半径随 sx、文案位置随 h 分数，
+    // 两套尺度在 w/h>1.35（横屏手机、平板横屏、分屏）发散，
+    // 按钮底缘（cy1+r1）会越过标题块顶（0.6163h）压进文字。
+    // 钳到 0.1473h-12（= 0.6163h - 0.469h - 12px 呼吸）；竖屏下
+    // 44*sx 远小于该值，行为与原版完全一致。
+    r1 = math.min(44 * _sx, 0.1473 * height - 12);
     cy1 = 0.469 * height;
-    rf = 32 * _sx;
+    // 半径下限楼层随 r1 联动钳制，保持 rf < r1 的单调关系。
+    rf = math.min(32 * _sx, r1 - 2);
     cx = width / 2;
     travel = cy0 - cy1;
     _state = Float64List(stickerSlots * _k);

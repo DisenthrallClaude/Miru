@@ -75,7 +75,8 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
   /// v1.6.3 统一文案/字标尺度：取 sx/sy 中较小者。
   ///
   /// 原版常量以 402×874 为基准、字号随 sx 走、行位随 h 分数走：
-  /// 在非 874 纵横比的屏上（s=min(sx,sy)>1 的长屏尤为明显）
+  /// 在宽高比偏离基准的屏上（尤其 w/h≥0.46 的偏宽/偏短屏——16:9 短屏、
+  /// 横屏、平板；长屏反而因 0.7032h-0.6163h 差恒定而安全），
   /// 「两行标题块底部 0.6163h+76sx」会追上甚至越过第三行顶部 0.7032h，
   /// 造成文字重叠；宽屏/横屏/平板则字标爆炸。统一尺度后
   /// 全部元素随同一比例缩放，叠行由相对堆叠定位兜底。
@@ -456,6 +457,10 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       builder: (_, __) {
         final R = controller.radius;
         final dpr = MediaQuery.devicePixelRatioOf(context);
+        // 退化守卫：半径过小（异常几何）时不做 backdrop 快照。
+        if (R < 4) {
+          return const SizedBox.shrink();
+        }
         // float 槽位：0/1 = sceneRes（引擎写入，不设置）；
         // 2/3 = c；4 = r；5 = amount；6 = bezel；7 = disp；8/9 = slosh。
         shader.setFloat(2, controller.orbX * dpr);

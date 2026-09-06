@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v1.6.3: 启动屏颜色与液态玻璃欢迎页同色（Sky pageColor），
-     系统启动画面 → Flutter 首帧颜色一致，消除白屏闪断。 -->
+<!-- v1.6.3: launch_bg = 启动屏颜色与液态玻璃欢迎页同色（Sky pageColor），
+     系统启动画面 → Flutter 首帧颜色一致，消除白屏闪断。
+     ic_launcher_background = 自适应图标底色（mipmap-anydpi-v26/ic_launcher.xml
+     引用；v1.6.2 原值是白色，保留原值防止 AAPT2 悬空引用）。 -->
 <resources>
     <color name="launch_bg">#FFDCE8F2</color>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
 </resources>

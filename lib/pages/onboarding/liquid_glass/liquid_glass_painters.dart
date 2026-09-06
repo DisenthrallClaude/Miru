@@ -125,7 +125,10 @@ class GlassSpherePainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.8);
     canvas.drawCircle(c, R * 0.985, rimPaint);
 
-    // ── 左上 sheen：一段亮弧 + 一片内侧漫射 ──
+    // ── 右上 sheen：一段亮弧（峰值 ~1 点钟，对齐 glass.frg 的
+    // up = normalize(0.30, -0.95)）+ 一片内侧漫射。v1.6.3 修正了
+    // 首版左右镜像的错误（sweep 顺时针从 3 点钟起算：1 点钟 = 300°
+    // = stop 0.833）。──
     final sheenRect = Rect.fromCircle(center: c, radius: R);
     final sheenSweep = ui.Gradient.sweep(
       c,
@@ -134,7 +137,7 @@ class GlassSpherePainter extends CustomPainter {
         const ui.Color(0x66FFFFFF),
         const ui.Color(0x00FFFFFF),
       ],
-      const [0.55, 0.72, 0.95],
+      const [0.58, 0.833, 0.97],
       TileMode.clamp,
     );
     final sheenPaint = Paint()
@@ -146,10 +149,10 @@ class GlassSpherePainter extends CustomPainter {
       ..fillType = PathFillType.evenOdd;
     canvas.drawPath(rimBand, sheenPaint);
 
-    // 内侧左上漫射高光。
+    // 内侧右上漫射高光（1 点钟方向，同 sheen 峰值）。
     final innerPaint = Paint()
       ..shader = ui.Gradient.radial(
-        Offset(c.dx - R * 0.32, c.dy - R * 0.36),
+        Offset(c.dx + R * 0.30, c.dy - R * 0.32),
         R * 0.75,
         [
           const ui.Color(0x2EFFFFFF),

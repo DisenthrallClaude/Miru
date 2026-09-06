@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v1.6.3: 夜间启动屏颜色 = Astro pageColor。 -->
+<!-- v1.6.3: 夜间启动屏颜色 = Astro pageColor；ic_launcher_background 保留
+     原夜间值（黑），供自适应图标引用。 -->
 <resources>
     <color name="launch_bg">#FF04060C</color>
+    <color name="ic_launcher_background">#FF000000</color>
 </resources>

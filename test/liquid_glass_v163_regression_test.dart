@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_controller.dart';
 import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_copy_widgets.dart';
 import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_welcome.dart';
 import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_theme.dart';
@@ -151,6 +152,40 @@ void main() {
       final interfaceKeys = SettingsKeys.byGroup(SettingGroup.interface);
       expect(interfaceKeys, contains(SettingsKeys.showSplashOnEveryLaunch));
       expect(interfaceKeys, contains(SettingsKeys.onboardingDone));
+    });
+  });
+
+  group('v1.6.3 玻璃球半径钳制（宽屏/横屏）', () {
+    test('竖屏基准：r1/rf 与原版常量一致（钳制不生效）', () {
+      final c = LiquidGlassController(
+        theme: skyLiquidGlassTheme,
+        width: 402,
+        height: 874,
+      );
+      expect(c.r1, closeTo(44, 0.001));
+      expect(c.rf, closeTo(32, 0.001));
+    });
+
+    test('横屏 800×360：按钮底缘不越过标题块顶（0.6163h-12 呼吸）', () {
+      final c = LiquidGlassController(
+        theme: skyLiquidGlassTheme,
+        width: 800,
+        height: 360,
+      );
+      expect(c.r1, lessThanOrEqualTo(0.1473 * 360 - 12 + 1e-9));
+      expect(c.cy1 + c.r1, lessThanOrEqualTo(0.6163 * 360 - 12 + 1e-9));
+      // rf 与 r1 保持单调（过冲楼层必须小于按钮半径）。
+      expect(c.rf, lessThan(c.r1));
+    });
+
+    test('平板横屏 1280×800：同上', () {
+      final c = LiquidGlassController(
+        theme: astroLiquidGlassTheme,
+        width: 1280,
+        height: 800,
+      );
+      expect(c.cy1 + c.r1, lessThanOrEqualTo(0.6163 * 800 - 12 + 1e-9));
+      expect(c.rf, lessThan(c.r1));
     });
   });
 
