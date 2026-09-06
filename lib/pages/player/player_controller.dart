@@ -223,59 +223,22 @@ class PlayerController implements Disposable {
       return false;
     }
 
-    if (isDesktop()) {
-      final freshStart = playback.volume == -1;
-      if (freshStart) {
-        muted = GStorage.getSetting(SettingsKeys.playerMuted);
-        final remembered = GStorage.getSetting(SettingsKeys.defaultVolume);
-        _preMuteVolume = remembered > 0 ? remembered : 100;
-        playback.volume = muted ? 0 : remembered;
-      }
-      await setVolume(playback.volume);
-      if (!_ownsInitialization(initialization, player)) {
-        return false;
-      }
-    } else {
-      await FlutterVolumeController.getVolume().then((value) {
-        playback.volume = (value ?? 0.0) * 100;
-      });
-      if (!_ownsInitialization(initialization, player)) {
-        return false;
-      }
-
-      await FlutterVolumeController.updateShowSystemUI(false);
-      if (!_ownsInitialization(initialization, player)) {
-        await FlutterVolumeController.updateShowSystemUI(true);
-        return false;
-      }
-
-      FlutterVolumeController.addListener((volume) {
-        if (player == null || !_ownsInitialization(initialization, player)) {
-          return;
-        }
-        if (panel.volumeSeeking) {
-          return;
-        }
-        playback.applyExternalVolume(volume * 100);
-        if (!Platform.isAndroid && !panel.volumeSeeking) {
-          panel.showVolume = true;
-          hideVolumeUITimer?.cancel();
-          hideVolumeUITimer = Timer(const Duration(seconds: 1), () {
-            panel.showVolume = false;
-            hideVolumeUITimer = null;
-          });
-        }
-      }, category: AudioSessionCategory.playback, emitOnStart: false);
-      if (!_ownsInitialization(initialization, player)) {
-        return false;
-      }
-    }
-    await setPlaybackSpeed(playback.playerSpeed);
-    if (!_ownsInitialization(initialization, player)) {
-      return false;
-    }
+    // v1.6.4：open 已完成、画面纹理已就绪——此刻即翻转 loading。
+    // 后续音量/速度装配是非致命增强：任何平台通道失败只记日志，
+    // 绝不能 (a) 向上抛异常（调用方会把 init 异常误判为「解析失败」
+    // 触发换源循环）；(b) 阻塞 loading 翻转（黑遮罩盖着已出声的
+    // 画面 = 「有声音没画面、一直显示解析中」）。
     MiruLogger().i('PlayerController: video initialized');
     playback.loading = false;
+    try {
+      await _installVolumeAndSpeed(player, initialization);
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'PlayerController: post-open volume/speed assembly failed (non-fatal)',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
 
     coverUrl = params.coverUrl;
 
@@ -291,6 +254,63 @@ class PlayerController implements Disposable {
 
   bool _ownsInitialization(AsyncSession initialization, Player player) {
     return initialization.isActive && playback.isCurrentPlayer(player);
+  }
+
+  /// v1.6.4：open 之后的音量/播放速度装配（从 init 主流程拆出）。
+  ///
+  /// 全段被 init 的 try-catch 隔离——平台通道（音量服务）任何异常都
+  /// 不影响 init 的成功结论；会话失效（换集抢先）则静默返回。
+  Future<void> _installVolumeAndSpeed(
+    Player player,
+    AsyncSession initialization,
+  ) async {
+    if (isDesktop()) {
+      final freshStart = playback.volume == -1;
+      if (freshStart) {
+        muted = GStorage.getSetting(SettingsKeys.playerMuted);
+        final remembered = GStorage.getSetting(SettingsKeys.defaultVolume);
+        _preMuteVolume = remembered > 0 ? remembered : 100;
+        playback.volume = muted ? 0 : remembered;
+      }
+      await setVolume(playback.volume);
+    } else {
+      final initialVolume = await FlutterVolumeController.getVolume();
+      playback.volume = (initialVolume ?? 0.0) * 100;
+      if (!_ownsInitialization(initialization, player)) {
+        return;
+      }
+      await FlutterVolumeController.updateShowSystemUI(false);
+      if (!_ownsInitialization(initialization, player)) {
+        await FlutterVolumeController.updateShowSystemUI(true);
+        return;
+      }
+      FlutterVolumeController.addListener((volume) {
+        if (!_ownsInitialization(initialization, player)) {
+          return;
+        }
+        if (panel.volumeSeeking) {
+          return;
+        }
+        playback.applyExternalVolume(volume * 100);
+        if (!Platform.isAndroid && !panel.volumeSeeking) {
+          panel.showVolume = true;
+          hideVolumeUITimer?.cancel();
+          hideVolumeUITimer = Timer(const Duration(seconds: 1), () {
+            panel.showVolume = false;
+            hideVolumeUITimer = null;
+          });
+        }
+      }, category: AudioSessionCategory.playback, emitOnStart: false);
+    }
+    if (!_ownsInitialization(initialization, player)) {
+      return;
+    }
+    try {
+      await setPlaybackSpeed(playback.playerSpeed);
+    } catch (e) {
+      MiruLogger()
+          .w('PlayerController: setPlaybackSpeed failed (non-fatal)', error: e);
+    }
   }
 
   Future<void> setShader(SuperResolutionMode mode, {Player? player}) async {

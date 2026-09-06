@@ -5,6 +5,7 @@ import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/widget/embedded_native_control_area.dart';
 import 'package:miru/bean/widget/frosted_surface.dart';
 import 'package:miru/bean/widget/liquid_glass_indicator.dart';
+import 'package:miru/bean/widget/liquid_glass_panel.dart';
 import 'package:miru/utils/theme.dart';
 import 'package:miru/navigation.dart';
 import 'package:miru/pages/menu/route_visibility.dart';
@@ -159,17 +160,23 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
 
   Widget _bottomMenu(BuildContext context, int selectedIndex) {
     return Scaffold(
-      // 内容延伸到导航条之下，配合毛玻璃形成 iOS 式的材质层次
+      // 内容延伸到导航条之下，配合玻璃形成 iOS 式的材质层次
       extendBody: true,
       body: _outlet(context, bottomInset: _navBarHeight),
-      bottomNavigationBar: FrostedBar(
+      // v1.6.4：悬浮液态玻璃 Dock——与开屏同源的真实折射玻璃
+      //（ClipRRect + BackdropFilter(ImageFilter.shader)）：内容从
+      // 玻璃下滚过时被弯折、rim 色散、顶部内侧高光。回退路径自动
+      // 降级为毛玻璃。
+      bottomNavigationBar: LiquidGlassDock(
+        height: _navBarHeight,
+        radius: 32,
         child: Stack(
           alignment: Alignment.center,
           children: [
             // 玻璃滑块铺在页签之下，IgnorePointer 保证不抢手势
             Positioned(
-              left: 0,
-              right: 0,
+              left: 12,
+              right: 12,
               top: (_navBarHeight - _indicatorHeight) / 2,
               height: _indicatorHeight,
               child: LiquidGlassIndicator(
@@ -183,6 +190,7 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
               backgroundColor: Colors.transparent,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
+              indicatorColor: Colors.transparent,
               destinations: const <Widget>[
                 NavigationDestination(
                   selectedIcon: Icon(Icons.auto_awesome_rounded),

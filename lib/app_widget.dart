@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:miru/bean/appbar/safe_mediaquery_warpper.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -90,14 +89,14 @@ class _AppWidgetState extends State<AppWidget>
     _didApplyStoredThemeSettings = true;
 
     themeProvider.setThemeMode(_storedThemeMode(), notify: false);
-    themeProvider.setDynamic(
-      GStorage.getSetting(SettingsKeys.useDynamicColor),
-      notify: false,
-    );
+    // v1.6.4：动态配色功能已移除（useDynamicColor 恒为 false，
+    // 设置键保留以兼容存量数据）。
+    // v1.6.4：自定义字体（若已激活）优先于系统/内置开关。
     themeProvider.setFontFamily(
       GStorage.getSetting(SettingsKeys.useSystemFont),
       notify: false,
     );
+    themeProvider.refreshFontFamily(notify: false);
 
     final color = _storedThemeColor();
     final oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
@@ -310,49 +309,33 @@ class _AppWidgetState extends State<AppWidget>
     final ThemeProvider themeProvider = context.watch<ThemeProvider>();
     bool oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
 
-    var app = DynamicColorBuilder(
-      builder: (theme, darkTheme) {
-        final useDynamicColor =
-            themeProvider.useDynamicColor && theme != null && darkTheme != null;
-        final lightTheme = useDynamicColor
-            ? _buildAppTheme(
-                brightness: Brightness.light,
-                colorScheme: theme,
-                fontFamily: themeProvider.currentFontFamily,
-              )
-            : themeProvider.light;
-        final dynamicDarkTheme = useDynamicColor
-            ? _buildAppTheme(
-                brightness: Brightness.dark,
-                colorScheme: darkTheme,
-                fontFamily: themeProvider.currentFontFamily,
-              )
-            : themeProvider.dark;
-        final effectiveDarkTheme = useDynamicColor && oledEnhance
-            ? oledDarkTheme(dynamicDarkTheme)
-            : dynamicDarkTheme;
+    // v1.6.4：「动态配色」功能已移除——主题固定走设计系统种子色
+    //（themeProvider.light/dark 由字体/OLED 两个维度重建）。
+    // DynamicColorBuilder 与 Material You 取色链路一并拆除。
+    final lightTheme = themeProvider.light;
+    final effectiveDarkTheme = oledEnhance
+        ? oledDarkTheme(themeProvider.dark)
+        : themeProvider.dark;
 
-        return MaterialApp.router(
-          title: "Miru",
-          localizationsDelegates: GlobalMaterialLocalizations.delegates,
-          supportedLocales: const [
-            Locale.fromSubtags(
-                languageCode: 'zh', scriptCode: 'Hans', countryCode: "CN")
-          ],
-          locale: const Locale.fromSubtags(
-              languageCode: 'zh', scriptCode: 'Hans', countryCode: "CN"),
-          theme: lightTheme,
-          darkTheme: effectiveDarkTheme,
-          themeMode: themeProvider.themeMode,
-          scaffoldMessengerKey: rootScaffoldMessengerKey,
-          routerConfig: ModularApp.routerConfigOf(context),
-          // 修复部分 ROM（小米 HyperOS 等，flutter/flutter#161086）上报的
-          // 系统 MediaQuery padding 异常，导致 AppBar 顶到状态栏/刘海下面、
-          // 顶部内容被遮挡。正常设备零开销直接透传。
-          builder: (context, child) =>
-              SafeMediaQueryWrapper(child: child ?? const SizedBox.shrink()),
-        );
-      },
+    var app = MaterialApp.router(
+      title: "Miru",
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [
+        Locale.fromSubtags(
+            languageCode: 'zh', scriptCode: 'Hans', countryCode: "CN")
+      ],
+      locale: const Locale.fromSubtags(
+          languageCode: 'zh', scriptCode: 'Hans', countryCode: "CN"),
+      theme: lightTheme,
+      darkTheme: effectiveDarkTheme,
+      themeMode: themeProvider.themeMode,
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
+      routerConfig: ModularApp.routerConfigOf(context),
+      // 修复部分 ROM（小米 HyperOS 等，flutter/flutter#161086）上报的
+      // 系统 MediaQuery padding 异常，导致 AppBar 顶到状态栏/刘海下面、
+      // 顶部内容被遮挡。正常设备零开销直接透传。
+      builder: (context, child) =>
+          SafeMediaQueryWrapper(child: child ?? const SizedBox.shrink()),
     );
 
     return app;

@@ -1,17 +1,23 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
-import 'package:miru/bean/card/palette_card.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/settings/theme_provider.dart';
-import 'package:miru/bean/settings/color_type.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/bean/settings/settings_list.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:miru/utils/device.dart';
 import 'package:miru/utils/theme.dart';
 
+/// 外观设置页。
+///
+/// v1.6.4：
+/// * 移除「配色方案」与「动态配色」——主题色固定走设计系统默认种子色
+///   （页面观感统一，不再提供种子色选择墙）；
+/// * 字体链路升级为三级：自定义字体（下载激活）> 系统字体 > 内置
+///   思源宋体。「自定义字体」入口进专属字体页（内置精选目录，
+///   默认不下载，用户看中哪款下哪款）。
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({super.key});
 
@@ -22,9 +28,7 @@ class ThemeSettingsPage extends StatefulWidget {
 class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   late dynamic defaultDanmakuArea;
   late dynamic defaultThemeMode;
-  late dynamic defaultThemeColor;
   late bool oledEnhance;
-  late bool useDynamicColor;
   late bool showWindowButton;
   late bool useSystemFont;
   late final ThemeProvider themeProvider;
@@ -34,9 +38,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   void initState() {
     super.initState();
     defaultThemeMode = GStorage.getSetting(SettingsKeys.themeMode);
-    defaultThemeColor = GStorage.getSetting(SettingsKeys.themeColor);
     oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
-    useDynamicColor = GStorage.getSetting(SettingsKeys.useDynamicColor);
     showWindowButton = GStorage.getSetting(SettingsKeys.showWindowButton);
     useSystemFont = GStorage.getSetting(SettingsKeys.useSystemFont);
     themeProvider = context.read<ThemeProvider>();
@@ -49,28 +51,11 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
     }
   }
 
-  void setTheme(Color? color) {
-    // 主题构造统一走设计系统，保证与 app_widget 启动时构造的主题一致。
-    // color 为 null 时 buildMiruTheme 内部回落到 kDefaultSeedColor。
-    var defaultDarkTheme = buildMiruTheme(
-      brightness: Brightness.dark,
-      fontFamily: themeProvider.currentFontFamily,
-      seedColor: color,
-    );
-    var oledTheme = oledDarkTheme(defaultDarkTheme);
-    themeProvider.setTheme(
-      buildMiruTheme(
-        brightness: Brightness.light,
-        fontFamily: themeProvider.currentFontFamily,
-        seedColor: color,
-      ),
-      oledEnhance ? oledTheme : defaultDarkTheme,
-    );
-    defaultThemeColor = color?.toARGB32().toRadixString(16) ?? 'default';
-    GStorage.putSetting(SettingsKeys.themeColor, defaultThemeColor);
-  }
-
-  void resetTheme() {
+  /// 主题重建（字体变化后同步 light/dark 两套主题）。
+  ///
+  /// v1.6.4 起配色方案入口已移除，种子色固定为设计系统默认值；
+  /// 本方法只服务字体/OLED 两个维度的主题重建。
+  void rebuildThemes() {
     var defaultDarkTheme = buildMiruTheme(
       brightness: Brightness.dark,
       fontFamily: themeProvider.currentFontFamily,
@@ -85,7 +70,8 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
       ),
       oledEnhance ? oledTheme : defaultDarkTheme,
     );
-    defaultThemeColor = 'default';
+    // 兼容旧数据：themeColor 存量值统一回写为 default，
+    // 避免将来读取到不再被 UI 支持的种子色。
     GStorage.putSetting(SettingsKeys.themeColor, 'default');
   }
 
@@ -112,14 +98,14 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   void updateOledEnhance() {
-    dynamic color;
-    oledEnhance = GStorage.getSetting(SettingsKeys.oledEnhance);
-    if (defaultThemeColor == 'default') {
-      color = kDefaultSeedColor;
-    } else {
-      color = Color(int.parse(defaultThemeColor, radix: 16));
-    }
-    setTheme(color);
+    rebuildThemes();
+  }
+
+  /// 字体状态变化后的统一收口：重算 family → 重建主题 → 持久化。
+  void _onFontChanged() {
+    themeProvider.refreshFontFamily(notify: false);
+    rebuildThemes();
+    setState(() {});
   }
 
   @override
@@ -251,94 +237,47 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                     ],
                   ),
                 ),
+              ],
+            ),
+            SettingsSection(
+              title: Text('字体'),
+              tiles: [
                 SettingsTile(
-                  leading: Icons.palette_rounded,
-                  enabled: !useDynamicColor,
-                  onPressed: (_) async {
-                    MiruDialog.show(builder: (context) {
-                      return AlertDialog(
-                        title: Text('配色方案'),
-                        content: StatefulBuilder(builder:
-                            (BuildContext context, StateSetter setState) {
-                          final List<Map<String, dynamic>> colorThemes =
-                              colorThemeTypes;
-                          return Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 8,
-                            runSpacing: isDesktop() ? 8 : 0,
-                            children: [
-                              ...colorThemes.map(
-                                (e) {
-                                  final index = colorThemes.indexOf(e);
-                                  return GestureDetector(
-                                    onTap: () {
-                                      index == 0
-                                          ? resetTheme()
-                                          : setTheme(e['color']);
-                                      MiruDialog.dismiss();
-                                    },
-                                    child: Column(
-                                      children: [
-                                        PaletteCard(
-                                          color: e['color'],
-                                          selected: (e['color']
-                                                      .value
-                                                      .toRadixString(16) ==
-                                                  defaultThemeColor ||
-                                              (defaultThemeColor == 'default' &&
-                                                  index == 0)),
-                                        ),
-                                        Text(e['label']),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              )
-                            ],
-                          );
-                        }),
-                      );
-                    });
-                  },
-                  title: Text('配色方案'),
-                ),
-                SettingsTile.switchTile(
-                  leading: Icons.colorize_rounded,
-                  enabled: !Platform.isIOS,
-                  onToggle: (value) async {
-                    useDynamicColor = value ?? !useDynamicColor;
-                    await GStorage.putSetting(
-                        SettingsKeys.useDynamicColor, useDynamicColor);
-                    themeProvider.setDynamic(useDynamicColor);
-                    setState(() {});
-                  },
-                  title: Text('动态配色'),
-                  initialValue: useDynamicColor,
-                ),
-                SettingsTile.switchTile(
                   leading: Icons.font_download_rounded,
+                  onPressed: (_) async {
+                    await context.pushNamed('/settings/theme/fonts');
+                  },
+                  title: Text('自定义字体'),
+                  description: Text('内置精选字体目录 · 按需下载即时生效'),
+                  value: Text(themeProvider.currentFontFamily == null
+                      ? '系统字体'
+                      : '已自定义'),
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.text_fields_rounded,
                   onToggle: (value) async {
                     useSystemFont = value ?? !useSystemFont;
                     await GStorage.putSetting(
                         SettingsKeys.useSystemFont, useSystemFont);
-                    themeProvider.setFontFamily(useSystemFont);
-                    dynamic color;
-                    if (defaultThemeColor == 'default') {
-                      // 与 updateOledEnhance 保持一致：默认主题色用
-                      // kDefaultSeedColor，而不是遗留的绿色。
-                      color = kDefaultSeedColor;
-                    } else {
-                      color = Color(int.parse(defaultThemeColor, radix: 16));
-                    }
-                    setTheme(color);
-                    setState(() {});
+                    _onFontChanged();
                   },
                   title: Text('使用系统字体'),
-                  description: Text('关闭后使用 MI Sans 字体'),
+                  description: Text('未自定义且开启时使用系统字体，关闭则使用内置思源宋体'),
+                  enabled: themeProvider.currentFontFamily == null,
                   initialValue: useSystemFont,
                 ),
               ],
-              bottomInfo: Text('动态配色仅支持安卓12及以上和桌面平台'),
+              bottomInfo: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '字体优先级：自定义字体 > 系统字体 > 内置思源宋体。'
+                  '激活自定义字体后本开关暂不生效，取消自定义字体即恢复。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        height: 1.5,
+                      ),
+                ),
+              ),
             ),
             SettingsSection(
               title: Text('显示'),

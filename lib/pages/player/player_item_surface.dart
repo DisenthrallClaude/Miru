@@ -20,8 +20,16 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
   Widget build(BuildContext context) {
     final playerController = widget.playerController;
     return Observer(builder: (context) {
-      if (playerController.playback.loading ||
-          playerController.playback.videoController == null) {
+      // v1.6.4：mpv 已实际开始（playing/有时长）时必须挂载 Video——
+      // 此前 loading=true 期间整个 Video widget 被黑色转圈容器顶替，
+      // mpv 侧已在解码出帧却无处渲染，用户「有声音没画面」。
+      // loading 只在视频尚未开始时挡画面（实例仍在装配）。
+      final playback = playerController.playback;
+      final bool actuallyStarted =
+          playback.playing || playback.duration > Duration.zero;
+      final bool notReady = playback.videoController == null ||
+          (playback.loading && !actuallyStarted);
+      if (notReady) {
         return Container(
           color: Colors.black,
           child: const Center(

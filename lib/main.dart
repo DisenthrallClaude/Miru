@@ -8,6 +8,8 @@ import 'package:miru/bean/settings/theme_provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
+import 'package:miru/bean/widget/liquid_glass_panel.dart';
+import 'package:miru/services/fonts/custom_font_service.dart';
 import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/network/proxy_manager.dart';
 import 'package:miru/services/network/system_proxy_service.dart';
@@ -44,6 +46,14 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
+    // v1.6.4 自定义字体：启动时注册已激活的下载字体（FontLoader）。
+    // 必须在 runApp 之前完成——否则首帧按内置字体渲染，注册完成后
+    // 还得重建一遍主题。失败（文件损坏/缺失）静默回落，设置里可
+    // 重新下载修复。
+    await CustomFontService.instance.restoreActiveFont();
+    // v1.6.4 主界面液态玻璃面板 shader 预载：首帧前就绪，
+    // 底部 Dock 不会先闪一下毛玻璃再变折射玻璃。
+    await preloadLiquidGlassPanel();
     // 匿名活跃心跳（每日一次，fire-and-forget，失败静默）：
     // 为云端解析层的动态配额提供「当日活跃人数」输入
     unawaited(TelemetryService.instance.dailyPing());

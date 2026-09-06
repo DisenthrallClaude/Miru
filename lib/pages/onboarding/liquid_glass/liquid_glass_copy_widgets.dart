@@ -44,6 +44,13 @@ class SoftCopyBlock extends StatelessWidget {
     //（BlurView 在 children 之后）。这里直接对内容自身施加高斯模糊
     //（ImageFiltered），叠加原版同款 10% 明暗 tint，视觉等效且不依赖
     // saveLayer 的 backdrop 语义。
+    //
+    // v1.6.4 tint 穿帮修复：此前用 Positioned.fill + ColoredBox 给整个
+    // 矩形区域盖 10% 白/黑——wordmark 是透明背景 PNG，矩形 tint 在
+    // 图片的透明像素处直接可见，上滑（gateSoft 升高）时露出一个
+    // 230×230 的偏白正方形。改用 ColorFiltered(BlendMode.srcATop)：
+    // tint 只落在有内容（alpha>0）的像素上，透明区域保持全透明，
+    // 文字与字标在任何 soften 值下都不再有方形底色。
     final sigma = soften * _sigmaPerUnit;
     final hasBlur = sigma > 0.05;
     final tintOpacity = (soften / 2.5).clamp(0.0, 1.0) * 0.10;
@@ -58,20 +65,14 @@ class SoftCopyBlock extends StatelessWidget {
           )
         : child;
     if (hasBlur && tintOpacity > 0.003) {
-      content = Stack(
-        alignment: Alignment.center,
-        children: [
-          content,
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ColoredBox(
-                color: darkTint
-                    ? Colors.black.withValues(alpha: tintOpacity)
-                    : Colors.white.withValues(alpha: tintOpacity),
-              ),
-            ),
-          ),
-        ],
+      content = ColorFiltered(
+        colorFilter: ui.ColorFilter.mode(
+          darkTint
+              ? Colors.black.withValues(alpha: tintOpacity)
+              : Colors.white.withValues(alpha: tintOpacity),
+          ui.BlendMode.srcATop,
+        ),
+        child: content,
       );
     }
     return Opacity(

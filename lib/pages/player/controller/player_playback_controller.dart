@@ -828,11 +828,20 @@ abstract class _PlayerPlaybackController with Store {
   /// 换集软停（§2.1）：player.stop() 不 dispose，Player/VideoController
   /// 与纹理常驻，观察量复位；流订阅保留（实例还活着）。
   /// 真正销毁只在 [stop]（离开视频页）。
+  ///
+  /// v1.6.4：先 pause 再 stop。stop() 在 mpv 侧要走完整的 demuxer
+  /// teardown，慢机上可能挂起数百毫秒——这段时间旧一集的音频还在播，
+  /// 而新集已经开始解析（softStop 与解析并行），用户听到旧集声音
+  /// 叠着「视频资源解析中」的转圈。pause 立即静止音频输出，
+  /// stop 慢不慢都不再有穿帮。
   Future<void> softStop() async {
     final player = mediaPlayer;
     if (player == null) {
       return;
     }
+    try {
+      await player.pause();
+    } catch (_) {}
     try {
       await player.stop();
     } catch (_) {}

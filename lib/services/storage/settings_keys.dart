@@ -464,6 +464,14 @@ class SettingsKeys {
     false,
     group: SettingGroup.theme,
   );
+
+  /// v1.6.4 自定义字体：已下载并激活的字体 id
+  ///（空 = 未启用自定义，走 内置/系统 字体逻辑）。
+  static const customFontId = SettingKey<String>(
+    _SettingBoxKey.customFontId,
+    '',
+    group: SettingGroup.theme,
+  );
   static const forceAdBlocker = SettingKey<bool>(
     _SettingBoxKey.forceAdBlocker,
     false,
@@ -733,6 +741,7 @@ class SettingsKeys {
     timelineNotShowWatchedBangumis,
     timelineOnlyShowWatchingBangumis,
     useSystemFont,
+    customFontId,
     forceAdBlocker,
     backgroundPlayback,
     proxyEnable,
@@ -850,6 +859,7 @@ class _SettingBoxKey {
       timelineNotShowWatchedBangumis = 'timelineNotShowWatchedBangumis',
       timelineOnlyShowWatchingBangumis = 'timelineOnlyShowWatchingBangumis',
       useSystemFont = 'useSystemFont',
+      customFontId = 'customFontId',
       forceAdBlocker = 'forceAdBlocker',
       backgroundPlayback = 'backgroundPlayback',
       proxyEnable = 'proxyEnable',

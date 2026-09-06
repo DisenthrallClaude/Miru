@@ -8,13 +8,13 @@ import 'package:miru/services/announcement/announcement_service.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_theme.dart';
 import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_welcome.dart';
+import 'package:miru/pages/settings/github/github_login_sheet.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/plugins/rule_policy.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/startup/startup_gate.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/update/startup_update_check.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
 /// 首次启动引导页 —— 液态玻璃欢迎屏。
 ///
@@ -75,10 +75,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
               theme: theme,
               onEnter: () => unawaited(replayMode
                   ? _enterFromSplash()
-                  : _autoSetupAndFinish(openGithub: false)),
+                  : _autoSetupAndFinish()),
               onEnterViaGithub: () => unawaited(replayMode
-                  ? _enterFromSplash(viaGithub: true)
-                  : _autoSetupAndFinish(openGithub: true)),
+                  ? _enterViaGithubLogin()
+                  : _autoSetupAndFinish(viaGithubLogin: true)),
             ),
             if (autoSetupMessage != null) _buildSetupOverlay(),
           ],
@@ -121,18 +121,30 @@ class _OnboardingPageState extends State<OnboardingPage> {
     );
   }
 
+  /// v1.6.4：通过 GitHub 登录后进入（应用内完成，不再跳外部浏览器）。
+  ///
+  /// 已登录用户直接进入；未登录弹应用内登录面板——登录成功（或
+  /// 选择「暂不登录，直接进入」）后进入。取消登录则留在开屏页。
+  Future<void> _enterViaGithubLogin() async {
+    if (_entering || autoSetupMessage != null) return;
+    final loggedIn = GStorage.getSetting(SettingsKeys.githubEnable) &&
+        GStorage.getSetting(SettingsKeys.githubLogin).isNotEmpty;
+    if (!loggedIn) {
+      final success = await showGithubLoginSheet(context);
+      if (!mounted || !success) return; // 取消登录：留在玻璃页。
+    }
+    await _enterFromSplash();
+  }
+
   /// v1.6.3：重播模式的进入动作。
   ///
   /// 不重跑首次安装（规则已就绪、设置已同意）；只等后台初始化完成
   ///（StartupGate，秒级放行）后进入默认页。
   bool _entering = false;
 
-  Future<void> _enterFromSplash({bool viaGithub = false}) async {
+  Future<void> _enterFromSplash() async {
     if (_entering || autoSetupMessage != null) return; // 防重复点击。
     _entering = true;
-    if (viaGithub) {
-      unawaited(_openRepository());
-    }
     // 等待后台初始化（通常已完成，瞬间放行）；未完成时给轻雾进度。
     final pending = !StartupGate.isReady;
     if (pending && mounted) {
@@ -146,7 +158,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
     _finish(replay: true);
   }
 
-  /// 默认同意 + 自动完成：内置规则落盘 →（可选 GitHub 入口）→ 启用网络镜像
+  /// 默认同意 + 自动完成：内置规则落盘 →（可选 GitHub 登录）→ 启用网络镜像
   /// → 拉取规则目录 → 逐条安装 → 进入主界面。
   ///
   /// 原流程需要用户在「免责声明」「更新源」「网络镜像」「规则商店」
@@ -155,16 +167,19 @@ class _OnboardingPageState extends State<OnboardingPage> {
   /// 日漫为主的规则与已知损坏的规则不自动安装（见 rule_policy.dart）：
   /// 内置规则已覆盖国漫场景；日漫规则留给用户之后在
   /// 设置 → 规则管理 → 规则仓库 里按需手动安装。
-  Future<void> _autoSetupAndFinish({required bool openGithub}) async {
+  Future<void> _autoSetupAndFinish({bool viaGithubLogin = false}) async {
     if (autoSetupMessage != null) return;
+
+    // v1.6.4：GitHub 入口在应用内登录面板完成（不再跳仓库页）。
+    // 登录成功或「暂不登录」都继续首启流程；面板取消则留在玻璃页。
+    if (viaGithubLogin) {
+      final success = await showGithubLoginSheet(context);
+      if (!mounted || !success) return;
+    }
+
     setState(() {
       autoSetupMessage = '正在准备初始规则…';
     });
-
-    // 「通过 GitHub 进入」：打开项目仓库页，与「直接进入」等效完成进入。
-    if (openGithub) {
-      unawaited(_openRepository());
-    }
 
     // 默认同意的一揽子设置。
     await GStorage.putSetting(SettingsKeys.enableBangumiProxy, true);
@@ -228,18 +243,6 @@ class _OnboardingPageState extends State<OnboardingPage> {
               : '已自动安装 $installed 条规则');
     }
     _finish();
-  }
-
-  Future<void> _openRepository() async {
-    try {
-      const url = 'https://github.com/DisenthrallClaude/Miru';
-      await launchUrlString(
-        url,
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (error) {
-      MiruLogger().w('Onboarding: failed to open repository', error: error);
-    }
   }
 
   void _finish({bool replay = false}) {

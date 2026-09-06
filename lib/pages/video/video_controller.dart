@@ -142,6 +142,18 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 当前播放的自动兜底候选，按优先级排列，失败一次消费一个。
   final List<SourceFallback> _playbackFallbacks = [];
 
+  /// v1.6.4：本集已自动换源次数（换集/重进时归零）。
+  ///
+  /// 此前自动换源只受候选列表长度限制：列表里有 N 个备选就换 N 轮，
+  /// 每轮都要烧完一次完整解析超时（12s+），多源失败时用户被连绵
+  /// 不断的「解析失败，正在尝试 XX」toast 刷屏几十秒，观感即「死循环」。
+  /// 现在熔断到 2 次：两源都打不开基本是网络/站点整体故障，
+  /// 直接把选择权交回用户（错误页有手动换线路入口）。
+  int _autoFallbackCount = 0;
+
+  /// 自动换源熔断阈值。
+  static const int _maxAutoFallback = 2;
+
   late Plugin currentPlugin;
 
   String _offlinePluginName = '';
@@ -409,6 +421,8 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     _loading = true;
     _errorMessage = null;
+    // v1.6.4：换集事务重置自动换源熔断计数（新的一集重新开始计数）。
+    _autoFallbackCount = 0;
   }
 
   @action
@@ -440,7 +454,18 @@ abstract class _VideoPageController with Store implements Disposable {
     required PlayerController playerController,
     required int offset,
   }) async {
+    // v1.6.4 熔断：超过阈值的自动换源不再尝试——连续多源失败
+    // 大概率是网络/站点整体故障，继续换只会无限烧超时+刷 toast。
+    if (_autoFallbackCount >= _maxAutoFallback) {
+      MiruLogger().w(
+          'VideoPageController: auto fallback limit reached ($_autoFallbackCount)');
+      return false;
+    }
     while (_playbackFallbacks.isNotEmpty && !session.isStale) {
+      if (_autoFallbackCount >= _maxAutoFallback) {
+        break;
+      }
+      _autoFallbackCount++;
       final candidate = _playbackFallbacks.removeAt(0);
       MiruDialog.showToast(
         message:
@@ -628,12 +653,23 @@ abstract class _VideoPageController with Store implements Disposable {
           bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name,
     );
 
-    final initialized = await playerController.init(params);
+    bool initialized;
+    try {
+      initialized = await playerController.init(params);
+    } catch (e, stackTrace) {
+      MiruLogger().e(
+        'VideoPageController: offline player init failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      initialized = false;
+    }
     if (session.isActive && initialized) {
       playingEpisode = selection;
       unawaited(_loadPlaybackDanmaku(playerController, params, session));
     } else if (session.isActive) {
       _playbackSessions.cancel();
+      _failLoading('播放器初始化失败，请重试');
     }
   }
 
@@ -773,7 +809,21 @@ abstract class _VideoPageController with Store implements Disposable {
             : bangumiItem.name,
       );
 
-      final initialized = await playerController.init(params);
+      bool initialized;
+      try {
+        initialized = await playerController.init(params);
+      } catch (e, stackTrace) {
+        // v1.6.4：播放器装配失败 ≠ 解析失败。解析层已成功给出 URL，
+        // 若把这里的异常交给外层 catch 会误判为「源解析失败」→ 换源
+        // → 新源解析又成功、装配又抛同样异常 → 再换源……死循环。
+        // 按初始化失败处理：失效本集缓存，交还用户控制权。
+        MiruLogger().e(
+          'VideoPageController: player init failed after successful resolve',
+          error: e,
+          stackTrace: stackTrace,
+        );
+        initialized = false;
+      }
       if (session.isActive && initialized) {
         playingEpisode = VideoEpisodeSelection(
           episode: resolvedEpisode.listIndex,
@@ -789,6 +839,7 @@ abstract class _VideoPageController with Store implements Disposable {
         // 初始化失败：失效本集解析缓存，避免坏结果反复被用。
         unawaited(_videoSourceService!.invalidate(url));
         _playbackSessions.cancel();
+        _failLoading('播放器初始化失败，请尝试刷新或切换线路');
       }
     } on VideoSourceTimeoutException {
       // 翻转解析器重试已删除（阶段 0）：超时健康度在这层记录（此前由

@@ -8,6 +8,7 @@ import 'package:miru/pages/settings/danmaku/danmaku_module.dart';
 import 'package:miru/pages/settings/decoder_settings.dart';
 import 'package:miru/pages/settings/displaymode_settings.dart';
 import 'package:miru/pages/settings/download_settings.dart';
+import 'package:miru/pages/settings/fonts/custom_fonts_page.dart';
 import 'package:miru/pages/settings/interface_settings.dart';
 import 'package:miru/pages/settings/keyboard_settings.dart';
 import 'package:miru/pages/settings/player_settings.dart';
@@ -25,6 +26,10 @@ final settingsModule = createModule(
     c
       ..route('/', child: (context, state) => const SettingsPage())
       ..route('/theme', child: (context, state) => const ThemeSettingsPage())
+      ..route(
+        '/theme/fonts',
+        child: (context, state) => const CustomFontsPage(),
+      )
       ..route(
         '/theme/display',
         child: (context, state) => const SetDisplayMode(),

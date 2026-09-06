@@ -749,7 +749,18 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget get playerBody {
-    final bool playerLoading = playerController.playback.loading;
+    // v1.6.4：遮罩只在「视频尚未真正开始」时显示。
+    //
+    // 此前条件是 `playback.loading`——它在 init 全流程完成后才翻转，
+    // 而 mpv 的 open 早已开始出声出画。若 init 尾段（音量等平台通道）
+    // 卡住/失败，黑遮罩会一直盖在已出画的视频上：用户听到声音、
+    // 看不到画面、屏幕显示「解析中」——三重矛盾。现在以 mpv 的
+    // 真实状态为准：只要 playing 或拿到了时长，遮罩立即撤下，
+    // loading 标志的翻转与否不再能挡住画面。
+    final playback = playerController.playback;
+    final bool playerActuallyStarted =
+        playback.playing || playback.duration > Duration.zero;
+    final bool playerLoading = playback.loading && !playerActuallyStarted;
     return Stack(
       children: [
         Positioned.fill(
@@ -790,11 +801,11 @@ class _VideoPageState extends State<VideoPage>
                                         .colorScheme
                                         .tertiaryContainer),
                                 const SizedBox(height: 10),
-                                Text(
-                                  videoPageController.loading
-                                      ? '视频资源解析中'
-                                      : '视频资源解析成功, 播放器加载中',
-                                  style: const TextStyle(color: Colors.white),
+                                // v1.6.4：解析耗时实时可见——转圈不再是
+                                // 无限等待的错觉，用户能对照设置里的
+                                // 解析超时预算判断当前状态。
+                                _ResolveStatusText(
+                                  resolving: videoPageController.loading,
                                 ),
                               ],
                             ),
@@ -887,7 +898,9 @@ class _VideoPageState extends State<VideoPage>
           ),
         ),
         Positioned.fill(
-          child: playerController.playback.loading
+          // v1.6.4：同遮罩条件——mpv 已实际开始（playing/有时长）即挂载
+          // PlayerItem（手势/弹幕/控制面板），loading 标志不再阻塞挂载。
+          child: (playerController.playback.loading && !playerActuallyStarted)
               ? Container()
               : PlayerItem(
                   playerController: playerController,
@@ -1333,6 +1346,58 @@ class _RoadHealthBadge extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// v1.6.4：加载层的真实进度文案。
+///
+/// * 解析阶段：显示已耗时秒数（每 500ms 刷新），与设置里的
+///   解析超时预算形成真实对照——不再是无限转圈的错觉；
+/// * 缓冲阶段：解析已完成、mpv 正在拉流，按实际耗时显示。
+///
+/// 计时从组件挂载起算（挂载即遮罩出现 = 本集解析开始），
+/// 换集时遮罩重建，计时自然归零。
+class _ResolveStatusText extends StatefulWidget {
+  const _ResolveStatusText({required this.resolving});
+
+  /// true = 解析层工作中；false = 已解析、播放器缓冲中。
+  final bool resolving;
+
+  @override
+  State<_ResolveStatusText> createState() => _ResolveStatusTextState();
+}
+
+class _ResolveStatusTextState extends State<_ResolveStatusText> {
+  final DateTime _startedAt = DateTime.now();
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsedSeconds =
+        DateTime.now().difference(_startedAt).inMilliseconds / 1000.0;
+    final label = widget.resolving
+        ? '正在解析视频源… ${elapsedSeconds.toStringAsFixed(1)}s'
+        : '已解析完成，正在缓冲视频… ${elapsedSeconds.toStringAsFixed(1)}s';
+    return Text(
+      label,
+      style: const TextStyle(color: Colors.white),
     );
   }
 }
