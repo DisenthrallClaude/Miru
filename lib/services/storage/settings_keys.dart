@@ -254,6 +254,21 @@ class SettingsKeys {
     '/tab/popular/',
     group: SettingGroup.interface,
   );
+  /// v1.6.3：每次启动都播放液态玻璃开屏。
+  /// 默认 false（仅首次安装出现开屏）；设置 → 界面设置 中可开启。
+  static const showSplashOnEveryLaunch = SettingKey<bool>(
+    'showSplashOnEveryLaunch',
+    false,
+    group: SettingGroup.interface,
+  );
+  /// v1.6.3：首启动引导是否已完成（完成进入主界面时置 true）。
+  /// 首启动判定 = !onboardingDone && 本地无已装规则（双条件防
+  /// v1.6.2 老用户升级后被重新引导一遍）。
+  static const onboardingDone = SettingKey<bool>(
+    'onboardingDone',
+    false,
+    group: SettingGroup.interface,
+  );
   /// 远程公告频控状态：JSON 对象 {公告id: "关闭日期 yyyy-MM-dd"}。
   /// once 频控 = id 存在即不再弹；daily = 同一天内不重复弹。
   /// 用单一字符串键而不是逐公告动态键，避免 Hive 键无上限增长。
@@ -676,6 +691,8 @@ class SettingsKeys {
     enableBangumiProxy,
     enableSystemProxy,
     defaultStartupPage,
+    showSplashOnEveryLaunch,
+    onboardingDone,
     announcementDismissState,
     announcementCache,
     updateIgnoredVersion,

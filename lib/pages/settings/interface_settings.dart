@@ -13,6 +13,7 @@ class InterfaceSettingsPage extends StatefulWidget {
 class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
   late bool showRating;
   late bool showAnimeCounter;
+  late bool showSplashEveryLaunch;
   late String defaultPage;
   final MenuController defaultPageMenuController = MenuController();
 
@@ -28,6 +29,8 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
     super.initState();
     showRating = GStorage.getSetting(SettingsKeys.showRating);
     showAnimeCounter = GStorage.getSetting(SettingsKeys.showAnimeCounter);
+    showSplashEveryLaunch =
+        GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch);
     defaultPage = GStorage.getSetting(SettingsKeys.defaultStartupPage);
   }
 
@@ -45,6 +48,20 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
       body: SettingsList(
         sections: [
           SettingsSection(title: Text('启动'), tiles: [
+            SettingsTile.switchTile(
+              leading: Icons.blur_on_rounded,
+              onToggle: (value) async {
+                showSplashEveryLaunch = value ?? !showSplashEveryLaunch;
+                await GStorage.putSetting(
+                    SettingsKeys.showSplashOnEveryLaunch,
+                    showSplashEveryLaunch);
+                setState(() {});
+              },
+              title: Text('每次启动显示开屏动画'),
+              description: Text(
+                  '开启后每次打开应用都会播放液态玻璃开屏；默认仅首次安装时显示'),
+              initialValue: showSplashEveryLaunch,
+            ),
             SettingsTile(
               leading: Icons.home_rounded,
               onPressed: (_) async {

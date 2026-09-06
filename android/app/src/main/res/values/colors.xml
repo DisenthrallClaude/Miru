@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- v1.6.3: 启动屏颜色与液态玻璃欢迎页同色（Sky pageColor），
+     系统启动画面 → Flutter 首帧颜色一致，消除白屏闪断。 -->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="launch_bg">#FFDCE8F2</color>
 </resources>

@@ -72,6 +72,15 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
 
   LiquidGlassController get controller => _controller!;
 
+  /// v1.6.3 统一文案/字标尺度：取 sx/sy 中较小者。
+  ///
+  /// 原版常量以 402×874 为基准、字号随 sx 走、行位随 h 分数走：
+  /// 在非 874 纵横比的屏上（s=min(sx,sy)>1 的长屏尤为明显）
+  /// 「两行标题块底部 0.6163h+76sx」会追上甚至越过第三行顶部 0.7032h，
+  /// 造成文字重叠；宽屏/横屏/平板则字标爆炸。统一尺度后
+  /// 全部元素随同一比例缩放，叠行由相对堆叠定位兜底。
+  double get _cs => math.min(_sx, _sy);
+
   @override
   void initState() {
     super.initState();
@@ -600,13 +609,13 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       builder: (_, __) {
         final w = _size.width;
         final h = _size.height;
-        final sx = _sx;
-        final wordmarkSize = 230 * sx;
+        final s = _cs;
+        final wordmarkSize = 230 * s;
         return Stack(
           children: [
             // wordmark：chrome 气球字标位图（原版同款视觉）。
             Positioned(
-              top: h * 0.4368 - 115 * sx,
+              top: h * 0.4368 - 115 * s,
               left: (w - wordmarkSize) / 2,
               width: wordmarkSize,
               height: wordmarkSize,
@@ -624,7 +633,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
             // 上滑提示。
             Positioned(
               top: h * 0.8853,
-              height: 22 * sx,
+              height: 22 * s,
               left: 0,
               right: 0,
               child: SoftCopyBlock(
@@ -640,10 +649,10 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
                     theme.copy.hint,
                     style: TextStyle(
                       color: theme.hint,
-                      fontSize: 15 * sx,
-                      height: 20 * sx / (15 * sx),
+                      fontSize: 15 * s,
+                      height: 20 * s / (15 * s),
                       fontWeight: FontWeight.w500,
-                      letterSpacing: -0.1 * sx,
+                      letterSpacing: -0.1 * s,
                     ),
                   ),
                 ),
@@ -660,21 +669,29 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       animation: controller,
       builder: (_, __) {
         final h = _size.height;
-        final sx = _sx;
-        final fontSize = 32 * sx;
+        final s = _cs;
+        final fontSize = 32 * s;
+        final lineHeight = 38 * s;
         final bodyStyle = TextStyle(
           color: theme.ink,
           fontSize: fontSize,
-          height: 38 * sx / fontSize,
-          letterSpacing: -0.7 * sx,
+          height: lineHeight / fontSize,
+          letterSpacing: -0.7 * s,
           fontWeight: FontWeight.w500,
         );
+        // v1.6.3：第三行改为相对堆叠（标题块底部 + 呼吸间距）。
+        // 原版在 402×874 基准时 0.6163h+76sx 恰好贴着 0.7032h，
+        // 换任何纵横比都会叠行；堆叠后任何屏都不可能重叠。
+        // （块高加 4px 余量：文本行高在物理像素上会取整，
+        // 严格 2×行高会触发亚像素 RenderFlex 溢出断言。）
+        final headlineTop = h * 0.6163;
+        final thirdTop = headlineTop + 2 * lineHeight + 6;
         return Stack(
           children: [
             // 主标题 + 划线。
             Positioned(
-              top: h * 0.6163,
-              height: 76 * sx,
+              top: headlineTop,
+              height: 2 * lineHeight + 4,
               left: 0,
               right: 0,
               child: SoftCopyBlock(
@@ -703,8 +720,8 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
             ),
             // 旋转第三行。
             Positioned(
-              top: h * 0.7032,
-              height: 38 * sx,
+              top: thirdTop,
+              height: lineHeight,
               left: 0,
               right: 0,
               child: Center(
@@ -715,7 +732,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
                   soften: controller.thirdSoft,
                   darkTint: theme.night,
                   style: bodyStyle,
-                  height: 38 * sx,
+                  height: lineHeight,
                 ),
               ),
             ),
@@ -730,21 +747,20 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       animation: controller,
       builder: (_, __) {
         final h = _size.height;
-        final sx = _sx;
-        final sy = _sy;
+        final s = _cs;
         final shown = controller.shown;
         final live = controller.pillLive;
         return Positioned(
           top: h * 0.8848,
-          left: 50 * sx,
-          right: 50 * sx,
-          height: 58.7 * sy,
+          left: 50 * s,
+          right: 50 * s,
+          height: 58.7 * _sy,
           child: IgnorePointer(
             ignoring: !live,
             child: Opacity(
               opacity: shown,
               child: Transform.translate(
-                offset: Offset(0, (1 - shown) * 10 * sy),
+                offset: Offset(0, (1 - shown) * 10 * _sy),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),

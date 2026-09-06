@@ -15,6 +15,7 @@ import 'package:miru/pages/collect/collect_controller.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/shaders/shader_asset_service.dart';
+import 'package:miru/services/startup/startup_gate.dart';
 import 'package:miru/pages/download/download_controller.dart';
 import 'package:miru/pages/plugin_editor/plugin_update_actions.dart';
 import 'package:miru/services/download/background_download_service.dart';
@@ -63,14 +64,34 @@ class _InitPageState extends State<InitPage> {
 
     // 首屏导航前的必要初始化并行化：下载记录复位与规则加载互不依赖
     // （各自读写不同的目录/盒），串行 await 会把两段磁盘 IO/解析时间
-    // 叠加在空白启动页上；桌面端的 X11/快捷方式对话框也一并并行。
-    // 注意：「是否首装」依赖 _pluginInit 完成（pluginList 加载后判断），
-    // 因此路由决策必须等这一组 Future 全部结束。
-    await Future.wait([
+    // 叠加在启动页上；桌面端的 X11/快捷方式对话框也一并并行。
+    final initFutures = Future.wait([
       _initDownloads(),
       _pluginInit(),
       _desktopStartupDialogs(),
     ]);
+
+    // v1.6.3：开屏路由前置。
+    //
+    // 之前（v1.6.2）：先等全部初始化完成再导航——首启动用户先盯着
+    // 一页空白 Loading，然后才看到液态玻璃。
+    // 现在：设置里开了「每次启动显示开屏」的回访用户立即进入玻璃页
+    // （重播模式：不重跑首次安装流程），初始化转后台，进入主界面前
+    // 由 OnboardingPage 通过 StartupGate 等待其完成。
+    if (GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch) &&
+        mounted) {
+      context.navigate('/onboarding');
+      // 云同步错峰启动同样要跑（回访用户可能已配置同步）；
+      // 首屏导航后 4s 触发，不影响玻璃页渲染。
+      unawaited(_delayedCloudSyncInit());
+      await initFutures;
+      StartupGate.markPluginsReady();
+      // 后续动作（更新检查/公告）由 OnboardingPage 的进入动作接管。
+      return;
+    }
+
+    await initFutures;
+    StartupGate.markPluginsReady();
 
     // 三通道云同步延后到首屏导航后错峰触发（见 _delayedCloudSyncInit），
     // 避免全量历史同步的网络/磁盘/Hive 写锁与首屏渲染竞争。
@@ -80,10 +101,19 @@ class _InitPageState extends State<InitPage> {
     if (!mounted) {
       return;
     }
-    // First launch: no installed rules yet, hand over to the onboarding flow.
-    // OnboardingPage takes care of navigating to the default page and
-    // triggering the auto update check afterwards.
-    if (pluginsController.pluginList.isEmpty) {
+
+    // v1.6.3 首启动判定：双条件。
+    //  * onboardingDone 标志（v1.6.3+ 写入）；
+    //  * 本地无已装规则（v1.6.2 及之前的老判定，兼容升级用户——
+    //    他们没有标志但规则非空，不应被重新引导一遍）。
+    final bool firstLaunch =
+        !GStorage.getSetting(SettingsKeys.onboardingDone) &&
+            pluginsController.pluginList.isEmpty;
+    if (firstLaunch) {
+      // First launch: no installed rules yet, hand over to the onboarding
+      // flow. OnboardingPage takes care of navigating to the default page
+      // and triggering the auto update check afterwards.
+      // 初始化已在上面 await 完成——玻璃页里点「直接进入」即可进入主界面。
       context.navigate('/onboarding');
       return;
     }
@@ -440,6 +470,15 @@ class LoadingWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(body: Container());
+    // v1.6.3：加载底色与液态玻璃欢迎页同色（昼 Sky / 夜 Astro），
+    // 与原生启动屏颜色连成一体——不再出现白屏页。
+    final dark =
+        View.of(context).platformDispatcher.platformBrightness ==
+            Brightness.dark;
+    return Scaffold(
+      backgroundColor:
+          dark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),
+      body: const SizedBox.expand(),
+    );
   }
 }

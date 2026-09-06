@@ -32,9 +32,11 @@ class GlassSpherePainter extends CustomPainter {
     if (R <= 0) return;
 
     if (shader == null) {
-      // 降级：无 shader 时给一个半透明白球加 rim，不至于黑块。
-      final paint = Paint()..color = _white38;
-      canvas.drawCircle(Offset(orbX, cy), R, paint);
+      // 降级：无 shader（如极端后端异常）时画一个多层玻璃近似，
+      // 而不是 v1.6.2 的单个半透明白圆——那正是「不通透、无光影」
+      // 观感的来源之一。层次复刻 glass.frg 的静态部分：
+      // 外光晕 → 乳白体 → 发丝缘光 → 左上 sheen。
+      _paintFallbackOrb(canvas, Offset(orbX, cy), R, theme.night);
       return;
     }
 
@@ -70,9 +72,93 @@ class GlassSpherePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant GlassSpherePainter oldDelegate) => true;
-}
 
-const Color _white38 = Color(0x61FFFFFF);
+  /// 降级玻璃球（无 shader 路径）：用径向渐变分层模拟 glass.frg。
+  void _paintFallbackOrb(Canvas canvas, Offset c, double R, bool night) {
+    // ── 外光晕（halo）──
+    // 白天：柔和灰影、下方更重；夜晚：蓝白光晕、顶部更亮。
+    final haloPaint = Paint()
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, R * 0.10);
+    if (night) {
+      haloPaint.shader = ui.Gradient.radial(
+        c,
+        R * 1.22,
+        [
+          const ui.Color(0x338CB8FF),
+          const ui.Color(0x00081020),
+        ],
+      );
+    } else {
+      haloPaint.shader = ui.Gradient.radial(
+        c,
+        R * 1.16,
+        [
+          const ui.Color(0x24000000),
+          const ui.Color(0x00000000),
+        ],
+      );
+    }
+    canvas.drawCircle(c, R * 1.22, haloPaint);
+
+    // ── 乳白体（body）：中心更亮、边缘渐薄 ──
+    final bodyAlpha = night ? 0.07 : 0.13;
+    final bodyPaint = Paint()
+      ..shader = ui.Gradient.radial(
+        c,
+        R,
+        [
+          ui.Color.fromARGB((bodyAlpha * 255 * 1.35).round().clamp(0, 255),
+              255, 255, 255),
+          ui.Color.fromARGB((bodyAlpha * 255 * 0.55).round().clamp(0, 255),
+              255, 255, 255),
+        ],
+      );
+    canvas.drawCircle(c, R, bodyPaint);
+
+    // ── 发丝缘光（rim hairline）──
+    final rimPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.0, R * 0.012)
+      ..color = night
+          ? const ui.Color(0x99D8E4FF)
+          : const ui.Color(0xB3FFFFFF)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.8);
+    canvas.drawCircle(c, R * 0.985, rimPaint);
+
+    // ── 左上 sheen：一段亮弧 + 一片内侧漫射 ──
+    final sheenRect = Rect.fromCircle(center: c, radius: R);
+    final sheenSweep = ui.Gradient.sweep(
+      c,
+      [
+        const ui.Color(0x00FFFFFF),
+        const ui.Color(0x66FFFFFF),
+        const ui.Color(0x00FFFFFF),
+      ],
+      const [0.55, 0.72, 0.95],
+      TileMode.clamp,
+    );
+    final sheenPaint = Paint()
+      ..shader = sheenSweep
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, R * 0.03);
+    final rimBand = Path()
+      ..addOval(Rect.fromCircle(center: c, radius: R * 0.96))
+      ..addOval(Rect.fromCircle(center: c, radius: R * 0.78))
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(rimBand, sheenPaint);
+
+    // 内侧左上漫射高光。
+    final innerPaint = Paint()
+      ..shader = ui.Gradient.radial(
+        Offset(c.dx - R * 0.32, c.dy - R * 0.36),
+        R * 0.75,
+        [
+          const ui.Color(0x2EFFFFFF),
+          const ui.Color(0x00FFFFFF),
+        ],
+      );
+    canvas.drawOval(sheenRect, innerPaint);
+  }
+}
 
 /// 贴纸场画笔 —— 40 贴纸 + 星尘（vortex）。
 ///

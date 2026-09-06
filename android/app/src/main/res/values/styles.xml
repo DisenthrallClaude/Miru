@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
+    <!-- Theme applied to the Android Window while the process is starting when
+         the OS's Dark Mode setting is off.
+         v1.6.3: windowBackground 从默认白色改为液态玻璃欢迎页同色，
+         系统启动画面（含 Android 12+ splash）与 Flutter 首帧无缝衔接。 -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <!-- Show a splash screen on the activity. Automatically removed when
              the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@color/launch_bg</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
 
@@ -13,10 +17,9 @@
          This theme determines the color of the Android Window while your
          Flutter UI initializes, as well as behind your Flutter UI while its
          running.
-
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+         v1.6.3: 同色，避免初始化窗口期露出白色。 -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@color/launch_bg</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
 
         <item name="android:defaultFocusHighlightEnabled">false</item>

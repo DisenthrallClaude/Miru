@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- v1.6.3: 夜间（Astro）启动主题：颜色与欢迎页同色。 -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+    <!-- v1.6.3: Android 12+（API 31+）系统启动画面。
+         * 背景与欢迎页同色（昼/夜 values 自动切换）；
+         * 图标换成全透明占位（splash_icon_empty），删掉居中的应用图标——
+           点击应用图标后直接「落入」液态玻璃欢迎页，没有中间页。 -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@color/launch_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_empty</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
-
         <item name="android:defaultFocusHighlightEnabled">false</item>
     </style>
-    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@color/launch_bg</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
-
         <item name="android:defaultFocusHighlightEnabled">false</item>
     </style>
 </resources>

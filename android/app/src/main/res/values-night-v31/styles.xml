@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- v1.6.3: 夜间（Astro）启动主题：颜色与欢迎页同色。 -->
+    <!-- v1.6.3: Android 12+ 夜间系统启动画面（Astro 色 + 透明图标）。 -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@color/launch_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_empty</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
-
         <item name="android:defaultFocusHighlightEnabled">false</item>
     </style>
+
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@color/launch_bg</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
-
         <item name="android:defaultFocusHighlightEnabled">false</item>
     </style>
 </resources>

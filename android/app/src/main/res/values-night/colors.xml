@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.6.3: 夜间启动屏颜色 = Astro pageColor。 -->
+<resources>
+    <color name="launch_bg">#FF04060C</color>
+</resources>

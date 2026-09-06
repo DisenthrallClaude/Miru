@@ -5,9 +5,13 @@
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true">
+        <!-- v1.6.3: 启用 Impeller 渲染后端。
+             v1.6.1/1.6.2 的液态玻璃 shader（IPLR 格式）只有 Impeller 能加载：
+             该值为 false（上游 Kazumi 旧配置）时所有 FragmentProgram.fromAsset
+             静默失败，玻璃球退化为纯白圆片、透镜折射完全不生效。 -->
         <meta-data
              android:name="io.flutter.embedding.android.EnableImpeller"
-             android:value="false" 
+             android:value="true"
         />
         <activity
             android:name=".MainActivity"
