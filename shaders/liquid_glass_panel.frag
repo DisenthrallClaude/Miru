@@ -22,6 +22,7 @@ uniform float dispersion; // chromatic dispersion at the rim (0..0.03)
 uniform float highlight;  // top inner specular strength (0..1)
 uniform vec3 tintColor;   // glass body tint (rgb)
 uniform float tintAmt;    // how much body tint to mix in (0..1)
+uniform float blur;       // gaussian sigma in PHYSICAL px; 0 disables
 
 uniform sampler2D image;  // engine-bound: the backdrop to refract
 
@@ -40,6 +41,35 @@ vec2 toUV(vec2 pos) {
   uv.y = 1.0 - uv.y;
   #endif
   return uv;
+}
+
+// v1.6.5: REAL gaussian blur of the backdrop, sampled at `pos`.
+//
+// 13-tap dual-ring poisson kernel: centre + 6 taps at sigma + 6 taps
+// at 2*sigma (rotated 30 degrees). Weights come from the unit gaussian
+// (e^-0.5 = 0.6065, e^-2 = 0.1353), normalised to sum to 1. This is
+// what turns the "sharp refracting pane" into frosted liquid glass:
+// without it, anime covers scrolling under the dock stayed fully legible
+// and drowned out the tab labels.
+//
+// Cost: 13 texture fetches, only on the dock's small region.
+vec4 blurSample(vec2 pos) {
+  if (blur < 0.5) {
+    return texture(image, toUV(pos));
+  }
+  const float WC = 0.1835; // centre
+  const float W1 = 0.1113; // ring 1 (at sigma)
+  const float W2 = 0.0248; // ring 2 (at 2 sigma)
+  vec4 sum = texture(image, toUV(pos)) * WC;
+  for (int i = 0; i < 6; i++) {
+    float a = 1.0471976 * float(i) + 0.2617994; // 60 deg steps, 15 deg off
+    vec2 dir = vec2(cos(a), sin(a));
+    // ring 1 at +sigma, ring 2 at -2*sigma (opposite side, 2x radius):
+    // 12 outer taps land on 12 distinct angles, 6 at each radius.
+    sum += texture(image, toUV(pos + dir * blur)) * W1;
+    sum += texture(image, toUV(pos - dir * blur * 2.0)) * W2;
+  }
+  return sum;
 }
 
 void main() {
@@ -70,9 +100,12 @@ void main() {
   vec2 back = n * k * bevelW * 1.6;
 
   // Chromatic dispersion: R/G/B land slightly apart — strongest at rim.
+  // The green (base) channel goes through the gaussian kernel; R/B take
+  // cheap single taps at their tiny dispersion offsets (1-2 px at the rim)
+  // where the blur difference is imperceptible — 15 fetches total.
   float disp = dispersion * (0.25 + 0.75 * bev);
   vec4 cr = texture(image, toUV(p - back * (1.0 + disp)));
-  vec4 cg = texture(image, toUV(p - back));
+  vec4 cg = blurSample(p - back);
   vec4 cb = texture(image, toUV(p - back * (1.0 - disp)));
   vec4 refracted = vec4(cr.r, cg.g, cb.b, max(cg.a, max(cr.a, cb.a)));
 

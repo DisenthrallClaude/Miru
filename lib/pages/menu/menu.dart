@@ -173,10 +173,17 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // 玻璃滑块铺在页签之下，IgnorePointer 保证不抢手势
+            // 玻璃滑块铺在页签之下，IgnorePointer 保证不抢手势。
+            //
+            // v1.6.5 对齐修复：滑块的槽位必须与 NavigationBar 的页签
+            // 严格同宽同域。M3 NavigationBar 的 Row 用 Expanded 把页签
+            // 均分【整条宽度】（scaffold.dart / navigation_bar.dart 源码），
+            // 之前 left:12/right:12 的内缩让滑块按 (宽-24)/4 分槽，
+            // 首项中心偏右 9px、末项偏左 9px——「小球没落在文字中心」。
+            // 现在 left:0/right:0 跨满 Dock 内宽，槽位与页签逐像素对齐。
             Positioned(
-              left: 12,
-              right: 12,
+              left: 0,
+              right: 0,
               top: (_navBarHeight - _indicatorHeight) / 2,
               height: _indicatorHeight,
               child: LiquidGlassIndicator(
@@ -185,36 +192,51 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                 height: _indicatorHeight,
               ),
             ),
-            NavigationBar(
-              height: _navBarHeight,
-              backgroundColor: Colors.transparent,
-              surfaceTintColor: Colors.transparent,
-              elevation: 0,
-              indicatorColor: Colors.transparent,
-              destinations: const <Widget>[
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.auto_awesome_rounded),
-                  icon: Icon(Icons.auto_awesome_outlined),
-                  label: '推荐',
-                ),
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.calendar_today_rounded),
-                  icon: Icon(Icons.calendar_today_outlined),
-                  label: '时间表',
-                ),
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.bookmark_rounded),
-                  icon: Icon(Icons.bookmark_border_rounded),
-                  label: '追番',
-                ),
-                NavigationDestination(
-                  selectedIcon: Icon(Icons.person_rounded),
-                  icon: Icon(Icons.person_outline_rounded),
-                  label: '我的',
-                ),
-              ],
-              selectedIndex: selectedIndex,
-              onDestinationSelected: _selectDestination,
+            // v1.6.5 垂直修复：Scaffold 对 bottomNavigationBar【不移除】
+            // 底部安全区 padding（removeBottomPadding: false），而悬浮
+            // Dock 已自行抬离手势区——NavigationBar 内置的 SafeArea 再
+            // 消费一次 bottom inset，会把 70px 页签区压成 70-inset，
+            // 图标+文字被挤扁、行中心上移（滑块与文字垂直错位）。
+            // 左右 padding 一并剥掉：NavigationBar 的 SafeArea 在异形
+            // 屏（横竖切刘海）上报非零左右 inset 时会内缩页签行，
+            // 再次拉偏与滑块的对齐。这里显式剥离后交给 NavigationBar，
+            // 恢复满高满宽布局。
+            MediaQuery.removePadding(
+              context: context,
+              removeLeft: true,
+              removeRight: true,
+              removeBottom: true,
+              child: NavigationBar(
+                height: _navBarHeight,
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                elevation: 0,
+                indicatorColor: Colors.transparent,
+                destinations: const <Widget>[
+                  NavigationDestination(
+                    selectedIcon: Icon(Icons.auto_awesome_rounded),
+                    icon: Icon(Icons.auto_awesome_outlined),
+                    label: '推荐',
+                  ),
+                  NavigationDestination(
+                    selectedIcon: Icon(Icons.calendar_today_rounded),
+                    icon: Icon(Icons.calendar_today_outlined),
+                    label: '时间表',
+                  ),
+                  NavigationDestination(
+                    selectedIcon: Icon(Icons.bookmark_rounded),
+                    icon: Icon(Icons.bookmark_border_rounded),
+                    label: '追番',
+                  ),
+                  NavigationDestination(
+                    selectedIcon: Icon(Icons.person_rounded),
+                    icon: Icon(Icons.person_outline_rounded),
+                    label: '我的',
+                  ),
+                ],
+                selectedIndex: selectedIndex,
+                onDestinationSelected: _selectDestination,
+              ),
             ),
           ],
         ),

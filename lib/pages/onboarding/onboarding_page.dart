@@ -28,6 +28,10 @@ import 'package:miru/services/update/startup_update_check.dart';
 ///  * 重播（onboardingDone=true，设置里开了「每次启动显示开屏」）：
 ///    只播开屏特效，不重跑安装/写设置；进入时等 StartupGate 放行，
 ///    返回键 = 跳过开屏直接进主界面（不再弹退出确认）。
+///
+/// v1.6.5 开屏主题（Sky 昼 / Astro 夜）三重判定：
+/// 应用内深色模式、系统深色模式、北京时间深夜窗口（23:00–06:00）
+/// 任一命中即夜版（见 liquid_glass_theme.splashEffectiveBrightness）。
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({
     super.key,
@@ -54,7 +58,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = MediaQuery.platformBrightnessOf(context);
+    // v1.6.5：开屏主题三重判定——应用内深色设置 / 系统深色 /
+    // 北京时间深夜窗口（23:00–06:00），任一命中即 Astro 夜版。
+    // platformBrightnessOf 建立依赖：开屏期间系统切换深色会实时换主题。
+    final brightness =
+        splashEffectiveBrightness(MediaQuery.platformBrightnessOf(context));
     final theme = liquidGlassThemeFor(brightness);
     return PopScope(
       canPop: false,

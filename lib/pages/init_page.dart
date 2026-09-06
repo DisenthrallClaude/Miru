@@ -5,6 +5,7 @@ import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/services/announcement/announcement_service.dart';
 import 'package:miru/services/plugin/community_rules_sync.dart';
 import 'package:miru/pages/my/my_controller.dart';
+import 'package:miru/pages/onboarding/liquid_glass/liquid_glass_theme.dart';
 import 'package:miru/services/sync/bangumi_sync_service.dart';
 import 'package:miru/services/sync/github_sync.dart';
 import 'package:miru/services/sync/webdav.dart';
@@ -485,9 +486,11 @@ class LoadingWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     // v1.6.3：加载底色与液态玻璃欢迎页同色（昼 Sky / 夜 Astro），
     // 与原生启动屏颜色连成一体——不再出现白屏页。
-    final dark =
-        View.of(context).platformDispatcher.platformBrightness ==
-            Brightness.dark;
+    // v1.6.5：判定与欢迎页同源（应用内/系统深色 + 北京时间深夜窗口），
+    // 避免「深色设置下原生深底 → 浅色加载页 → 深色开屏」的闪变。
+    final dark = splashEffectiveBrightness(
+            View.of(context).platformDispatcher.platformBrightness) ==
+        Brightness.dark;
     return Scaffold(
       backgroundColor:
           dark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),

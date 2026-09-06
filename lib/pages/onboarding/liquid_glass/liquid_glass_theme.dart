@@ -11,6 +11,7 @@ library;
 /// cookbooks/sky.ts、astro.ts 保持一致；文案替换为 Miru 追番语境。
 
 import 'package:flutter/material.dart';
+import 'package:miru/services/storage/storage.dart';
 
 /// 贴纸离开羽流的方式。
 enum LiquidGlassReturnMode { fall, vortex }
@@ -222,4 +223,56 @@ LiquidGlassTheme liquidGlassThemeFor(Brightness brightness) {
   return brightness == Brightness.dark
       ? astroLiquidGlassTheme
       : skyLiquidGlassTheme;
+}
+
+/// v1.6.5：北京时间深夜窗口（23:00–06:00）。
+///
+/// 「23 点之后」进入开屏 → 夜版 Astro；窗口在次日 06:00 结束
+///（0–5 点同样是「23 点之后」的深夜）。以 UTC+8 显式换算，
+/// 不随设备时区设置漂移。
+bool isBeijingNightWindow([DateTime? now]) {
+  final beijing =
+      (now ?? DateTime.now()).toUtc().add(const Duration(hours: 8));
+  final hour = beijing.hour;
+  return hour >= 23 || hour < 6;
+}
+
+/// v1.6.5：开屏特效的有效亮度。
+///
+/// 优先级（任一命中即夜版）：
+/// 1. 应用内深色模式（设置 → 外观 → 深色模式）；
+/// 2. 系统深色模式（跟随系统时）；
+/// 3. 北京时间深夜窗口（23:00–06:00）——即使应用设为浅色也强制
+///    夜版（用户明确要求「23 点之后一律黑色版本」）。
+///
+/// [platformBrightness] 传平台亮度（如 MediaQuery.platformBrightnessOf），
+/// 仅在应用内设为「跟随系统」时生效；[now] 供测试注入固定时刻，
+/// 生产路径缺省取当前时间。
+///
+/// 存储读取带防御：main.dart 对 GStorage.init 失败有「继续运行」的
+/// 兜底路径，LoadingWidget 又先于一切设置读取构建——此时按
+/// 「跟随系统」处理，绝不在首帧抛 LateError（也保证测试无需初始化
+/// Hive 即可渲染启动加载页）。
+Brightness splashEffectiveBrightness(
+  Brightness platformBrightness, {
+  DateTime? now,
+}) {
+  final Brightness effective;
+  String? mode;
+  try {
+    mode = GStorage.getSetting(SettingsKeys.themeMode);
+  } catch (_) {
+    // 存储未初始化/损坏：视为跟随系统。
+  }
+  if (mode == 'dark') {
+    effective = Brightness.dark;
+  } else if (mode == 'light') {
+    effective = Brightness.light;
+  } else {
+    effective = platformBrightness;
+  }
+  if (isBeijingNightWindow(now)) {
+    return Brightness.dark;
+  }
+  return effective;
 }
