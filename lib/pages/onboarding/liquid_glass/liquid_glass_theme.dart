@@ -249,10 +249,9 @@ bool isBeijingNightWindow([DateTime? now]) {
 /// 仅在应用内设为「跟随系统」时生效；[now] 供测试注入固定时刻，
 /// 生产路径缺省取当前时间。
 ///
-/// 存储读取带防御：main.dart 对 GStorage.init 失败有「继续运行」的
-/// 兜底路径，LoadingWidget 又先于一切设置读取构建——此时按
-/// 「跟随系统」处理，绝不在首帧抛 LateError（也保证测试无需初始化
-/// Hive 即可渲染启动加载页）。
+/// 存储读取带防御：GStorage 异常（测试环境未初始化 Hive、存储盒
+/// 打开失败等）时按「跟随系统」处理，不向上抛——开屏/加载页不该
+/// 因设置读取失败而黑屏，测试也无需初始化 Hive 即可渲染。
 Brightness splashEffectiveBrightness(
   Brightness platformBrightness, {
   DateTime? now,

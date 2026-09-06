@@ -192,18 +192,21 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                 height: _indicatorHeight,
               ),
             ),
-            // v1.6.5 垂直修复：Scaffold 对 bottomNavigationBar【不移除】
-            // 底部安全区 padding（removeBottomPadding: false），而悬浮
-            // Dock 已自行抬离手势区——NavigationBar 内置的 SafeArea 再
-            // 消费一次 bottom inset，会把 70px 页签区压成 70-inset，
-            // 图标+文字被挤扁、行中心上移（滑块与文字垂直错位）。
-            // 左右 padding 一并剥掉：NavigationBar 的 SafeArea 在异形
-            // 屏（横竖切刘海）上报非零左右 inset 时会内缩页签行，
-            // 再次拉偏与滑块的对齐。这里显式剥离后交给 NavigationBar，
-            // 恢复满高满宽布局。
+            // v1.6.5 垂直修复（含复审代理 A 发现的 top 回注问题）：
+            // Scaffold 对 bottomNavigationBar 槽位本身已做
+            // removePadding(removeTop: true, removeBottom: false)
+            //（scaffold.dart:3163），而悬浮 Dock 又自行抬离手势区——
+            // NavigationBar 内置 SafeArea 再消费一次 bottom inset 会把
+            // 70px 页签行压扁。这里用【调用处 context】整体重建
+            // MediaQuery（removePadding 按调用处求值——位于 Scaffold
+            // 之上，ambient 仍含状态栏 top inset），若只剥 bottom 会把
+            // top inset 重新注入：SafeArea 从顶部再吃 32px，行中心
+            // 反向偏移比修复前更糟。因此四个方向全剥，NavigationBar
+            // 恢复满高满宽，行中心与滑块中心（(70-54)/2+27=35）对齐。
             MediaQuery.removePadding(
               context: context,
               removeLeft: true,
+              removeTop: true,
               removeRight: true,
               removeBottom: true,
               child: NavigationBar(

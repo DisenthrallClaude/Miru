@@ -127,11 +127,19 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
     if (themeChanged) {
       // 主题切换（昼夜）：整套资产与视频随主题重载，旧资源释放。
       final oldPlayer = _player;
+      // v1.6.5：先捕获旧场景图再置 null——_reloadThemeAssets 内部
+      // 捕获的 _scene 此时已是 null，旧的全屏 ui.Image（约 10MB）
+      // 此前会泄漏。这里在下一帧（画笔不再引用）后释放。
+      final oldScene = _scene;
       _player = null;
       _videoController = null;
       _videoReady = false;
       _scene = null;
       oldPlayer?.dispose();
+      if (oldScene != null) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => oldScene.dispose());
+      }
       unawaited(_reloadThemeAssets());
     } else if (theme.videoAsset == null && _scene == null) {
       unawaited(_captureScene());

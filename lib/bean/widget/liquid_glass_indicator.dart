@@ -116,9 +116,16 @@ class _LiquidGlassIndicatorState extends State<LiquidGlassIndicator>
         final width = baseWidth * (1 + stretch);
         final height = widget.height * (1 - stretch * 0.42);
 
-        // 以滑块中心对齐当前页签中心
+        // 以滑块中心对齐当前页签中心。
+        // v1.6.5：clamp 到槽位域内——欠阻尼弹簧在跨多槽位跳转时
+        // 过冲约 0.25 槽位，滑块会短暂冲出左右边界被 Stack 硬切
+        //（left<0 或超右缘）。夹在边界内滑动比平切更顺眼。
         final centerX = slot * (_position + 0.5);
-        final left = centerX - width / 2;
+        final maxLeft = constraints.maxWidth - width;
+        final left = (centerX - width / 2).clamp(
+          0.0,
+          maxLeft > 0 ? maxLeft : 0.0,
+        );
 
         return Stack(
           children: [

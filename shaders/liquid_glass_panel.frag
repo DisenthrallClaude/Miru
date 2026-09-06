@@ -65,7 +65,9 @@ vec4 blurSample(vec2 pos) {
     float a = 1.0471976 * float(i) + 0.2617994; // 60 deg steps, 15 deg off
     vec2 dir = vec2(cos(a), sin(a));
     // ring 1 at +sigma, ring 2 at -2*sigma (opposite side, 2x radius):
-    // 12 outer taps land on 12 distinct angles, 6 at each radius.
+    // 6 directions x 2 radii = 12 outer taps in 12 distinct positions,
+    // the kernel stays radially symmetric (each direction has a tap at
+    // each radius on both sides through the centre line).
     sum += texture(image, toUV(pos + dir * blur)) * W1;
     sum += texture(image, toUV(pos - dir * blur * 2.0)) * W2;
   }
