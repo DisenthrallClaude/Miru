@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.2/Miru-1.6.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.3-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.3/Miru-1.6.3-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,22 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.6.2（本次）
+### 1.6.3（本次）
+
+> 安装包：[Releases v1.6.3](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.3)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**液态玻璃开屏精修：光影、通透、布局与启动体验四线修复。**
+
+- **修复玻璃球不通透、无光影（根因）**：上游遗留的 `EnableImpeller=false` 配置让全部液态玻璃着色器在运行时静默加载失败，玻璃球退化成一个纯白半透明圆片——这就是「一点也不通透、一点也没有光影变化」的来源。已启用 Impeller 渲染后端：外光晕、乳白玻璃体、发丝缘光、上侧日辉、推动时的彩虹焦散与金线、以及背景透过球体的真实折射（放大 + 边缘剪切 + RGB 色散）自此全部生效，与原版一致。
+- **修复文字重叠**：标题块与第三行在非 402×874 比例的屏幕上会叠行；现改用统一缩放 + 相对堆叠定位，长屏/短屏/横屏/平板全部不叠；宽屏下玻璃按钮半径同步收窄，不再压进文字。
+- **文案重写**：「追番这件事——不将就，要讲究」（白天）/「深夜追番——没有孤单，只有陪伴」（夜晚），第三行轮换短语同步打磨。
+- **删除白底启动页**：点开应用不再先看到「白底 + 居中图标」的系统页——原生启动屏换成与玻璃页同色的底色（昼云蓝/夜深空黑）并隐藏居中图标，App 图标点下去直接「落入」液态玻璃开屏，颜色全程无缝。
+- **新增设置：每次启动显示开屏**：设置 → 界面设置 → 「每次启动显示开屏动画」。默认关闭（仅首次安装出现）；开启后每次打开应用都会完整播放一遍液态玻璃开屏，进入前自动等待后台初始化完成。
+- 其余：无着色器设备上的降级玻璃球升级为多层渐变近似（光晕/缘光/日辉俱全，不再是白圆片）、重播模式的返回键直接跳过开屏、升级用户不再被误判为首启动。全量 287 项测试通过。
+
+### 1.6.2
 
 > 安装包：[Releases v1.6.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2)
 >

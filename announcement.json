@@ -1,8 +1,29 @@
 {
   "announcements": [
     {
-      "id": "ann-20260906-v162",
+      "id": "ann-20260906-v163",
       "enabled": true,
+      "priority": 20,
+      "title": "v1.6.3 发布：玻璃开屏光影通透修复",
+      "body": "玻璃开屏这次真的「玻璃」了：\n\n1. 修复玻璃球不通透、没有光影的根因——之前全部玻璃光影着色器在运行时静默加载失败，球只是一片半透明白。现在外光晕、乳白玻璃体、发丝缘光、推动时的彩虹焦散与背景真实折射全部生效，与原版一致。\n\n2. 文字重叠修复：任何屏幕比例下标题都不再叠行；文案重写为「追番这件事——不将就，要讲究」。\n\n3. 删除白底启动页：点开应用直接落入液态玻璃开屏，全程同色无缝。\n\n4. 设置 → 界面设置 新增「每次启动显示开屏动画」：想每次都看一遍开屏就打开它。\n\n到 GitHub Releases 下载 v1.6.3 覆盖安装即可，固定签名无需卸载。",
+      "coverImage": "",
+      "actions": [
+        {
+          "label": "去下载",
+          "type": "url",
+          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.3"
+        }
+      ],
+      "minAppVersion": "1.3.0",
+      "maxAppVersion": "1.6.2",
+      "startAt": "",
+      "endAt": "",
+      "showFrequency": "once",
+      "font": "longCang"
+    },
+    {
+      "id": "ann-20260906-v162",
+      "enabled": false,
       "priority": 20,
       "title": "v1.6.2 发布：液态玻璃开屏大修",
       "body": "上滑之后的体验这次全部修好：\n\n1. 修复上滑松手后画面「冻结」——贴纸、文案、按钮不出现的根因已除。\n\n2. 修复贴纸放大 5 倍糊满全屏、文案失焦动画失效、贴纸层偶发整层空白。\n\n3. 玻璃球透镜升级为真实折射：云海视频、星空与贴纸都会被玻璃弯折放大。\n\n4. 开屏字标换为 chrome 气球字（昼夜两个色调），观感对齐原版。\n\n到 GitHub Releases 下载 v1.6.2 覆盖安装即可，固定签名无需卸载。",
@@ -10,7 +31,8 @@
       "actions": [
         {
           "label": "去下载",
-          "url": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2"
+          "type": "url",
+          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2"
         }
       ],
       "minAppVersion": "1.3.0",
