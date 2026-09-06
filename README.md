@@ -60,7 +60,7 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 安装
 
-1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.1-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.1/Miru-1.6.1-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
+1. 到 [Releases](https://github.com/DisenthrallClaude/Miru/releases/latest) 下载 APK（直链：[Miru-1.6.2-android-arm64-release.apk](https://github.com/DisenthrallClaude/Miru/releases/download/v1.6.2/Miru-1.6.2-android-arm64-release.apk)），每个版本附 `.sha1` 校验文件
 2. 安装（首次需允许「安装未知来源应用」）
 3. 首启跟着引导走完，规则会自动装好
 
@@ -68,7 +68,23 @@ Miru 改用无需鉴权的社区公共反代：
 
 ## 更新记录
 
-### 1.6.1（本次）
+### 1.6.2（本次）
+
+> 安装包：[Releases v1.6.2](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2)
+>
+> 固定签名之下的常规覆盖升级，直接安装即可。
+
+**液态玻璃开屏大修：上滑后的全部体验修复。**
+
+- **修复上滑后画面「冻结」**：手势结束后内部触摸状态未清除，导致落定判定永不触发——上滑松手后贴纸、文案与按钮全部不出现。已修复并以整页手势测试锁死回归。
+- **修复贴纸放大 5 倍**：贴纸按原图 512px 直接绘制而未按设计槽位尺寸缩放，羽流会糊满全屏；现与原版逐点一致。
+- **修复文案失焦失效**：标题/提示的「原位失焦淡出」层序颠倒（模糊盖在文字下方），文字永远锐利；现对齐原版 BlurView 语义。
+- **修复贴纸层整层报废**：贴纸图异步解码完成前绘制越界，会让贴纸层抛错变空白；已加守卫。
+- **透镜升级为真实折射**：改用 Impeller 的 ImageFilter.shader 做 BackdropFilter——云海视频、星空光晕与贴纸都会被玻璃球真实折射（放大+边缘剪切+RGB 色散+液体滞后），与原版 Skia BackdropFilter 同构；不支持 Impeller 的设备自动回退近似路径。
+- **字标换新**：自绘文字字标（反馈「低级丑陋」的根源）换为 chrome 气球字标位图，昼夜两个色调变体，色调分布对齐原版（夜间 123/130/144 vs 原版 117/128/144）。
+- 其余修正：Astro 提示色 ARGB 错位、侧向弹簧参数对齐原版（120/15/1.05）、手势被抢时球体不再悬停、昼夜切换时状态机重建。全量 271 项测试通过。
+
+### 1.6.1
 
 > 安装包：[Releases v1.6.1](https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.1)
 >

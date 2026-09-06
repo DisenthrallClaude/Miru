@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui show Image, ImmutableBuffer, ImageDescriptor;
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -22,6 +23,11 @@ import 'liquid_glass_theme.dart';
 /// 一路缩小成 + 按钮；落定后贴纸从按钮的玻璃里升起结成羽流，
 /// 文案与 CTA 淡入；下拉则重新放大并收回羽流
 /// （Sky 坠落淡出 / Astro 星尘漩涡入芯）。
+///
+/// v1.6.2：透镜改为真实 BackdropFilter（ImageFilter.shader，
+/// Impeller），与原版 Skia BackdropFilter + RuntimeShader 同构——
+/// 背景视频/星场与贴纸都会被球体真实折射；贴纸按槽位尺寸绘制；
+/// 层序与原版一致（背景 → 贴纸 → 透镜 → 玻璃）。
 class LiquidGlassWelcome extends StatefulWidget {
   const LiquidGlassWelcome({
     super.key,
@@ -49,6 +55,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
 
   List<ui.Image?> _stickers = const [];
   ui.Image? _scene;
+  ui.Image? _glowImage;
   bool _shadersReady = false;
 
   // Sky 视频背景。
@@ -59,6 +66,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
   double _sx = 1;
   double _sy = 1;
   Size _size = Size.zero;
+  String? _themeId;
 
   LiquidGlassTheme get theme => widget.theme;
 
@@ -82,6 +90,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       setState(() => _shadersReady = ready);
     }
     await _loadStickers();
+    await _loadGlowImage();
     if (theme.videoAsset != null) {
       await _initVideo();
     }
@@ -91,8 +100,10 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final mq = MediaQuery.of(context);
-    if (_size == mq.size) return;
+    final themeChanged = _themeId != null && _themeId != theme.id;
+    if (_size == mq.size && !themeChanged) return;
     _size = mq.size;
+    _themeId = theme.id;
     _sx = _size.width / 402;
     _sy = _size.height / 874;
     final old = _controller;
@@ -103,14 +114,56 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       reduceMotion: mq.disableAnimations,
     );
     old?.dispose();
-    if (theme.videoAsset == null && _scene == null) {
+    if (themeChanged) {
+      // 主题切换（昼夜）：整套资产与视频随主题重载，旧资源释放。
+      final oldPlayer = _player;
+      _player = null;
+      _videoController = null;
+      _videoReady = false;
+      _scene = null;
+      oldPlayer?.dispose();
+      unawaited(_reloadThemeAssets());
+    } else if (theme.videoAsset == null && _scene == null) {
       unawaited(_captureScene());
     }
   }
 
+  Future<void> _reloadThemeAssets() async {
+    final oldStickers = _stickers;
+    final oldGlow = _glowImage;
+    final oldScene = _scene;
+    _stickers = const [];
+    _glowImage = null;
+    await _loadStickers();
+    await _loadGlowImage();
+    if (theme.videoAsset != null) {
+      await _initVideo();
+    } else {
+      await _captureScene();
+    }
+    if (mounted) {
+      // 旧 ui.Image 在下一帧渲染（不再被画笔引用）后释放。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        oldScene?.dispose();
+        oldGlow?.dispose();
+        for (final img in oldStickers) {
+          img?.dispose();
+        }
+      });
+      setState(() {});
+    } else {
+      oldScene?.dispose();
+      oldGlow?.dispose();
+      for (final img in oldStickers) {
+        img?.dispose();
+      }
+    }
+  }
+
   Future<void> _loadStickers() async {
+    final paths = theme.stickers;
     final images = <ui.Image?>[];
-    for (final path in theme.stickers) {
+    for (final path in paths) {
       try {
         final data = await rootBundle.load(path);
         final buffer =
@@ -123,13 +176,34 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
         images.add(null);
       }
     }
-    if (mounted) {
+    if (mounted && identical(paths, theme.stickers)) {
       setState(() => _stickers = images);
     }
   }
 
+  /// Astro 地平光晕层：不透明调色板 PNG，必须以 plus 混合绘制
+  ///（与原版 `SkImage blendMode=plus` 一致）——黑像素加 0，
+  /// 星空透出，光带增亮。
+  Future<void> _loadGlowImage() async {
+    final asset = theme.glowAsset;
+    if (asset == null) return;
+    try {
+      final data = await rootBundle.load(asset);
+      final buffer =
+          await ui.ImmutableBuffer.fromUint8List(data.buffer.asUint8List());
+      final descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final codec = await descriptor.instantiateCodec();
+      final frame = await codec.getNextFrame();
+      if (mounted && identical(asset, theme.glowAsset)) {
+        setState(() => _glowImage = frame.image);
+      }
+    } catch (_) {
+      // 光晕缺失：仅损失增亮层。
+    }
+  }
+
   /// Sky：把 asset 视频拷到应用目录后以文件播放
-  /// （与原项目同理：asset 通道对 AVPlayer 的 byte-range 不可靠）。
+  /// （与原项目同理：asset 通道对播放器的 byte-range 不可靠）。
   Future<void> _initVideo() async {
     try {
       final player = Player();
@@ -157,19 +231,19 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
     }
   }
 
-  /// Astro：捕获静态星空为透镜场景贴图。
+  /// Astro：捕获静态星空为透镜场景贴图（仅回退路径使用）。
   Future<void> _captureScene() async {
-    if (_size == Size.zero) return;
+    if (_size == Size.zero || !mounted) return;
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    final asset = theme.refractionAsset;
     final scene = await LiquidGlassShaders.captureCoverScene(
-      asset: theme.refractionAsset,
+      asset: asset,
       widthLogical: _size.width,
       heightLogical: _size.height,
       dpr: dpr,
     );
-    if (mounted) {
-      setState(() => _scene = scene);
-    }
+    if (!mounted || !identical(asset, theme.refractionAsset)) return;
+    setState(() => _scene = scene);
   }
 
   @override
@@ -177,6 +251,11 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
     _ticker.dispose();
     _controller?.dispose();
     _player?.dispose();
+    _scene?.dispose();
+    _glowImage?.dispose();
+    for (final img in _stickers) {
+      img?.dispose();
+    }
     super.dispose();
   }
 
@@ -218,6 +297,11 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       d.velocity.pixelsPerSecond.dx,
       d.velocity.pixelsPerSecond.dy,
     );
+    controller.onPanFinalize();
+  }
+
+  void _onPanCancel() {
+    controller.onPanCancel();
   }
 
   // ── 构建 ──────────────────────────────────────────────────────────────────
@@ -241,36 +325,19 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
           onPanStart: _onPanStart,
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
-          onPanCancel: () => controller.onPanFinalize(),
+          onPanCancel: _onPanCancel,
           child: ClipRect(
             child: Stack(
               fit: StackFit.expand,
               children: [
+                // 与原版 Canvas 层序一致：背景 → 贴纸 → 透镜 → 玻璃。
+                //（回退路径下透镜输出不透明，需画在贴纸之下，
+                // 否则按钮内出生的贴纸会被透镜整层遮住。）
                 _buildBackdrop(),
-                if (theme.videoAsset != null)
-                  _buildSkyLens()
-                else
-                  _buildAstroLens(),
-                AnimatedBuilder(
-                  animation: controller,
-                  builder: (_, __) => CustomPaint(
-                    painter: StickerFieldPainter(
-                      controller: controller,
-                      theme: theme,
-                      images: _stickers,
-                    ),
-                  ),
-                ),
-                AnimatedBuilder(
-                  animation: controller,
-                  builder: (_, __) => CustomPaint(
-                    painter: GlassSpherePainter(
-                      controller: controller,
-                      theme: theme,
-                      dpr: MediaQuery.devicePixelRatioOf(context),
-                    ),
-                  ),
-                ),
+                if (!_realLens) _buildLens(),
+                _buildStickers(),
+                if (_realLens) _buildLens(),
+                _buildGlass(),
                 _buildPlus(),
                 _buildGateCopy(),
                 _buildOpenCopy(),
@@ -308,37 +375,114 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
       );
     }
     // Astro：星星层 + 地平光晕（随球上升散去；物质量再点亮）。
+    // 光晕是不透明调色板 PNG：必须 plus 混合（黑像素加 0 → 星空透出），
+    // 与原版 <SkImage blendMode="plus" opacity={...}> 一致。
+    final glow = _glowImage;
     return Stack(
       fit: StackFit.expand,
       children: [
         Image.asset(theme.refractionAsset, fit: BoxFit.cover),
-        AnimatedBuilder(
-          animation: controller,
-          builder: (_, __) => Opacity(
-            opacity: controller.glowAlpha,
-            child: Image.asset(
-              theme.glowAsset!,
-              fit: BoxFit.cover,
+        if (glow != null)
+          AnimatedBuilder(
+            animation: controller,
+            builder: (_, __) => CustomPaint(
+              painter: _PlusBlendImagePainter(
+                image: glow,
+                opacity: controller.glowAlpha,
+              ),
             ),
           ),
-        ),
-        AnimatedBuilder(
-          animation: controller,
-          builder: (_, __) => Opacity(
-            opacity: controller.feedAlpha,
-            child: Image.asset(
-              theme.glowAsset!,
-              fit: BoxFit.cover,
+        if (glow != null)
+          AnimatedBuilder(
+            animation: controller,
+            builder: (_, __) => CustomPaint(
+              painter: _PlusBlendImagePainter(
+                image: glow,
+                opacity: controller.feedAlpha,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
 
-  /// Sky 的透镜：视频无法采样进 shader，用 clip + 放大近似
+  // ── 贴纸层（透镜之下，被玻璃真实折射） ────────────────────────────────────
+
+  bool get _realLens =>
+      _shadersReady && LiquidGlassShaders.isBackdropLensSupported;
+
+  Widget _buildStickers() {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (_, __) => CustomPaint(
+        painter: StickerFieldPainter(
+          controller: controller,
+          theme: theme,
+          images: _stickers,
+          approxLens: !_realLens,
+        ),
+      ),
+    );
+  }
+
+  // ── 透镜层 ────────────────────────────────────────────────────────────────
+
+  /// 真实 backdrop 透镜（Impeller）：BackdropFilter(ImageFilter.shader)
+  /// 覆盖全屏 + ClipOval 圆形裁剪。shader 的 sceneRes/c 均为屏幕物理
+  /// 像素坐标，与原版 BackdropFilter 语义一致。
+  Widget _buildLens() {
+    if (!_realLens) {
+      return theme.videoAsset != null
+          ? _buildSkyLensFallback()
+          : _buildAstroLensFallback();
+    }
+    final shader = LiquidGlassShaders.lensBackdrop();
+    if (shader == null) {
+      return theme.videoAsset != null
+          ? _buildSkyLensFallback()
+          : _buildAstroLensFallback();
+    }
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (_, __) {
+        final R = controller.radius;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        // float 槽位：0/1 = sceneRes（引擎写入，不设置）；
+        // 2/3 = c；4 = r；5 = amount；6 = bezel；7 = disp；8/9 = slosh。
+        shader.setFloat(2, controller.orbX * dpr);
+        shader.setFloat(3, controller.cy * dpr);
+        shader.setFloat(4, R * dpr);
+        shader.setFloat(
+            5, _lerpClamped(R, controller.r1, controller.r0, 0.62, 0.42));
+        shader.setFloat(
+            6, _lerpClamped(R, controller.r1, controller.r0, 0.42, 0.25));
+        shader.setFloat(7, _lerpClamped(R, controller.r1,
+            controller.r0 * theme.domeAt, theme.buttonDispersion,
+            theme.domeDispersion));
+        shader.setFloat(8, controller.sloshX * R * 0.10 * dpr);
+        shader.setFloat(9, controller.sloshY * R * 0.10 * dpr);
+
+        return Positioned.fill(
+          child: IgnorePointer(
+            child: ClipOval(
+              clipper: _OrbClipper(
+                Offset(controller.orbX, controller.cy),
+                R,
+              ),
+              child: BackdropFilter(
+                filter: ui.ImageFilter.shader(shader),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Sky 的回退透镜：视频无法采样进 shader，用 clip + 放大近似
   /// （中心放大、随半径变化、slosh 拖影；穹顶态色散 0.05 不可见，省略）。
-  Widget _buildSkyLens() {
+  Widget _buildSkyLensFallback() {
     final video = _videoController;
     if (video == null || !_videoReady) return const SizedBox.shrink();
     return AnimatedBuilder(
@@ -383,8 +527,8 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
     );
   }
 
-  /// Astro 的透镜：静态星空已捕获为贴图，shader 做真实折射。
-  Widget _buildAstroLens() {
+  /// Astro 的回退透镜：静态星空已捕获为贴图，shader 做真实折射。
+  Widget _buildAstroLensFallback() {
     if (_scene == null || !_shadersReady) return const SizedBox.shrink();
     return AnimatedBuilder(
       animation: controller,
@@ -393,6 +537,21 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
           controller: controller,
           theme: theme,
           scene: _scene,
+          dpr: MediaQuery.devicePixelRatioOf(context),
+        ),
+      ),
+    );
+  }
+
+  // ── 玻璃层 ────────────────────────────────────────────────────────────────
+
+  Widget _buildGlass() {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (_, __) => CustomPaint(
+        painter: GlassSpherePainter(
+          controller: controller,
+          theme: theme,
           dpr: MediaQuery.devicePixelRatioOf(context),
         ),
       ),
@@ -445,7 +604,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
         final wordmarkSize = 230 * sx;
         return Stack(
           children: [
-            // wordmark。
+            // wordmark：chrome 气球字标位图（原版同款视觉）。
             Positioned(
               top: h * 0.4368 - 115 * sx,
               left: (w - wordmarkSize) / 2,
@@ -455,9 +614,10 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
                 fade: controller.gateFade,
                 soften: controller.gateSoft,
                 darkTint: theme.night,
-                child: ChromeWordmark(
-                  size: wordmarkSize,
-                  night: theme.night,
+                child: Image.asset(
+                  theme.wordmarkAsset,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
                 ),
               ),
             ),
@@ -687,8 +847,9 @@ class _StruckWord extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fontSize = style.fontSize ?? 32;
+    final lineHeight = (style.height ?? 1.2) * fontSize;
     return SizedBox(
-      height: style.height != null ? fontSize * (style.height ?? 1.2) : null,
+      height: lineHeight,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -696,7 +857,9 @@ class _StruckWord extends StatelessWidget {
           Positioned(
             left: 0,
             right: 0,
-            top: fontSize * 0.56,
+            // 原版公式（screen.tsx）：
+            // lineHeight*0.5 + fontSize*(0.36 - 0.234 - 0.052)。
+            top: lineHeight * 0.5 + fontSize * 0.074,
             child: Container(
               height: fontSize * 0.104,
               color: strikeColor,
@@ -722,6 +885,47 @@ class _OrbClipper extends CustomClipper<Rect> {
   @override
   bool shouldReclip(covariant _OrbClipper oldClipper) =>
       oldClipper.center != center || oldClipper.radius != radius;
+}
+
+/// 以 plus 混合绘制一张全屏 cover 图（Astro 光晕层）：
+/// 不透明黑底 PNG 只有加色才不遮星空。
+class _PlusBlendImagePainter extends CustomPainter {
+  _PlusBlendImagePainter({required this.image, required this.opacity});
+
+  final ui.Image image;
+  final double opacity;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (opacity <= 0.001) return;
+    // cover：居中裁剪。
+    final srcW = image.width.toDouble();
+    final srcH = image.height.toDouble();
+    final scale =
+        math.max(size.width / srcW, size.height / srcH);
+    final visibleW = size.width / scale;
+    final visibleH = size.height / scale;
+    final src = ui.Rect.fromLTRB(
+      (srcW - visibleW) / 2,
+      (srcH - visibleH) / 2,
+      (srcW + visibleW) / 2,
+      (srcH + visibleH) / 2,
+    );
+    final paint = Paint()
+      ..blendMode = BlendMode.plus
+      ..filterQuality = ui.FilterQuality.medium
+      ..color = ui.Color.fromRGBO(255, 255, 255, opacity);
+    canvas.drawImageRect(
+      image,
+      src,
+      ui.Offset.zero & size,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _PlusBlendImagePainter oldDelegate) =>
+      oldDelegate.opacity != opacity || oldDelegate.image != image;
 }
 
 double _lerpClamped(double x, double x0, double x1, double y0, double y1) {

@@ -64,6 +64,7 @@ class LiquidGlassTheme {
     required this.videoAsset,
     required this.refractionAsset,
     required this.glowAsset,
+    required this.wordmarkAsset,
     required this.stickers,
     required this.copy,
   });
@@ -101,6 +102,9 @@ class LiquidGlassTheme {
 
   /// Astro 的地平光晕层；Sky 为 null。
   final String? glowAsset;
+
+  /// chrome 气球字标图（昼夜各一，透明底）。
+  final String wordmarkAsset;
 
   /// 40 个贴纸槽（羽流出生顺序，大贴纸在前），asset 路径。
   final List<String> stickers;
@@ -153,6 +157,7 @@ final LiquidGlassTheme skyLiquidGlassTheme = LiquidGlassTheme(
   videoAsset: 'assets/liquid_glass/sky/sky.mp4',
   refractionAsset: 'assets/liquid_glass/sky/sky-poster.png',
   glowAsset: null,
+  wordmarkAsset: 'assets/liquid_glass/wordmark_day.png',
   stickers: [
     for (final name in _skyStickerNames)
       'assets/liquid_glass/sky/stickers/$name.png',
@@ -178,7 +183,8 @@ final LiquidGlassTheme astroLiquidGlassTheme = LiquidGlassTheme(
   night: true,
   pageColor: const Color(0xFF04060C),
   ink: const Color(0xFFF4F6FC),
-  hint: const Color(0xE2E8F2C4),
+  // 原版 astro.ts: rgba(226,232,246,0.78)。
+  hint: const Color(0xC7E2E8F6),
   plus: const Color(0xFFF4F6FC),
   pillFrom: const Color(0xFF3A3F4D),
   pillTo: const Color(0xFFF4F6FC),
@@ -191,6 +197,7 @@ final LiquidGlassTheme astroLiquidGlassTheme = LiquidGlassTheme(
   videoAsset: null,
   refractionAsset: 'assets/liquid_glass/astro/stars.png',
   glowAsset: 'assets/liquid_glass/astro/glow.png',
+  wordmarkAsset: 'assets/liquid_glass/wordmark_night.png',
   stickers: [
     for (final name in _astroStickerNames)
       'assets/liquid_glass/astro/stickers/$name.png',

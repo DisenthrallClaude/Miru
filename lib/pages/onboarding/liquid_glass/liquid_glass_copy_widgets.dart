@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 
 const double _ramp = 0.34; // 失焦前沿宽度（占整行比例）
 const double _soft = 26; // 前沿到达前词的失焦量
+// expo-blur intensity(0-100) → 近似等效高斯 sigma ≈ 0.35×intensity。
+const double _sigmaPerUnit = 0.35;
 
 class SoftCopyBlock extends StatelessWidget {
   const SoftCopyBlock({
@@ -25,7 +27,7 @@ class SoftCopyBlock extends StatelessWidget {
   /// 0..1 透明度。
   final double fade;
 
-  /// 0..~20 失焦量。
+  /// 0..~20 失焦量（原版 BlurView intensity 同尺度）。
   final double soften;
 
   /// true = 夜间深色 tint。
@@ -38,35 +40,45 @@ class SoftCopyBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasBlur = soften > 0.05;
+    // 原版 copy.tsx 的 Soft：内容上盖一层随 soften 增强的失焦幕
+    //（BlurView 在 children 之后）。这里直接对内容自身施加高斯模糊
+    //（ImageFiltered），叠加原版同款 10% 明暗 tint，视觉等效且不依赖
+    // saveLayer 的 backdrop 语义。
+    final sigma = soften * _sigmaPerUnit;
+    final hasBlur = sigma > 0.05;
     final tintOpacity = (soften / 2.5).clamp(0.0, 1.0) * 0.10;
+    Widget content = hasBlur
+        ? ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: sigma,
+              sigmaY: sigma,
+              tileMode: TileMode.decal,
+            ),
+            child: child,
+          )
+        : child;
+    if (hasBlur && tintOpacity > 0.003) {
+      content = Stack(
+        alignment: Alignment.center,
+        children: [
+          content,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: darkTint
+                    ? Colors.black.withValues(alpha: tintOpacity)
+                    : Colors.white.withValues(alpha: tintOpacity),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     return Opacity(
       opacity: fade,
       child: Transform.translate(
         offset: shift ?? Offset.zero,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (hasBlur)
-              Positioned.fill(
-                child: ClipRect(
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(
-                      sigmaX: soften * 0.9,
-                      sigmaY: soften * 0.9,
-                      tileMode: TileMode.decal,
-                    ),
-                    child: ColoredBox(
-                      color: darkTint
-                          ? Colors.black.withValues(alpha: tintOpacity)
-                          : Colors.white.withValues(alpha: tintOpacity),
-                    ),
-                  ),
-                ),
-              ),
-            child,
-          ],
-        ),
+        child: content,
       ),
     );
   }
@@ -177,19 +189,19 @@ class _WipeSegment extends StatelessWidget {
     // 前沿位置；未到达该段时 t=0（失焦且近乎不可见），过后 t=1（清晰）。
     final front = -_ramp + wipe * (1 + _ramp * 2);
     final t = ((front - segment.at) / _ramp + 0.5).clamp(0.0, 1.0);
-    final blur = (1 - t) * _soft + soften;
 
     final text = Text(
       segment.label,
       style: style,
     );
-    if (blur < 0.4) {
-      return text;
+    final blur = (1 - t) * _soft * _sigmaPerUnit + soften * _sigmaPerUnit;
+    if (blur < 0.15) {
+      return Opacity(opacity: t, child: text);
     }
     return ImageFiltered(
       imageFilter: ui.ImageFilter.blur(
-        sigmaX: blur * 0.9,
-        sigmaY: blur * 0.9,
+        sigmaX: blur,
+        sigmaY: blur,
         tileMode: TileMode.decal,
       ),
       child: Opacity(
@@ -198,151 +210,4 @@ class _WipeSegment extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Chrome 气球字标「Miru」——替代原项目的 wordmark 位图。
-///
-/// 双 pass：白色 keyline 描边 + 纵向 chrome 渐变填充，
-/// 夜间配色更冷。绘制在 230×230 的基准框内。
-class ChromeWordmark extends StatelessWidget {
-  const ChromeWordmark({
-    super.key,
-    required this.size,
-    required this.night,
-  });
-
-  final double size;
-  final bool night;
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _ChromeWordmarkPainter(size: size, night: night),
-      size: Size.square(size),
-    );
-  }
-}
-
-class _ChromeWordmarkPainter extends CustomPainter {
-  _ChromeWordmarkPainter({required this.size, required this.night});
-
-  final double size;
-  final bool night;
-
-  @override
-  void paint(Canvas canvas, Size canvasSize) {
-    final center = Offset(canvasSize.width / 2, canvasSize.height / 2);
-
-    // 底部柔光（chrome 气球落在玻璃上的那一点亮）。
-    final halo = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          (night ? const Color(0xFF9FB4E8) : const Color(0xFFFFFFFF))
-              .withValues(alpha: 0.16),
-          const Color(0x00000000),
-        ],
-        radius: 0.6,
-      ).createShader(Rect.fromCenter(
-        center: center,
-        width: canvasSize.width,
-        height: canvasSize.height,
-      ));
-    canvas.drawCircle(center, canvasSize.width * 0.5, halo);
-
-    final fontSize = size * 0.40;
-    final span = TextSpan(
-      text: 'Miru',
-      style: TextStyle(
-        fontSize: fontSize,
-        fontWeight: FontWeight.w700,
-        letterSpacing: size * 0.004,
-        color: Colors.white,
-      ),
-    );
-    final tp = TextPainter(
-      text: span,
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final offset = Offset(
-      center.dx - tp.width / 2,
-      center.dy - tp.height / 2 - size * 0.01,
-    );
-
-    // 白色 keyline（外描边）。
-    final strokeSpan = TextSpan(
-      text: 'Miru',
-      style: TextStyle(
-        fontSize: fontSize,
-        fontWeight: FontWeight.w700,
-        letterSpacing: size * 0.004,
-        foreground: Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = size * 0.030
-          ..strokeJoin = StrokeJoin.round
-          ..color = night
-              ? const Color(0xFFE9EFFB)
-              : const Color(0xFFFFFFFF)
-          ..maskFilter = ui.MaskFilter.blur(BlurStyle.normal, size * 0.006),
-      ),
-    );
-    final strokeTp = TextPainter(
-      text: strokeSpan,
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout();
-    strokeTp.paint(
-      canvas,
-      Offset(
-        center.dx - strokeTp.width / 2,
-        offset.dy,
-      ),
-    );
-
-    // chrome 渐变填充。
-    // chrome 渐变填充（paint 时 canvas 已平移到文字原点，
-    // shader 用局部 (0,0,w,h) 矩形）。
-    final gradient = LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: night
-          ? const [
-              Color(0xFFF2F6FF),
-              Color(0xFF8EA6E6),
-              Color(0xFFDDE8FF),
-            ]
-          : const [
-              Color(0xFFFDFFFE),
-              Color(0xFF93AECB),
-              Color(0xFFEDF3FA),
-            ],
-      stops: const [0.0, 0.52, 0.82],
-    );
-    final fillSpan = TextSpan(
-      text: 'Miru',
-      style: TextStyle(
-        fontSize: fontSize,
-        fontWeight: FontWeight.w700,
-        letterSpacing: size * 0.004,
-        foreground: Paint()
-          ..shader = gradient.createShader(
-            Rect.fromLTWH(0, 0, strokeTp.width, strokeTp.height),
-          ),
-      ),
-    );
-    final fillTp = TextPainter(
-      text: fillSpan,
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout();
-    canvas.save();
-    canvas.translate(offset.dx, offset.dy);
-    fillTp.paint(canvas, Offset.zero);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _ChromeWordmarkPainter oldDelegate) =>
-      oldDelegate.size != size || oldDelegate.night != night;
 }

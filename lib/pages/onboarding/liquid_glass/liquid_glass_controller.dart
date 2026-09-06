@@ -233,6 +233,19 @@ class LiquidGlassController extends ChangeNotifier {
     _springActive = true;
   }
 
+  /// 手势被取消（被其它识别器抢走等）：与原版 onFinalize 语义一致
+  /// 只抬手，但若此时没有弹簧在跑，则按当前位置选边释放，
+  /// 避免球体悬在半路不动。
+  void onPanCancel() {
+    if (!_springActive) {
+      _springTarget = p > 0.5 ? 1 : 0;
+      _pv = 0;
+      _cxv = 0;
+      _springActive = true;
+    }
+    touchOn = false;
+  }
+
   void onPanFinalize() {
     touchOn = false;
   }
@@ -263,6 +276,9 @@ class LiquidGlassController extends ChangeNotifier {
     }
 
     // ── 弹簧（着陆/回座） ──
+    // 与原版 withSpring 同参：SPRING = {damping 15, stiffness 120, mass 1.05}
+    //（reduceMotion: {30, 160, 1}）；cxOff 回中弹簧共用同一套参数
+    //（原版 withSpring(0, {...SPRING, velocity: e.velocityX})）。
     if (_springActive) {
       final k = _reduceMotion ? 160.0 : 120.0;
       final c = _reduceMotion ? 30.0 : 15.0;
@@ -270,7 +286,7 @@ class LiquidGlassController extends ChangeNotifier {
       final a = (k * (_springTarget - p) - c * _pv) / m;
       _pv += a * dt;
       p += _pv * dt;
-      final ac = (0 * 0 - cxOff * 260 - c * _cxv) / 1.05;
+      final ac = (k * (0 - cxOff) - c * _cxv) / m;
       _cxv += ac * dt;
       cxOff += _cxv * dt;
       if ((p - _springTarget).abs() < 5e-4 && _pv.abs() < 0.02 &&
@@ -414,6 +430,9 @@ class LiquidGlassController extends ChangeNotifier {
           _thirdPhase = _ThirdPhase.reveal;
           _thirdStart = _clock;
           _wipeStart = _clock;
+          // 换词帧同步归零对焦前沿：否则新短语带着旧 wipe=1
+          // 清晰亮一帧再隐没（闪帧）。原版在 reveal() 里同步置 0。
+          wipe = 0;
           thirdSoft = 0;
           thirdFade = 1;
         }

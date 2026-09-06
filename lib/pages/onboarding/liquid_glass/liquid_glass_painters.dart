@@ -24,7 +24,8 @@ class GlassSpherePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final shader = LiquidGlassShaders.createGlass();
+    // 复用单例实例：每帧新建 FragmentShader 是纯分配浪费。
+    final shader = LiquidGlassShaders.glass();
     final R = controller.radius;
     final orbX = controller.orbX;
     final cy = controller.cy;
@@ -79,19 +80,28 @@ const Color _white38 = Color(0x61FFFFFF);
 /// translate → rotate(heading) → scale(1+0.9st, 1-0.42st) →
 /// rotate(-heading) → scale(scale) → rotate(rot)。
 ///
-/// 球内贴纸的透镜放大：出生窗口内的贴纸在玻璃中被放大
-/// （mag = 1 + 0.9·(1-rr)，随离球心衰减），边缘叠加 RGB 色散三层。
+/// 绘制尺寸 = 槽位尺寸（STICKER_SIZES，pt），源 PNG 以 drawImageRect
+/// 压入目标矩形 —— 与原版 `Image fit="contain" width={size} height={size}`
+/// 完全一致（源图 512×512，直接 drawImage 会把贴纸画成 5 倍大）。
+///
+/// [approxLens] 为 true（无 Impeller 的回退路径）时，贴纸经过按钮附近
+/// 用手工放大+色散近似透镜；真实 backdrop 透镜路径下透镜本身会折射，
+/// 这里不再叠加。
 class StickerFieldPainter extends CustomPainter {
   StickerFieldPainter({
     required this.controller,
     required this.theme,
     required this.images,
+    this.approxLens = false,
     this.repaint,
   });
 
   final LiquidGlassController controller;
   final LiquidGlassTheme theme;
   final List<ui.Image?> images;
+
+  /// 回退路径：无真实 backdrop 透镜时启用近似放大。
+  final bool approxLens;
   final Listenable? repaint;
 
   @override
@@ -122,8 +132,9 @@ class StickerFieldPainter extends CustomPainter {
         }
       }
       if (dim.isNotEmpty) {
+        // 原版：rgba(150, 200, 255, 0.38)。
         final paint = Paint()
-          ..color = const Color(0x61A0C8FF)
+          ..color = const Color(0x6196C8FF)
           ..strokeWidth = 1.6
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke;
@@ -148,7 +159,9 @@ class StickerFieldPainter extends CustomPainter {
       final b = i * k;
       final alive = s[b + 5];
       if (alive <= 0) continue;
-      final img = images[i];
+      // 贴纸图异步解码完成前列表可能为空/不齐 —— 越界会让整层绘制
+      // 抛 RangeError（v1.6.1 的实际线上 bug：层被废掉直到下一帧重建）。
+      final img = i < images.length ? images[i] : null;
       if (img == null) continue;
 
       final x = s[b];
@@ -159,17 +172,22 @@ class StickerFieldPainter extends CustomPainter {
       final rot = s[b + 9];
       final slotSize = LiquidGlassController.stickerSizes[i];
       final half = slotSize / 2;
+      final src = ui.Rect.fromLTWH(
+          0, 0, img.width.toDouble(), img.height.toDouble());
+      final dst = ui.Rect.fromLTWH(-half, -half, slotSize, slotSize);
 
-      // 球内放大（出生透过按钮玻璃的折射近似）：只在接近按钮态启用。
-      final dx = x - orbX;
-      final dy = y - cy;
-      final dist = math.sqrt(dx * dx + dy * dy);
+      // 回退路径的球内放大（出生透过按钮玻璃的折射近似）。
       var mag = 1.0;
       var chroma = 0.0;
-      if (R < controller.r1 * 1.8 && R > 1 && dist < R * 1.02) {
-        final rr = dist / R;
-        mag = 1 + 0.9 * (1 - rr);
-        chroma = disp * (1 - rr) * 0.22;
+      if (approxLens) {
+        final dx = x - orbX;
+        final dy = y - cy;
+        final dist = math.sqrt(dx * dx + dy * dy);
+        if (R < controller.r1 * 1.8 && R > 1 && dist < R * 1.02) {
+          final rr = dist / R;
+          mag = 1 + 0.9 * (1 - rr);
+          chroma = disp * (1 - rr) * 0.22;
+        }
       }
 
       final op = (alive * 255).round().clamp(0, 255);
@@ -184,12 +202,26 @@ class StickerFieldPainter extends CustomPainter {
 
       if (chroma > 0.002) {
         // RGB 三层色散（plus 混合，提取单通道）。
-        _drawChannel(canvas, img, half, op, chroma,
-            const [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
-        _drawChannel(canvas, img, half, op, 0,
-            const [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
-        _drawChannel(canvas, img, half, op, -chroma,
-            const [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        // ColorFilter.matrix 必须是 4×5=20 元素；alpha 行保留 A
+        // 以维持贴纸镂空形状。
+        _drawChannel(canvas, img, src, dst, op, chroma, const [
+          1, 0, 0, 0, 0, // R' = R
+          0, 0, 0, 0, 0, // G' = 0
+          0, 0, 0, 0, 0, // B' = 0
+          0, 0, 0, 1, 0, // A' = A
+        ]);
+        _drawChannel(canvas, img, src, dst, op, 0, const [
+          0, 0, 0, 0, 0, // R' = 0
+          0, 1, 0, 0, 0, // G' = G
+          0, 0, 0, 0, 0, // B' = 0
+          0, 0, 0, 1, 0, // A' = A
+        ]);
+        _drawChannel(canvas, img, src, dst, op, -chroma, const [
+          0, 0, 0, 0, 0, // R' = 0
+          0, 0, 0, 0, 0, // G' = 0
+          0, 0, 1, 0, 0, // B' = B
+          0, 0, 0, 1, 0, // A' = A
+        ]);
       } else {
         final paint = Paint()
           ..color = Color.fromARGB(255, 255, 255, 255)
@@ -197,7 +229,7 @@ class StickerFieldPainter extends CustomPainter {
         if (op < 255) {
           paint.color = Color.fromARGB(op, 255, 255, 255);
         }
-        canvas.drawImage(img, Offset(-half, -half), paint);
+        canvas.drawImageRect(img, src, dst, paint);
       }
       canvas.restore();
     }
@@ -206,19 +238,20 @@ class StickerFieldPainter extends CustomPainter {
   void _drawChannel(
     Canvas canvas,
     ui.Image img,
-    double half,
+    ui.Rect src,
+    ui.Rect dst,
     int op,
     double offset,
     List<double> matrix,
   ) {
     canvas.save();
-    canvas.translate(offset * half * 0.6, -offset * half * 0.15);
+    canvas.translate(offset * dst.width * 0.3, -offset * dst.width * 0.075);
     final paint = Paint()
       ..color = Color.fromARGB(op, 255, 255, 255)
       ..colorFilter = ColorFilter.matrix(matrix)
       ..blendMode = BlendMode.plus
       ..filterQuality = FilterQuality.medium;
-    canvas.drawImage(img, Offset(-half, -half), paint);
+    canvas.drawImageRect(img, src, dst, paint);
     canvas.restore();
   }
 
@@ -244,7 +277,8 @@ class LensPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final img = scene;
     if (img == null) return;
-    final shader = LiquidGlassShaders.createLens();
+    // 单例复用：每帧重设 sampler 与 uniform。
+    final shader = LiquidGlassShaders.lens();
     if (shader == null) return;
 
     final R = controller.radius;
