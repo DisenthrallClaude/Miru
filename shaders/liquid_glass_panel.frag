@@ -1,5 +1,13 @@
 // Liquid Glass — rounded-rect glass panel as a REAL backdrop filter
-// (Impeller path). v1.6.4.
+// (Impeller path). v1.6.4; v1.6.6 dual-pass frosted architecture.
+//
+// v1.6.6: the Dart side now stacks TWO BackdropFilters (liquid_glass_easy
+// architecture): pass 1 = engine ImageFilter.blur(frostSigma) which blurs
+// ALL channels of the backdrop; pass 2 = THIS shader, whose `image` sampler
+// receives the ALREADY-BLURRED backdrop. Background is frosted BEFORE it
+// is refracted. The in-shader 13-tap kernel below is therefore a secondary
+// tuning knob (blur uniform, default 0 = off) — the primary frost comes
+// from the engine pass.
 //
 // Brings the same physics as the welcome-screen orb lens to app chrome
 // (floating dock, nav bar): real refraction of the content scrolling
@@ -43,14 +51,14 @@ vec2 toUV(vec2 pos) {
   return uv;
 }
 
-// v1.6.5: REAL gaussian blur of the backdrop, sampled at `pos`.
+// v1.6.5: optional in-shader gaussian blur of the backdrop, sampled at
+// `pos` (v1.6.6: SECONDARY — the engine-level ImageFilter.blur pass on
+// the Dart side already frosts ALL channels; this kernel only runs when
+// the blur uniform is > 0, for extra rim-zone softening if ever needed).
 //
 // 13-tap dual-ring poisson kernel: centre + 6 taps at sigma + 6 taps
 // at 2*sigma (rotated 30 degrees). Weights come from the unit gaussian
-// (e^-0.5 = 0.6065, e^-2 = 0.1353), normalised to sum to 1. This is
-// what turns the "sharp refracting pane" into frosted liquid glass:
-// without it, anime covers scrolling under the dock stayed fully legible
-// and drowned out the tab labels.
+// (e^-0.5 = 0.6065, e^-2 = 0.1353), normalised to sum to 1.
 //
 // Cost: 13 texture fetches, only on the dock's small region.
 vec4 blurSample(vec2 pos) {
@@ -112,8 +120,11 @@ void main() {
   vec4 refracted = vec4(cr.r, cg.g, cb.b, max(cg.a, max(cr.a, cb.a)));
 
   // Glass body: milky tint mixed in, stronger near the rim (the plate is
-  // thickest there and catches the light).
-  float body = tintAmt * (0.55 + 0.45 * bev);
+  // thickest there and catches the light). v1.6.6: interior floor raised
+  // 0.55 → 0.68 — with the engine-pass frost the interior colour washes
+  // stay soft, and a slightly sturdier milk base keeps tab labels readable
+  // over bright covers (snow scenes) in light theme.
+  float body = tintAmt * (0.68 + 0.32 * bev);
   vec3 glass = mix(refracted.rgb, tintColor, clamp(body, 0.0, 1.0));
   float alpha = mix(refracted.a, 1.0, clamp(body * 0.9, 0.0, 0.95));
 

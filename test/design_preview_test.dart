@@ -182,7 +182,12 @@ Widget _showcase(BuildContext context) {
         ),
       ),
     ),
-    bottomNavigationBar: FrostedBar(
+    // FrostedBar 已删除（lib 内无调用点的死代码）——用等价的
+    // FrostedSurface + 顶部发丝线直接表达，预览观感不变。
+    bottomNavigationBar: FrostedSurface(
+      border: Border(
+        top: BorderSide(color: scheme.outlineVariant, width: 0.5),
+      ),
       child: Stack(
         alignment: Alignment.center,
         children: [
