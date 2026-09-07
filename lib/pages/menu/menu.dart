@@ -59,8 +59,14 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     final currentIndex =
         menu.indexForPath(context.routeState(listen: false).uri.path);
     if (index == currentIndex) {
+      // B2：双击当前 tab 回顶。子页滚动结构拿不到（见
+      // TabScrollToTop 的说明），通过登记通道通知当前子页自己回顶。
+      TabScrollToTop.request();
       return;
     }
+    // B1：切 tab 触觉反馈——全 app 频率最高的操作，玻璃滑块的
+    // 弹簧过冲配一次 selectionClick 手感才完整。
+    HapticFeedback.selectionClick();
     _outletKey.currentState?.navigate('/tab${menu.getPath(index)}/');
   }
 

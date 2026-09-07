@@ -811,12 +811,28 @@ class FastVideoSourceResolver {
     request.headers.set(HttpHeaders.refererHeader, referer);
     request.headers.set(HttpHeaders.acceptHeader, accept);
     request.headers.set(HttpHeaders.acceptLanguageHeader, 'zh-CN,zh;q=0.9');
-    final response = await request.close().timeout(timeout);
+    final response = await request.close().timeout(timeout, onTimeout: () {
+      // v1.6.6 修复（B1-🟡4）：超时必须 abort 底层请求——否则「连接已
+      // 建立但响应头永不到达」的源站留下永久悬挂 socket（FD 泄漏）。
+      request.abort();
+      throw TimeoutException('head: $url', timeout);
+    });
     if (response.statusCode >= 400) {
+      // v1.6.6 修复（B3-D13）：非 2xx 响应体不消费则连接不归还共享池
+      //（maxConnectionsPerHost=6 被打满后同 host 请求假死）。
+      unawaited(_discardResponse(response));
       throw HttpException('page fetch failed: ${response.statusCode}');
     }
     final bytes = await _readBodyLimited(response, maxBytes, bodyTimeout);
     return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  /// v1.6.6 修复（B3-D13）：非 2xx 响应统一 drain（带 3s 兜底），
+  /// 归还共享池连接配额；drain 失败即销毁连接，同样释放配额。
+  static Future<void> _discardResponse(HttpClientResponse response) async {
+    try {
+      await response.drain<void>().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   /// 读取响应体（封顶 [maxBytes]）。总耗时超过 [timeout] 时取消订阅

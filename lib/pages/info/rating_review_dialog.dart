@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/modules/bangumi/bangumi_tag.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -162,8 +163,9 @@ class _RatingReviewDialogState extends State<RatingReviewDialog> {
       comment: commentController.text,
     );
     setState(() => _isSubmitting = true);
+    var submitted = false;
     try {
-      final submitted = await widget.onSubmit?.call(result) ?? true;
+      submitted = await widget.onSubmit?.call(result) ?? true;
       if (submitted && mounted) {
         Navigator.of(context).pop();
         return;
@@ -176,6 +178,9 @@ class _RatingReviewDialogState extends State<RatingReviewDialog> {
       );
     }
     if (mounted) {
+      // 失败必须给出反馈：此前转圈收回、按钮恢复可点，用户会以为已
+      // 提交成功直接关掉——数据实际丢失，这是提交类交互的红线。
+      MiruDialog.showToast(message: '吐槽提交失败，请检查网络后重试');
       setState(() => _isSubmitting = false);
     }
   }
@@ -760,22 +765,18 @@ class _RatingReviewDialogState extends State<RatingReviewDialog> {
           const SizedBox(width: 8),
           FilledButton(
             onPressed: _isSubmitting ? null : _submit,
-            child: SizedBox(
-              width: 56,
-              height: 24,
-              child: Center(
-                child: _isSubmitting
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: theme.colorScheme.onPrimary,
-                        ),
-                      )
-                    : const Text('提交'),
-              ),
-            ),
+            // 按钮内容自适应宽度：写死 56×24 的内容区在系统大字号下
+            // 会溢出/裁字，交给按钮自身按内容取宽。
+            child: _isSubmitting
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.onPrimary,
+                    ),
+                  )
+                : const Text('提交'),
           ),
         ],
       ),

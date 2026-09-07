@@ -128,7 +128,9 @@ class _PlayerItemState extends State<PlayerItem>
   int _openPlayerMenuCount = 0;
   PlayerPanelHold? _progressBarDragHold;
   PointerDeviceKind? _lastTapPointerKind;
-  PointerDeviceKind? _lastDoubleTapPointerKind;
+
+  /// 双击快进/快退的 HUD 自动收起计时（连续双击时不断续期）。
+  Timer? _doubleTapSeekHudTimer;
 
   /// 历史落盘节流（v1.5.3）：播放中从每秒 1 次 Hive 写降为 5 秒 1 次，
   /// 暂停/播放停止与换集/退出（dispose）时立即 flush 兜底。
@@ -401,16 +403,48 @@ class _PlayerItemState extends State<PlayerItem>
     playerController.playOrPause();
   }
 
-  void _handleDoubleTap(PointerDeviceKind? pointerKind) {
+  /// 双击主手势：在 onDoubleTapDown（第二次按下的瞬间）立即执行，
+  /// 不再等抬手后的 onDoubleTap——反馈零延迟。
+  ///
+  /// 分区对齐 bilibili/YouTube 肌肉记忆：左/右 1/3 = 快退/快进
+  /// （跳过秒数与「快进 N 秒」按钮同源），中部 = 播放/暂停；
+  /// 桌面鼠标双击维持「切全屏」。单击显隐面板仍由手势竞技场的
+  /// 双击消歧路径处理（约 300ms 内无二连击才触发 onTap）。
+  void _handleDoubleTapDown(TapDownDetails details) {
     if (shouldToggleFullscreenOnDoubleTap(
       isDesktop: isDesktop(),
       isPip: videoPageController.isPip,
-      pointerKind: pointerKind,
+      pointerKind: details.kind,
     )) {
       handleFullscreen();
       return;
     }
-    playerController.playOrPause();
+    final double width = context.size?.width ?? 0;
+    if (width <= 0) {
+      return;
+    }
+    final double dx = details.localPosition.dx;
+    final int zone = dx < width / 3 ? -1 : (dx > width * 2 / 3 ? 1 : 0);
+    if (zone == 0) {
+      playerController.playOrPause();
+      return;
+    }
+    _seekWithPlayerTimer(() => playerController.seekBy(
+          Duration(seconds: zone * playerController.playback.buttonSkipTime)));
+    playerController.panel.seekDirection = zone;
+    playerController.panel.showSeekTime = true;
+    _doubleTapSeekHudTimer?.cancel();
+    _doubleTapSeekHudTimer = Timer(const Duration(milliseconds: 800), () {
+      // 期间若用户开始了拖动式 seek（横滑手势），HUD 交给那条路径管理，
+      // 这里的定时器只收起自己触发的提示，避免打断进行中的拖动。
+      if (mounted &&
+          !playerController.seeking.hasActiveInteractiveSeek &&
+          playerController.panel.showSeekTime) {
+        playerController.panel.showSeekTime = false;
+        playerController.panel.seekDirection = 0;
+      }
+      _doubleTapSeekHudTimer = null;
+    });
   }
 
   void _handleMouseScroller() {
@@ -653,12 +687,14 @@ class _PlayerItemState extends State<PlayerItem>
   }
 
   Future<void> handleScreenshot() async {
-    _playScreenshotFeedback();
-
+    // 桌面端先挡下：取景框动画只留给真正会保存截图的平台，
+    // 避免「先播完动画再提示暂未支持」的空反馈。
     if (isDesktop()) {
       MiruDialog.showToast(message: '桌面端暂未支持保存截图');
       return;
     }
+
+    _playScreenshotFeedback();
 
     try {
       Uint8List? screenshot = await playerController.screenshotPng();
@@ -944,6 +980,16 @@ class _PlayerItemState extends State<PlayerItem>
     hideTimer = null;
   }
 
+  /// 触屏点按控制栏时续期自动隐藏计时：自动隐藏原本只在唤出面板与
+  /// hold 租约释放时重启，触屏没有 hover——用户唤出面板后隔 3.8s
+  /// 再点「倍速/全屏/弹幕」时，第 4 秒面板当场滑走、手指落空。
+  void restartAutoHideTimer() {
+    _cancelHideTimer();
+    if (_canHidePlayerPanel && mounted) {
+      _startHideTimer();
+    }
+  }
+
   bool _isDanmakuSourceEnabled(DanmakuEntry danmaku) {
     if (!_danmakuBiliBiliSource && danmaku.source.contains('BiliBili')) {
       return false;
@@ -1121,6 +1167,9 @@ class _PlayerItemState extends State<PlayerItem>
           await DanmakuApi.getDanmakuSearchResponse(keyword);
     } catch (e) {
       MiruDialog.dismiss();
+      // 请求失败时 loading 对话框一关就什么都没有——像按钮没生效。
+      // 与同文件「弹幕切换失败」的反馈保持一致。
+      MiruDialog.showToast(message: '弹幕检索失败，请检查网络后重试');
       MiruLogger().w('PlayerItem: danmaku search failed', error: e);
       return;
     }
@@ -1147,6 +1196,7 @@ class _PlayerItemState extends State<PlayerItem>
                             danmakuInfo.animeId);
                   } catch (e) {
                     MiruDialog.dismiss();
+                    MiruDialog.showToast(message: '弹幕检索失败，请检查网络后重试');
                     MiruLogger()
                         .w('PlayerItem: danmaku episode failed', error: e);
                     return;
@@ -1411,6 +1461,7 @@ class _PlayerItemState extends State<PlayerItem>
     hideTimer?.cancel();
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
+    _doubleTapSeekHudTimer?.cancel();
     _panelVisibilityController.dispose();
     _screenshotFeedbackController.dispose();
     _disposePlayerMenu();
@@ -1471,7 +1522,12 @@ class _PlayerItemState extends State<PlayerItem>
                       focusScopeNode: widget.keyboardFocus,
                       actions: keyboardActions,
                       longPressActions: keyboardLongPressActions,
-                      isBlocked: () => _openPlayerMenuCount > 0,
+                      // 对话框（弹幕检索/跳过秒数等 AlertDialog）打开时焦点
+                      // 仍在播放器作用域，空格会在对话框后面暂停视频——
+                      // 一并纳入屏蔽条件。
+                      isBlocked: () =>
+                          _openPlayerMenuCount > 0 ||
+                          MiruDialog.observer.hasMiruDialog,
                     ),
                     Center(
                       child: PlayerItemSurface(
@@ -1499,19 +1555,10 @@ class _PlayerItemState extends State<PlayerItem>
                       },
                       onDoubleTapDown: (playerController.panel.lockPanel)
                           ? null
-                          : (details) {
-                              _lastDoubleTapPointerKind = details.kind;
-                            },
-                      onDoubleTap: (playerController.panel.lockPanel)
-                          ? null
-                          : () {
-                              _handleDoubleTap(
-                                _lastDoubleTapPointerKind ??
-                                    _lastTapPointerKind,
-                              );
-                              _lastDoubleTapPointerKind = null;
-                              _lastTapPointerKind = null;
-                            },
+                          : _handleDoubleTapDown,
+                      // 双击动作已在 onDoubleTapDown 立即执行（分区快进
+                      // 退/播放暂停），这里置 null 避免抬手后二次触发。
+                      onDoubleTap: null,
                       onLongPressStart: (_) {
                         if (playerController.panel.lockPanel) {
                           return;
@@ -1534,15 +1581,25 @@ class _PlayerItemState extends State<PlayerItem>
                         height: double.infinity,
                       ),
                     ),
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: videoPageController.isFullscreen ||
-                              videoPageController.isPip
-                          ? MediaQuery.sizeOf(context).height
-                          : (MediaQuery.sizeOf(context).width * 9 / 16),
-                      child: DanmakuScreen(
+                    // 全屏时弹幕层避开顶部挖孔（cutout）：视频本体顶到边
+                    // 是对的，弹幕文字不该从挖孔后面穿过去。非全屏时页面级
+                    // SafeArea 已吃掉顶部 inset（此处为 0）。
+                    Builder(builder: (context) {
+                      final double danmakuTopInset =
+                          videoPageController.isFullscreen
+                              ? MediaQuery.paddingOf(context).top
+                              : 0.0;
+                      return Positioned(
+                        top: danmakuTopInset,
+                        left: 0,
+                        right: 0,
+                        height:
+                            (videoPageController.isFullscreen ||
+                                    videoPageController.isPip
+                                ? MediaQuery.sizeOf(context).height
+                                : (MediaQuery.sizeOf(context).width * 9 / 16)) -
+                                danmakuTopInset,
+                        child: DanmakuScreen(
                         key: _danmuKey,
                         createdController: (DanmakuController e) {
                           playerController.danmaku.canvasController = e;
@@ -1568,7 +1625,8 @@ class _PlayerItemState extends State<PlayerItem>
                               : customAppFontFamily,
                         ),
                       ),
-                    ),
+                      );
+                    }),
                     Positioned.fill(
                       child: PlayerScreenshotFeedbackOverlay(
                         animation: _screenshotFeedbackAnimation,
@@ -1592,6 +1650,7 @@ class _PlayerItemState extends State<PlayerItem>
                             handlePreNextEpisode: handlePreNextEpisode,
                             panelVisibilityController:
                                 _panelVisibilityController,
+                            restartAutoHideTimer: restartAutoHideTimer,
                             keyboardFocus: widget.keyboardFocus,
                             sendDanmaku: widget.sendDanmaku,
                             acquirePlayerPanelHold: acquirePlayerPanelHold,
@@ -1621,6 +1680,7 @@ class _PlayerItemState extends State<PlayerItem>
                                 handleSuperResolutionChange,
                             panelVisibilityController:
                                 _panelVisibilityController,
+                            restartAutoHideTimer: restartAutoHideTimer,
                             acquirePlayerPanelHold: acquirePlayerPanelHold,
                             onMenuVisibilityChanged:
                                 _handlePlayerMenuVisibilityChanged,

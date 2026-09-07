@@ -157,20 +157,44 @@ class GStorage {
   /// collectchanges 保留上限：append-only 变更日志的无上界增长防线
   /// （多设备重度用户长期累积会让每次 WebDAV 全量上传越来越重）。
   /// 收藏全量状态在 collectibles 盒里，日志截断不丢状态。
+  ///
+  /// v1.6.6 修复（B3-C9）：裁剪改为「同步水位线感知」——此前只看数量
+  /// 不看水位，>500 条**未同步**变更被裁掉后，远端合并只重放变更日志
+  /// （不读本地全量），对应收藏静默丢失且被回传远端（不可恢复）。
+  /// 现在：水位线（[SettingsKeys.lastSyncedCollectChangeId]，上传成功
+  /// 后写入）以下的已同步记录按 500 常规上限裁剪；水位线以上的未同步
+  /// 记录只在 5000 硬上限兜底下才裁（防无上界膨胀），保证「攒了很久
+  /// 才第一次开同步」的变更完整可同步。
   static const int maxCollectChanges = 500;
 
-  /// 裁剪变更日志：保留最新的 [maxCollectChanges] 条。
+  /// 未同步变更的硬上限（防从未同步用户的盒无上界增长）。
+  static const int maxUnsyncedCollectChanges = 5000;
+
+  /// 裁剪变更日志：已同步部分保留最新 [maxCollectChanges] 条，
+  /// 未同步部分保留最新 [maxUnsyncedCollectChanges] 条。
   /// 必须在写队列内调用。键为秒级时间戳（或更大）的自增 id，
   /// 升序即时间序；个别非 int 键（理论上不存在）不参与裁剪。
   static Future<void> _trimCollectChangesLocked() async {
+    final watermark =
+        GStorage.getSetting(SettingsKeys.lastSyncedCollectChangeId);
     final ids = collectChanges.keys.whereType<int>().toList()..sort();
-    if (ids.length <= maxCollectChanges) return;
-    final victims =
-        ids.take(ids.length - maxCollectChanges).toList(growable: false);
+    if (ids.isEmpty) return;
+    final syncedCount = ids.indexWhere((id) => id > watermark);
+    final split = syncedCount < 0 ? ids.length : syncedCount;
+    final synced = ids.take(split).toList(growable: false);
+    final unsynced = ids.skip(split).toList(growable: false);
+    final victims = <int>[];
+    if (synced.length > maxCollectChanges) {
+      victims.addAll(synced.take(synced.length - maxCollectChanges));
+    }
+    if (unsynced.length > maxUnsyncedCollectChanges) {
+      victims.addAll(unsynced.take(unsynced.length - maxUnsyncedCollectChanges));
+    }
     if (victims.isEmpty) return;
     await collectChanges.deleteAll(victims);
     MiruLogger().i(
-        'GStorage: trimmed ${victims.length} collect changes (cap $maxCollectChanges)');
+        'GStorage: trimmed ${victims.length} collect changes '
+        '(synced cap $maxCollectChanges / unsynced cap $maxUnsyncedCollectChanges)');
   }
 
   /// Put a collectible using the same write queue
@@ -388,40 +412,57 @@ class GStorage {
     }
   }
 
+  /// 临时读盒自增序号：v1.6.6（B3-C8）盒名唯一化用。
+  static int _tempBoxNonce = 0;
+
   static Future<List<CollectedBangumi>> getCollectiblesFromFile(
       String backupFilePath) async {
     final backupFile = File(backupFilePath);
     final backupContent = await backupFile.readAsBytes();
-    final tempBox =
-        await Hive.openBox('tempCollectiblesBox', bytes: backupContent);
-    final tempBoxItems = tempBox.toMap().entries;
-    MiruLogger().i(
-        'WebDav: get collectibles from file. tempCollectiblesBox length ${tempBoxItems.length}');
+    // v1.6.6 修复（B3-C8/🔴2）：盒名唯一化 + try/finally 关闭。此前
+    // 双通道（WebDAV/GitHub）并发冷启动同名同开，后开的 bytes 被忽略
+    // → 读到对方数据交叉污染；且 toMap 抛错后盒保持打开，盒名被永久
+    // 毒化——之后所有调用都拿回旧实例，静默读同一份陈旧数据。
+    final boxName = 'tempCollectiblesBox.'
+        '${DateTime.now().microsecondsSinceEpoch}.${_tempBoxNonce++}';
+    final tempBox = await Hive.openBox(boxName, bytes: backupContent);
+    try {
+      final tempBoxItems = tempBox.toMap().entries;
+      MiruLogger().i(
+          'WebDav: get collectibles from file. $boxName length ${tempBoxItems.length}');
 
-    final List<CollectedBangumi> collectibles = [];
-    for (var tempBoxItem in tempBoxItems) {
-      collectibles.add(tempBoxItem.value);
+      final List<CollectedBangumi> collectibles = [];
+      for (var tempBoxItem in tempBoxItems) {
+        collectibles.add(tempBoxItem.value);
+      }
+      return collectibles;
+    } finally {
+      await tempBox.close();
     }
-    await tempBox.close();
-    return collectibles;
   }
 
   static Future<List<CollectedBangumiChange>> getCollectChangesFromFile(
       String backupFilePath) async {
     final backupFile = File(backupFilePath);
     final backupContent = await backupFile.readAsBytes();
-    final tempBox =
-        await Hive.openBox('tempCollectChangesBox', bytes: backupContent);
-    final tempBoxItems = tempBox.toMap().entries;
-    MiruLogger().i(
-        'WebDav: get collectChanges from file. tempCollectChangesBox length ${tempBoxItems.length}');
+    // v1.6.6 修复（B3-C8/🔴2）：盒名唯一化 + try/finally 关闭（同
+    // getCollectiblesFromFile，杜绝跨服务同名同开与异常毒化）。
+    final boxName = 'tempCollectChangesBox.'
+        '${DateTime.now().microsecondsSinceEpoch}.${_tempBoxNonce++}';
+    final tempBox = await Hive.openBox(boxName, bytes: backupContent);
+    try {
+      final tempBoxItems = tempBox.toMap().entries;
+      MiruLogger().i(
+          'WebDav: get collectChanges from file. $boxName length ${tempBoxItems.length}');
 
-    final List<CollectedBangumiChange> collectChanges = [];
-    for (var tempBoxItem in tempBoxItems) {
-      collectChanges.add(tempBoxItem.value);
+      final List<CollectedBangumiChange> collectChanges = [];
+      for (var tempBoxItem in tempBoxItems) {
+        collectChanges.add(tempBoxItem.value);
+      }
+      return collectChanges;
+    } finally {
+      await tempBox.close();
     }
-    await tempBox.close();
-    return collectChanges;
   }
 
   static Future<void> patchCollectibles(

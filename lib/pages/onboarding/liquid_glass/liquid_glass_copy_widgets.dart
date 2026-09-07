@@ -196,7 +196,11 @@ class _WipeSegment extends StatelessWidget {
       style: style,
     );
     final blur = (1 - t) * _soft * _sigmaPerUnit + soften * _sigmaPerUnit;
-    if (blur < 0.15) {
+    // v1.6.6（B-6）：阈值 0.15 → 0.8——sigma<0.8 的失焦肉眼不可辨，
+    // 绝大多数帧走纯 Opacity 路径，仅真失焦（前沿模糊）才 saveLayer；
+    // reveal 的 0.56s 内每帧 7~10 个独立 blur saveLayer 在低端机上
+    // 可能掉帧。
+    if (blur < 0.8) {
       return Opacity(opacity: t, child: text);
     }
     return ImageFiltered(

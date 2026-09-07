@@ -72,7 +72,15 @@ class BackgroundDownloadService {
 
   Future<bool> startService() async {
     if (!isSupported) return false;
-    if (_isRunning) return true;
+    if (_isRunning) {
+      // v1.6.6 修复：Dart 侧 _isRunning 可能与原生服务状态脱钩（服务
+      // 被系统/用户杀死时 onDestroy 只在回调 isolate 里跑，此前不回写）
+      // ——复核原生侧真在跑才短路，否则复位状态重新拉起。
+      if (await FlutterForegroundTask.isRunningService) return true;
+      _isRunning = false;
+      MiruLogger().w(
+          'BackgroundDownloadService: service no longer running natively, resetting state');
+    }
 
     if (!_isInitialized) {
       await init();
@@ -138,6 +146,15 @@ class BackgroundDownloadService {
     } catch (e) {
       MiruLogger()
           .e('BackgroundDownloadService: failed to stop service', error: e);
+    }
+  }
+
+  /// v1.6.6 修复：原生服务销毁（onDestroy → sendDataToMain）后回写
+  /// Dart 侧运行状态，主 isolate 的 [_isRunning] 不再与真实状态脱钩。
+  void markServiceDestroyed() {
+    if (_isRunning) {
+      _isRunning = false;
+      MiruLogger().w('BackgroundDownloadService: service destroyed natively');
     }
   }
 
@@ -241,6 +258,9 @@ class _DownloadTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     debugPrint(
         'BackgroundDownloadService: task handler destroyed (isTimeout: $isTimeout)');
+    // v1.6.6 修复：服务被系统/用户杀死时通知主 isolate 复位 _isRunning，
+    // 否则之后 startService 被短路、下载失去保活且不再自愈。
+    FlutterForegroundTask.sendDataToMain({'action': 'service_destroyed'});
   }
 
   @override

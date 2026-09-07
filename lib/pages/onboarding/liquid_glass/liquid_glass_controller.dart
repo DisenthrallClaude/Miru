@@ -45,6 +45,92 @@ class LiquidGlassController extends ChangeNotifier {
     _makeState();
   }
 
+  /// v1.6.6（A-3/B-3/A-7）：状态迁移构造。
+  ///
+  /// 主题热切换（昼夜）、旋转/分屏尺寸变化或系统「移除动画」
+  /// 开关变化时，交互状态（球位与速度、侧偏、模式、文案时序、
+  /// 贴纸羽流物理）整体迁移到新实例，仅几何（r0/cy0/r1/cy1/
+  /// rf/cx/travel/sx/sy）与主题参数按新尺寸重算——球体不再砸回
+  /// 底缘、文案不再瞬灭、羽流不再清空重来。
+  ///
+  /// 贴纸归位点相对按钮中心（ox/a[b+7]），尺寸变化后由边界弹簧
+  /// 把出界贴纸拉回新几何内，物理上自然收敛。
+  factory LiquidGlassController.retune({
+    required LiquidGlassTheme theme,
+    required LiquidGlassController old,
+    required double width,
+    required double height,
+    bool reduceMotion = false,
+  }) {
+    final c = LiquidGlassController(
+      theme: theme,
+      width: width,
+      height: height,
+      reduceMotion: reduceMotion,
+    );
+    c._migrateFrom(old);
+    return c;
+  }
+
+  /// [retune] 的状态迁移主体。
+  void _migrateFrom(LiquidGlassController old) {
+    p = old.p;
+    _pv = old._pv;
+    cxOff = old.cxOff;
+    _cxv = old._cxv;
+    _springActive = old._springActive;
+    _springTarget = old._springTarget;
+    _panP0 = old._panP0;
+    _panCx0 = old._panCx0;
+    touchOn = old.touchOn;
+    touchX = old.touchX;
+    touchY = old.touchY;
+    fvx = old.fvx;
+    fvy = old.fvy;
+    windX = old.windX;
+    windY = old.windY;
+    mode = old.mode;
+    settled = old.settled;
+    feed = old.feed;
+    glow = old.glow;
+    dirX = old.dirX;
+    dirY = old.dirY;
+    sloshX = old.sloshX;
+    sloshY = old.sloshY;
+    shown = old.shown;
+    phraseIndex = old.phraseIndex;
+    wipe = old.wipe;
+    thirdFade = old.thirdFade;
+    thirdSoft = old.thirdSoft;
+    gateFade = old.gateFade;
+    gateSoft = old.gateSoft;
+    bodyFade = old.bodyFade;
+    bodySoft = old.bodySoft;
+    _warm = old._warm;
+    _clock = old._clock;
+    _emitT = old._emitT;
+    _leaveT = old._leaveT;
+    _lastMode = old._lastMode;
+    _leaving = old._leaving;
+    _shownFrom = old._shownFrom;
+    _shownTo = old._shownTo;
+    _shownStart = old._shownStart;
+    _shownDur = old._shownDur;
+    _shownEaseOut = old._shownEaseOut;
+    _wipeStart = old._wipeStart;
+    _thirdStart = old._thirdStart;
+    _thirdPhase = old._thirdPhase;
+    _live = old._live;
+    _state.setAll(0, old._state);
+    _dust.setAll(0, old._dust);
+    _dustHead = old._dustHead;
+    // 换几何后首帧的速度采样会把位置跳变误读成巨变推挤
+    //（假焦散光斑）：预热与上帧速度对齐新几何。
+    _prevCy = cy;
+    _prevCx = cxOff;
+    _prevV = 0;
+  }
+
   static const int stickerSlots = 40;
   static const int _k = 19;
   static const int _dustMotes = 260;
@@ -134,6 +220,12 @@ class LiquidGlassController extends ChangeNotifier {
   int _lastMode = 0;
   int _leaving = 0;
 
+  /// v1.6.6（B-1）：球体着陆（弹簧收敛、文案进场）时的回调。
+  ///
+  /// 由宿主（welcome 层）接 HapticFeedback.lightImpact——本类
+  /// 保持不依赖 Flutter 平台服务，单测无需 mock 触觉通道。
+  void Function()? onSettled;
+
   // shown / 第三行的显式 tween。
   double _shownFrom = 0;
   double _shownTo = 0;
@@ -174,8 +266,8 @@ class LiquidGlassController extends ChangeNotifier {
 
   double get hintSoft => _clamp01(_lerpRange(p, 0.04, 0.28, 0, 12));
 
-  double get plusOpacity => _clamp01(
-      _lerpRange(radius, r1 * 1.2, r1 * 1.7, 1, 0));
+  double get plusOpacity =>
+      _clamp01(_lerpRange(radius, r1 * 1.2, r1 * 1.7, 1, 0));
 
   bool get pillLive => shown > 0.9;
 
@@ -295,8 +387,10 @@ class LiquidGlassController extends ChangeNotifier {
       final ac = (k * (0 - cxOff) - c * _cxv) / m;
       _cxv += ac * dt;
       cxOff += _cxv * dt;
-      if ((p - _springTarget).abs() < 5e-4 && _pv.abs() < 0.02 &&
-          cxOff.abs() < 0.5 && _cxv.abs() < 20) {
+      if ((p - _springTarget).abs() < 5e-4 &&
+          _pv.abs() < 0.02 &&
+          cxOff.abs() < 0.5 &&
+          _cxv.abs() < 20) {
         p = _springTarget;
         cxOff = 0;
         _pv = 0;
@@ -318,6 +412,8 @@ class LiquidGlassController extends ChangeNotifier {
       settled = 1;
       if (mode != 1) mode = 1;
       _startShown(1, 0.52, true);
+      // v1.6.6（B-1）：着陆一拍的触觉钩子（宿主接轻震）。
+      onSettled?.call();
     } else if (cur < 0.80 && settled == 1) {
       settled = 0;
       _startShown(0, 0.24, false);
@@ -382,7 +478,7 @@ class LiquidGlassController extends ChangeNotifier {
 
   void _advanceShown() {
     if (_shownStart < 0) return;
-    final t = (( _clock - _shownStart) / _shownDur).clamp(0.0, 1.0);
+    final t = ((_clock - _shownStart) / _shownDur).clamp(0.0, 1.0);
     final eased = _shownEaseOut
         ? 1 - (1 - t) * (1 - t) // easeOutQuad
         : _bezier(t, 0.23, 1, 0.32, 1);
@@ -466,9 +562,8 @@ class LiquidGlassController extends ChangeNotifier {
       final t = _rand.nextDouble();
       final spread = 34 + t * 178;
       final stray = i % 7 == 3;
-      a[b + 7] = (_rand.nextDouble() * 2 - 1) *
-          spread *
-          (stray ? 1.8 : 1 - 0.3 * big);
+      a[b + 7] =
+          (_rand.nextDouble() * 2 - 1) * spread * (stray ? 1.8 : 1 - 0.3 * big);
       a[b + 8] = -40 - t * 545 - (stray ? 90 : 0);
       // 少数小贴纸守在按钮附近，玻璃里总有东西可折射。
       if (i % 6 == 4 && stickerSizes[i] < 82) {
@@ -602,8 +697,7 @@ class LiquidGlassController extends ChangeNotifier {
           final u = math.min(1, tau / s[b + 16]);
           final e = math.pow(u, 2.0).toDouble();
           rad = r0 * (1 - e);
-          final th =
-              s[b + 14] + s[b + 17] * math.log(r0 / math.max(rad, 6));
+          final th = s[b + 14] + s[b + 17] * math.log(r0 / math.max(rad, 6));
           final nx = sinkX + math.cos(th) * rad;
           final ny = sinkY + math.sin(th) * rad;
           vx = (nx - s[b]) / dt;
@@ -612,8 +706,7 @@ class LiquidGlassController extends ChangeNotifier {
           s[b + 1] = ny;
           // 缩入核心并自旋加速。
           s[b + 4] = 0.12 + 0.88 * math.pow(math.min(1, rad / 260), 0.8);
-          s[b + 10] +=
-              (s[b + 10].sign == 0 ? 1 : s[b + 10].sign) * 26 * e * dt;
+          s[b + 10] += (s[b + 10].sign == 0 ? 1 : s[b + 10].sign) * 26 * e * dt;
           if (u >= 1 || rad < _sinkRadius) {
             s[b + 5] = 0;
             s[b + 18] = 0;
@@ -665,10 +758,10 @@ class LiquidGlassController extends ChangeNotifier {
             final back = _rand.nextDouble() * stickerSizes[i] * 0.3;
             d[c] = s[b] - ux * back - uy * off;
             d[c + 1] = s[b + 1] - uy * back + ux * off;
-            d[c + 2] =
-                vx * (0.25 + 0.30 * _rand.nextDouble()) + (_rand.nextDouble() - 0.5) * 80;
-            d[c + 3] =
-                vy * (0.25 + 0.30 * _rand.nextDouble()) + (_rand.nextDouble() - 0.5) * 80;
+            d[c + 2] = vx * (0.25 + 0.30 * _rand.nextDouble()) +
+                (_rand.nextDouble() - 0.5) * 80;
+            d[c + 3] = vy * (0.25 + 0.30 * _rand.nextDouble()) +
+                (_rand.nextDouble() - 0.5) * 80;
             d[c + 4] = 0.45 + _rand.nextDouble() * 0.40;
             d[c + 5] = d[c + 4];
           }
@@ -731,9 +824,8 @@ class LiquidGlassController extends ChangeNotifier {
       if (s[b] > width - pad) vx -= (s[b] - (width - pad)) * 6 * dt;
       if (!out) {
         if (s[b + 1] < -r * 1.3) vy += (-r * 1.3 - s[b + 1]) * 8 * dt;
-        final floor = (i % 6 == 4 && stickerSizes[i] < 82)
-            ? oy + r
-            : oy - r * 0.8;
+        final floor =
+            (i % 6 == 4 && stickerSizes[i] < 82) ? oy + r : oy - r * 0.8;
         if (s[b + 1] > floor) vy -= (s[b + 1] - floor) * 10 * dt;
       }
 

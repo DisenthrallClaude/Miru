@@ -84,8 +84,18 @@ class _InitPageState extends State<InitPage> {
     // 现在：设置里开了「每次启动显示开屏」的回访用户立即进入玻璃页
     // （重播模式：不重跑首次安装流程），初始化转后台，进入主界面前
     // 由 OnboardingPage 通过 StartupGate 等待其完成。
-    if (GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch) &&
-        mounted) {
+    if (GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch) && mounted) {
+      // v1.6.6：该设置只在主界面可达，能开它的用户必然已完成过引导
+      //（v1.6.3+ 用户有标志；v1.6.2 老用户早已引导过只是没标志）。
+      // 首启动新用户不可能到达此分支。这里对缺标志的老用户一次性
+      // 补写 onboardingDone——否则 OnboardingPage.replayMode 读到
+      // false，玻璃页按首启动模式运行：重跑自动安装、把镜像/自动
+      // 更新等设置强写回默认值、返回键弹「退出应用」而非跳过开屏
+      //（131 行的同类补写因本分支提前 return 而永远不执行）。
+      // Hive put 的内存值同步可见，导航后同帧读取即为 true。
+      if (!GStorage.getSetting(SettingsKeys.onboardingDone)) {
+        unawaited(GStorage.putSetting(SettingsKeys.onboardingDone, true));
+      }
       context.navigate('/onboarding');
       await initFutures;
       // 云同步错峰启动：计时从 init 完成后起算（4s 后触发），
@@ -488,13 +498,34 @@ class LoadingWidget extends StatelessWidget {
     // 与原生启动屏颜色连成一体——不再出现白屏页。
     // v1.6.5：判定与欢迎页同源（应用内/系统深色 + 北京时间深夜窗口），
     // 避免「深色设置下原生深底 → 浅色加载页 → 深色开屏」的闪变。
-    final dark = splashEffectiveBrightness(
-            View.of(context).platformDispatcher.platformBrightness) ==
-        Brightness.dark;
-    return Scaffold(
-      backgroundColor:
-          dark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),
-      body: const SizedBox.expand(),
+    // v1.6.6：原生启动层只认系统深色（values-night 一重判定），与
+    // 三重判定存在两条不同步路径——深夜窗口的系统浅色用户、应用内
+    // 深色的系统浅色用户，冷启动会「亮蓝 → 深黑」硬闪。两者判定
+    // 一致时直接落位（零额外动画）；不一致时从「原生同色」起帧、
+    // 300ms 渐变到目标底色。改用 platformBrightnessOf（订阅式）与
+    // 欢迎页同源同行为。
+    final platform = MediaQuery.platformBrightnessOf(context);
+    final nativeDark = platform == Brightness.dark;
+    final effectiveDark =
+        splashEffectiveBrightness(platform) == Brightness.dark;
+    if (nativeDark == effectiveDark) {
+      return Scaffold(
+        backgroundColor:
+            effectiveDark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),
+        body: const SizedBox.expand(),
+      );
+    }
+    // 原生层与三重判定不一致：从原生同色起帧、渐变到目标色。
+    return TweenAnimationBuilder<Color>(
+      tween: Tween<Color>(
+        begin: nativeDark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),
+        end: effectiveDark ? const Color(0xFF04060C) : const Color(0xFFDCE8F2),
+      ),
+      duration: const Duration(milliseconds: 300),
+      builder: (_, color, __) => Scaffold(
+        backgroundColor: color,
+        body: const SizedBox.expand(),
+      ),
     );
   }
 }

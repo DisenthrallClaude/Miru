@@ -62,6 +62,11 @@ class SearchHistoryRepository implements ISearchHistoryRepository {
 
   @override
   Future<bool> saveHistory(String keyword) async {
+    // 空关键词不落盘：否则建议列表会渲染出空白条目（F4 修复，
+    // 页面与 controller 侧已拦截，这里作数据层最后兜底）。
+    if (keyword.trim().isEmpty) {
+      return false;
+    }
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final history = SearchHistory(keyword, timestamp);

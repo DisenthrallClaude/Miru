@@ -206,7 +206,12 @@ class _BangumiHeroCarouselState extends State<BangumiHeroCarousel> {
                   : (kHeroBanners.length > 8 ? 4 : 6),
               height: kHeroBanners.length > 8 ? 4 : 6,
               decoration: BoxDecoration(
-                color: active ? scheme.primary : scheme.outlineVariant,
+                // C4：inactive 点 outlineVariant 在浅色 surface 上
+                // ΔL≈3% 近不可见，换 onSurface@0.25 保证浅色主题下
+                // 指示点可辨（active primary 不变）。
+                color: active
+                    ? scheme.primary
+                    : scheme.onSurface.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(3),
               ),
             );

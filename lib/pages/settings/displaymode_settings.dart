@@ -45,20 +45,33 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
   }
 
   Future<void> init() async {
+    // init 是未 await 的 async：任何未捕获异常都会逸出到 Zone。
+    // 整体 try/catch，modes 拿不到时保持空表，由 build 展示不支持提示。
     try {
-      modes = await FlutterDisplayMode.supported;
-    } on PlatformException catch (_) {}
-    var res = await getDisplayModeType(modes);
+      try {
+        modes = await FlutterDisplayMode.supported;
+      } on PlatformException catch (_) {}
+      var res = await getDisplayModeType(modes);
 
-    preferred = modes.toList().firstWhere((el) => el == res);
-    FlutterDisplayMode.setPreferredMode(preferred!);
+      // 换机/系统更新后存量 displayMode 字符串可能不再存在于本机
+      // 模式表——firstWhere 无兜底会抛 StateError，这里改用 firstOrNull。
+      final matched = modes.where((el) => el == res).firstOrNull;
+      if (matched != null) {
+        preferred = matched;
+        await FlutterDisplayMode.setPreferredMode(matched);
+      }
+    } catch (_) {
+      // 读取/设置失败不致命：页面仍可用「自动」模式正常展示。
+    }
   }
 
   Future<DisplayMode> getDisplayModeType(List<DisplayMode> modes) async {
     var value = GStorage.getSetting(SettingsKeys.displayMode);
     DisplayMode f = DisplayMode.auto;
     if (value != null) {
-      f = modes.firstWhere((e) => e.toString() == value);
+      // 存量值与本机模式不匹配时回退 auto，而不是抛错。
+      f = modes.where((e) => e.toString() == value).firstOrNull ??
+          DisplayMode.auto;
     }
     return f;
   }
@@ -77,11 +90,15 @@ class _SetDisplayModeState extends State<SetDisplayMode> {
       // 返回键行为与原先裸 AppBar 的自动 leading 一致。
       appBar: const SysAppBar(title: Text('屏幕帧率设置')),
       body: (modes.isEmpty)
-          ? const CircularProgressIndicator()
+          // 空模式表（PlatformException/不支持查询）此前永远转圈，
+          // 给出明确文案让用户知道这台设备改不了帧率。
+          ? const Center(
+              child: Text('当前设备不支持修改屏幕帧率'),
+            )
           : SettingsList(
               sections: [
                 SettingsRadioSection<DisplayMode>(
-                  title: Text('没有生效? 重启app试试'),
+                  title: const Text('没有生效？重启应用试试'),
                   groupValue: preferred,
                   onChanged: (DisplayMode? newMode) async {
                     await FlutterDisplayMode.setPreferredMode(newMode!);

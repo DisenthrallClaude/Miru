@@ -165,7 +165,9 @@ class _ProfileEditorDialogState extends State<_ProfileEditorDialog> {
                   decoration: const InputDecoration(
                     labelText: '用户名',
                     hintText: '留空显示「我的追番」',
-                    counterText: '',
+                    // 显示字数计数器：此前 counterText 置空隐藏了它，
+                    // 用户打到第 12 字才知道上限。
+                    helperText: '最多 12 个字',
                     border: OutlineInputBorder(),
                     isDense: true,
                     prefixIcon: Icon(Icons.badge_outlined),

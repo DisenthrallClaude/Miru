@@ -2,11 +2,13 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/bean/widget/glass_fab.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
@@ -126,6 +128,14 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   Future<void> _clearLogs() async {
+    // 清空是破坏性操作（排障凭据），加统一危险确认。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '清空日志',
+      message: '将删除全部日志文件内容，排障凭据会一并丢失。确定清空吗？',
+      confirmLabel: '清空',
+    );
+    if (!confirmed) return;
     try {
       final file = await _getLogsFile();
       await file.writeAsString('');
@@ -137,9 +147,12 @@ class _LogsPageState extends State<LogsPage> {
         _fullContent = '';
         _displayedLines = 0;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // 原始异常只进日志，用户文案收敛成人话。
+      MiruLogger().e('Logs: clear log file failed',
+          error: e, stackTrace: stackTrace);
       if (!mounted) return;
-      MiruDialog.showToast(message: '清空失败: $e');
+      MiruDialog.showToast(message: '清空失败，请重试');
     }
   }
 

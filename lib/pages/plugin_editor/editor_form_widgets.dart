@@ -144,6 +144,7 @@ class EditorTextField extends StatelessWidget {
     required this.label,
     this.hint,
     this.helper,
+    this.errorText,
     this.maxLines = 1,
   });
 
@@ -151,6 +152,10 @@ class EditorTextField extends StatelessWidget {
   final String label;
   final String? hint;
   final String? helper;
+
+  /// 字段级校验错误：保存失败时由上层把出错信息回显到对应输入框
+  /// （30+ 字段的表单里，只在底部 toast 提示用户要自己找哪个字段写错）。
+  final String? errorText;
   final int maxLines;
 
   @override
@@ -163,6 +168,8 @@ class EditorTextField extends StatelessWidget {
         labelText: label,
         hintText: hint,
         helperText: helper,
+        errorText: errorText,
+        errorMaxLines: 3,
         helperMaxLines: 3,
         alignLabelWithHint: maxLines > 1,
         filled: true,

@@ -20,7 +20,8 @@ class StorageErrorPage extends StatelessWidget {
               final supportDir = snapshot.data;
               final path = supportDir != null ? '$supportDir' : '未知路径';
               return GeneralErrorWidget(
-                errMsg: '存储初始化错误 \n 当前储存位置 $path \n 尝试删除该目录以重置本地存储',
+                // 用词统一为「存储」（此前同句里「存储/储存」混用）。
+                errMsg: '存储初始化错误 \n 当前存储位置 $path \n 尝试删除该目录以重置本地存储',
                 actions: [
                   GeneralErrorButton(
                     onPressed: () {

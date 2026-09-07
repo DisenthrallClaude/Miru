@@ -56,6 +56,14 @@ class M3u8MasterPlaylist {
   M3u8Variant get bestVariant {
     return variants.reduce((a, b) => a.bandwidth > b.bandwidth ? a : b);
   }
+
+  /// v1.6.6 修复：空 variants 时的安全读取（返回 null 而非抛
+  /// StateError）——STREAM-INF 后缺 URI 行/媒体清单被误判为 master
+  /// 时调用方可判空回落，报可读的失败文案。
+  M3u8Variant? get bestVariantOrDefault {
+    if (variants.isEmpty) return null;
+    return variants.reduce((a, b) => a.bandwidth > b.bandwidth ? a : b);
+  }
 }
 
 class M3u8MediaPlaylist {
@@ -89,7 +97,12 @@ class M3u8Parser {
     if (relativeUrl.startsWith('/')) {
       return '${baseUri.scheme}://${baseUri.host}${baseUri.hasPort ? ':${baseUri.port}' : ''}$relativeUrl';
     }
-    final basePath = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
+    // v1.6.6 修复：baseUrl 无斜杠时（如裸域名）不再拼出空前缀的裸
+    // 文件名，补一个斜杠当作根目录下的相对路径。
+    final slashIndex = baseUrl.lastIndexOf('/');
+    final basePath = slashIndex >= 0
+        ? baseUrl.substring(0, slashIndex + 1)
+        : '$baseUrl/';
     return '$basePath$relativeUrl';
   }
 

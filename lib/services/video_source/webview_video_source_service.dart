@@ -94,11 +94,18 @@ class WebViewVideoSourceService implements IVideoSourceService {
     try {
       request.throwIfNotCurrent(_activeRequest);
       didStartLoad = true;
+      // v1.6.6 修复（B1-🟡12）：loadUrl 同样要有硬超时（与 init 的
+      // 10s 同款 P8 问题）——WebView 进程僵死/通道丢失时 future
+      // 永不完成，串行队列卡死、dispose 悬挂、实例泄漏。
+      // 超时抛 VideoSourceTimeoutException，走既有 finally 的
+      // unloadPage 清理与上层降级链路。
       await _webview!.loadUrl(
         episodeUrl,
         useLegacyParser,
         offset: offset,
-      );
+      ).timeout(const Duration(seconds: 10),
+          onTimeout: () => throw VideoSourceTimeoutException(
+              const Duration(seconds: 10)));
 
       request.throwIfNotCurrent(_activeRequest);
 
@@ -223,5 +230,7 @@ class _ResolveRequest {
 /// URL 是否应按 HLS 流处理：以 .m3u8 结尾，或 .m3u8 后跟查询串/锚点。
 bool _looksLikeHls(String url) {
   final path = url.split('#').first.split('?').first;
-  return path.endsWith('.m3u8');
+  // v1.6.6 修复（B1-🔵6）：大小写不敏感（大写 .M3U8 同为 HLS），
+  // 与 hybrid 层判定对齐，避免两侧语义漂移。
+  return path.toLowerCase().endsWith('.m3u8');
 }

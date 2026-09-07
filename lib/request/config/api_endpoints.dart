@@ -51,7 +51,7 @@ class ApiEndpoints {
   /// 由项目方部署在 Cloudflare Workers 免费额度上，带匿名用户统计与
   /// 动态配额（按当日活跃人数均摊，超限自动降级本地解析，不影响播放）。
   /// 想自建/换源的用户可在「设置 → 播放 → 播放加速」里覆盖，
-  /// 部署方法见仓库 cloudflare-worker/miru-resolver/README.md。
+  /// 部署方法见 worker.js 顶部注释（v1.6.6 起仓库不再附独立 README）。
   static const String cloudResolverOfficialEndpoint =
       'https://miru-resolver.3127467219.workers.dev';
 

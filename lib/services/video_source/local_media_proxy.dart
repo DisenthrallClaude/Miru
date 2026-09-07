@@ -446,6 +446,10 @@ class LocalMediaProxy {
     final built = await _buildManifest(url, headers);
     if (built == null) return;
     _rewrittenManifests[_tokenFor(url)] = built.manifest;
+    // v1.6.6 修复（B1-🟡1）：预取时同步登记分片序列——否则正式播放
+    // 命中会话缓存清单、跳过重建分支，_segmentsByToken 永远为空，
+    // 滑窗预取对预取过的集静默失效。
+    _segmentsByToken[_tokenFor(url)] = built.segmentUrls;
     final segments =
         built.segmentUrls.take(hlsPrefetchSegments).toList(growable: false);
     final segTokens = <String>[];
@@ -808,7 +812,15 @@ class LocalMediaProxy {
 
         // 2) 有界但越过缓存边界：只回磁盘部分，mpv 会重连补齐
         if (requestedEnd != null) {
-          final total = meta?.total ?? diskEnd + 1;
+          // v1.6.6 修复（B1-🟡10）：total 未知时不得伪造 total（case3
+          // 同款防护）——mpv 会误信文件只有缓存这么大，播到缓存边界
+          // 即停且不请求后半段；改走透传顺带学 total 写 meta。
+          if (meta?.total == null) {
+            await _passthroughUpstream(request, client, srcUrl, forwardHeaders,
+                cacheFile, token, meta, range, requestedStart, cachedLen);
+            return;
+          }
+          final total = meta!.total!;
           await _respondDiskRange(
               request, cacheFile, requestedStart, diskEnd, total);
           return;
@@ -848,6 +860,18 @@ class LocalMediaProxy {
           return;
         }
 
+        // v1.6.6 修复（B1-🔴1）：上游 206 起始校验提前到写出任何字节
+        // 之前——原实现磁盘段已推给 mpv 才校验，错位的上游字节直拼
+        // 进播放流（花屏/seek 错乱）。起始缺失或不等于 cachedLen 时
+        // 字节无法与磁盘拼接，整体放弃（502 → mpv 直连兜底）。
+        final upstreamStart = _contentRangeStart(response);
+        if (upstreamStart == null || upstreamStart != cachedLen) {
+          await response.drain<void>().catchError((_) {});
+          request.response.statusCode = HttpStatus.badGateway;
+          await request.response.close();
+          return;
+        }
+
         final servedEnd = total - 1;
         request.response.statusCode = HttpStatus.partialContent;
         request.response.headers.set(HttpHeaders.contentRangeHeader,
@@ -856,15 +880,10 @@ class LocalMediaProxy {
         // 磁盘部分（流式，不占大内存）
         await request.response
             .addStream(cacheFile.openRead(requestedStart, diskEnd + 1));
-        // 上游部分：从 cachedLen 开始正好接在缓存末尾，可 tee。
-        // B12 同款校验（case4 是三处 tee 中此前漏掉的一处）：206 的
-        // Content-Range 起始必须恰为 cachedLen——上游对开放 Range 做
-        // 钳制/回畸形 206 时字节错位，追加进缓存就是永久损坏；
-        // 校验不过只转发不落盘（丢一次缓存机会而已）。
-        final upstreamStart = _contentRangeStart(response);
-        holdingWriteLock = upstreamStart == cachedLen &&
-            cachedLen < mp4PrefetchBytes &&
-            _writing.add(token);
+        // 上游部分：起始已在写出前校验必为 cachedLen，正好接在缓存
+        // 末尾，可安全 tee 落盘（B12 校验上移后无需二次判起始）。
+        holdingWriteLock =
+            cachedLen < mp4PrefetchBytes && _writing.add(token);
         if (holdingWriteLock) {
           teeSink = cacheFile.openWrite(mode: FileMode.append);
         }

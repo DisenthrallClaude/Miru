@@ -36,7 +36,7 @@ class _CollectPageState extends State<CollectPage>
   Future<bool> _syncBangumiWithProgress({
     required GlobalKey<_FullSyncProgressDialogState> progressDialogKey,
   }) async {
-    progressDialogKey.currentState?.update('准备同步 Bangumi 收藏...', null);
+    progressDialogKey.currentState?.update('准备同步 Bangumi 收藏…', null);
 
     await Future<void>.delayed(const Duration(milliseconds: 80));
 
@@ -99,7 +99,7 @@ class _CollectPageState extends State<CollectPage>
 
     try {
       if (plan.shouldSyncWebDavCollectibles) {
-        progressDialogKey.currentState?.update('正在同步 WebDav 收藏...', null);
+        progressDialogKey.currentState?.update('正在同步 WebDav 收藏…', null);
         webDavSynced =
             await collectController.syncCollectibles(showSuccessToast: false);
       }
@@ -114,7 +114,7 @@ class _CollectPageState extends State<CollectPage>
         webDavSynced: webDavSynced,
         bangumiSynced: bangumiSynced,
       )) {
-        progressDialogKey.currentState?.update('正在回传最新收藏到 WebDav...', null);
+        progressDialogKey.currentState?.update('正在回传最新收藏到 WebDav…', null);
         webDavUploaded = await collectController.uploadCollectiblesToWebDav(
           showSuccessToast: false,
         );
@@ -221,14 +221,17 @@ class _CollectPageState extends State<CollectPage>
                 : const Icon(Icons.sync_rounded),
           ),
           IconButton(
+              tooltip: showDelete ? '退出编辑' : '编辑',
               onPressed: () {
                 setState(() {
                   showDelete = !showDelete;
                 });
               },
+              // 与历史页同构页面保持同一套图标语义（此前两页状态互为
+              // 相反，且缺「退出编辑」的 edit_off 语义）。
               icon: showDelete
-                  ? const Icon(Icons.edit_outlined)
-                  : const Icon(Icons.edit))
+                  ? const Icon(Icons.edit_off_outlined)
+                  : const Icon(Icons.edit_outlined))
         ],
       ),
       body: Observer(builder: (context) {

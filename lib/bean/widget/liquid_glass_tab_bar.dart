@@ -16,6 +16,7 @@ class LiquidGlassTabBar extends StatelessWidget implements PreferredSizeWidget {
     this.isScrollable = false,
     this.indicatorHeight = 38,
     this.widthFactor = 0.84,
+    this.highlightIndex,
   });
 
   final TabController controller;
@@ -24,15 +25,31 @@ class LiquidGlassTabBar extends StatelessWidget implements PreferredSizeWidget {
   final double indicatorHeight;
   final double widthFactor;
 
+  /// 需要持续标记的页签下标（如时间表的「今日」）。
+  ///
+  /// 初始落点就在今日，但没有持续标记的话滑走后找不到
+  /// 「今天」；这里在其文字下方点一枚 primary 小圆点
+  ///（positioned 不参与布局，也不与选中态耦合）。
+  final int? highlightIndex;
+
   @override
   Size get preferredSize => Size.fromHeight(kTextTabBarHeight);
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 今日标记：给目标页签叠一枚不参与布局的小圆点（D1）。
+    List<Widget> effectiveTabs = tabs;
+    final hi = highlightIndex;
+    if (hi != null && hi >= 0 && hi < tabs.length) {
+      effectiveTabs = [
+        for (var i = 0; i < tabs.length; i++)
+          i == hi ? _TodayMark(child: tabs[i]) : tabs[i],
+      ];
+    }
     final bar = TabBar(
       controller: controller,
-      tabs: tabs,
+      tabs: effectiveTabs,
       isScrollable: isScrollable,
       // 显式钉死前景色，保证选中页签的文字在任何主题、任何玻璃罩
       // （包括下方的液态玻璃滑块）之上都清晰可读：
@@ -74,6 +91,35 @@ class LiquidGlassTabBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         ),
         bar,
+      ],
+    );
+  }
+}
+
+/// 在页签文字下方点一枚 3dp primary 圆点（positioned 不占布局）。
+class _TodayMark extends StatelessWidget {
+  const _TodayMark({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        child,
+        Positioned(
+          bottom: 7,
+          child: Container(
+            width: 3,
+            height: 3,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
       ],
     );
   }

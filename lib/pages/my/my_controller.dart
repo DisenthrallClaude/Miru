@@ -135,6 +135,16 @@ abstract class _MyController with Store {
       MiruDialog.showToast(message: '关键词过长');
       return;
     }
+    // 正则形（/pattern/）在添加时预检：坏正则此前会静默入库，
+    // 运行期每条弹幕都 catch 一次，用户以为屏蔽生效其实没有。
+    if (item.startsWith('/') && item.endsWith('/') && item.length > 2) {
+      try {
+        RegExp(item.substring(1, item.length - 1));
+      } catch (_) {
+        MiruDialog.showToast(message: '正则表达式无效，请检查');
+        return;
+      }
+    }
     if (shieldList.contains(item)) {
       MiruDialog.showToast(message: '已存在该关键词');
       return;

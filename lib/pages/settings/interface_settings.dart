@@ -115,7 +115,9 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
                 setState(() {});
               },
               title: Text('显示评分'),
-              description: Text('关闭后将在概览中隐藏评分信息'),
+              // 后果导向描述（与「显示追番统计」同视角，此前一句
+              // 开启视角一句关闭视角）。
+              description: Text('控制概览中的评分信息是否显示'),
               initialValue: showRating,
             ),
             SettingsTile.switchTile(
@@ -127,7 +129,7 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
                 setState(() {});
               },
               title: Text('显示追番统计'),
-              description: Text('启用后将在追番页面下方显示追番统计'),
+              description: Text('控制追番页面下方的追番统计是否显示'),
               initialValue: showAnimeCounter,
             ),
           ]),

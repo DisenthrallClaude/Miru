@@ -23,48 +23,48 @@ class BangumiCardV extends StatelessWidget {
   Widget build(BuildContext context) {
     // 极简：去掉卡片容器与投影，只保留圆角海报 + 下方标题，
     // 让网格靠留白而非边框来分隔。
-    return GestureDetector(
-      child: InkWell(
-        borderRadius: Radii.brMd,
-        onTap: () {
-          if (!canTap) {
-            MiruDialog.showToast(
-              message: '编辑模式',
-            );
-            return;
-          }
-          context.pushNamed('/info/', arguments: bangumiItem);
-        },
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AspectRatio(
-              aspectRatio: 0.65,
-              child: LayoutBuilder(builder: (context, boxConstraints) {
-                final double maxWidth = boxConstraints.maxWidth;
-                final double maxHeight = boxConstraints.maxHeight;
-                return enableHero
-                    ? Hero(
-                        transitionOnUserGestures: true,
-                        flightShuttleBuilder:
-                            NetworkImgLayer.heroFlightShuttleBuilder,
-                        tag: bangumiItem.id,
-                        child: NetworkImgLayer(
-                          src: bangumiItem.images['large'] ?? '',
-                          width: maxWidth,
-                          height: maxHeight,
-                        ),
-                      )
-                    : NetworkImgLayer(
+    // （E6：原先外层还包了一个无任何回调的 GestureDetector，
+    // 纯冗余——手势语义与命中区域由 InkWell 一层决定即可。）
+    return InkWell(
+      borderRadius: Radii.brMd,
+      onTap: () {
+        if (!canTap) {
+          MiruDialog.showToast(
+            message: '编辑模式',
+          );
+          return;
+        }
+        context.pushNamed('/info/', arguments: bangumiItem);
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 0.65,
+            child: LayoutBuilder(builder: (context, boxConstraints) {
+              final double maxWidth = boxConstraints.maxWidth;
+              final double maxHeight = boxConstraints.maxHeight;
+              return enableHero
+                  ? Hero(
+                      transitionOnUserGestures: true,
+                      flightShuttleBuilder:
+                          NetworkImgLayer.heroFlightShuttleBuilder,
+                      tag: bangumiItem.id,
+                      child: NetworkImgLayer(
                         src: bangumiItem.images['large'] ?? '',
                         width: maxWidth,
                         height: maxHeight,
-                      );
-              }),
-            ),
-            BangumiContent(bangumiItem: bangumiItem)
-          ],
-        ),
+                      ),
+                    )
+                  : NetworkImgLayer(
+                      src: bangumiItem.images['large'] ?? '',
+                      width: maxWidth,
+                      height: maxHeight,
+                    );
+            }),
+          ),
+          BangumiContent(bangumiItem: bangumiItem)
+        ],
       ),
     );
   }

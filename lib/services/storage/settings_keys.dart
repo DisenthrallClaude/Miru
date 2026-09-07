@@ -597,6 +597,15 @@ class SettingsKeys {
     false,
     group: SettingGroup.sync,
   );
+  /// v1.6.6（B3-C9）：收藏变更日志的同步水位线——已成功上传到远端的
+  /// 最大变更 id。collectchanges 裁剪只裁水位线以下的记录，防止
+  /// 「>500 条未同步变更被裁 → 合并只重放日志 → 收藏静默丢失」。
+  /// 由 WebDav / GithubSync 上传 collectchanges 盒成功后写入。
+  static const lastSyncedCollectChangeId = SettingKey<int>(
+    'lastSyncedCollectChangeId',
+    0,
+    group: SettingGroup.sync,
+  );
   static const playerControllerLayerDisappearTime = SettingKey<int>(
     'playerControllerLayerDisappearTime',
     4000,
@@ -622,7 +631,7 @@ class SettingsKeys {
   /// 云端解析加速：自建/自定义 Worker 地址。
   /// 留空 = 使用内置官方端点（v1.5.1 起零配置可用，见
   /// [ApiEndpoints.cloudResolverOfficialEndpoint]）；填了则完全替换官方端点。
-  /// 部署方法见仓库 cloudflare-worker/miru-resolver/README.md。
+  /// 部署方法见 worker.js 顶部注释（v1.6.6 起仓库不再附独立 README）。
   static const cloudResolverUrl = SettingKey<String>(
     'cloudResolverUrl',
     '',
@@ -766,6 +775,7 @@ class SettingsKeys {
     historySyncDeviceId,
     historySyncSequence,
     historySyncSnapshotInitialized,
+    lastSyncedCollectChangeId,
     playerControllerLayerDisappearTime,
     defaultVolume,
     playerMuted,

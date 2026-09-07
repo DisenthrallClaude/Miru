@@ -102,21 +102,25 @@ abstract class _PopularController with Store {
 
   @action
   Future<void> queryBangumiByTrend({String type = 'add'}) async {
-    if (type == 'init') {
-      trendList.clear();
+    // C1/C2：'init'（主动刷新/切回热门）不再先清空列表——请求期间
+    // 旧内容继续展示，先取到局部 sink 里，成功后一次性替换，
+    // 避免「列表被抽掉」的闪空；失败时旧内容原样保留。
+    final isInit = type == 'init';
+    if (isInit) {
       _trendOffset = 0;
       _featuredLoaded = false;
     }
     isLoadingMore = true;
     loadMoreFailed = false;
+    final sink = isInit ? <BangumiItem>[] : trendList;
 
     // 首屏先铺置顶清单：封面轮播取列表前几条，因此这里决定了「封面推荐」的内容。
     if (!_featuredLoaded) {
       _featuredLoaded = true;
       final featured =
           await BangumiApi.getBangumiListByIds(kFeaturedBangumiIds);
-      final seen = trendList.map((e) => e.id).toSet();
-      trendList.addAll(featured.where((e) => seen.add(e.id)));
+      final seen = sink.map((e) => e.id).toSet();
+      sink.addAll(featured.where((e) => seen.add(e.id)));
     }
 
     // 置顶之后再接算法推荐（按热度的国漫），域名由拦截器重写到公共反代。
@@ -145,8 +149,15 @@ abstract class _PopularController with Store {
     if (result.isNotEmpty) {
       _trendOffset += result.length;
     }
-    final existingIds = trendList.map((item) => item.id).toSet();
-    trendList.addAll(result.where((item) => existingIds.add(item.id)));
+    final existingIds = sink.map((item) => item.id).toSet();
+    sink.addAll(result.where((item) => existingIds.add(item.id)));
+    if (isInit) {
+      // 一次性替换：clear+addAll 在同一同步段内完成，
+      // 观察者不会看到中间的空列表（见 C1/C2）。
+      trendList
+        ..clear()
+        ..addAll(sink);
+    }
     // 落盘：下次启动直接读这份，不再联网
     await FeedCache.savePopular(trendList.toList(), offset: _trendOffset);
     // 成功后重置 toast 节流窗：下次失败（哪怕在 5s 内）仍会提示。
@@ -157,13 +168,17 @@ abstract class _PopularController with Store {
 
   @action
   Future<void> queryBangumiByTag({String type = 'add'}) async {
-    if (type == 'init') {
-      bangumiList.clear();
+    // C1：切 tag 同样不在请求前清空——首切进空分类时页面铺骨架，
+    // 非空时保留旧内容直到替换；失败则清空回到错误态，避免
+    // 「新标签标题 + 旧标签内容」的错位残留。
+    final isInit = type == 'init';
+    if (isInit) {
       _tagOffset = 0;
     }
     isLoadingMore = true;
     loadMoreFailed = false;
     var tag = currentTag;
+    final sink = isInit ? <BangumiItem>[] : bangumiList;
     // 分类浏览同样限定产地，并用 offset 翻页。
     // offset 用累计已请求条数（服务器侧游标），而非去重后的列表长度：
     // 返回重复项时列表长度不前进，旧写法会一直重拉同一页。
@@ -175,6 +190,7 @@ abstract class _PopularController with Store {
       );
     } catch (e) {
       isLoadingMore = false;
+      if (isInit) bangumiList.clear();
       isTimeOut = bangumiList.isEmpty;
       if (isTimeOut) {
         MiruDialog.showToast(message: '分类加载失败，请检查网络后重试');
@@ -190,8 +206,14 @@ abstract class _PopularController with Store {
     if (result.isNotEmpty) {
       _tagOffset += result.length;
     }
-    final existingIds = bangumiList.map((item) => item.id).toSet();
-    bangumiList.addAll(result.where((item) => existingIds.add(item.id)));
+    final existingIds = sink.map((item) => item.id).toSet();
+    sink.addAll(result.where((item) => existingIds.add(item.id)));
+    if (isInit) {
+      // 一次性替换：clear+addAll 在同一同步段内完成（见 C1）。
+      bangumiList
+        ..clear()
+        ..addAll(sink);
+    }
     // 成功后重置 toast 节流窗：下次失败（哪怕在 5s 内）仍会提示。
     _lastLoadMoreFailedToastAt = null;
     isLoadingMore = false;

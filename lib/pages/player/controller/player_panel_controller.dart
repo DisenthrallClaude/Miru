@@ -34,6 +34,11 @@ abstract class _PlayerPanelController with Store {
   bool brightnessSeeking = false;
   @observable
   bool volumeSeeking = false;
+  // 快进/快退 HUD 的方向（-1 退 / 0 无 / 1 进）。
+  // 面板 Observer 里直接读取它（SeekHud direction 参数），此前未挂
+  // @observable，恰好每次方向变化都伴随 currentPosition 更新才没露馅
+  // ——属于踩在副作用上，双击快进退落地后方向可独立于位置变化。
+  @observable
   int seekDirection = 0;
   @observable
   bool canHidePlayerPanel = true;

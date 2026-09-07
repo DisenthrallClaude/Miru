@@ -191,29 +191,3 @@ class _FrostedSurfaceState extends State<FrostedSurface> {
     );
   }
 }
-
-/// 顶部带一条发丝分隔线的玻璃条，用于底部导航一类的贴边容器。
-class FrostedBar extends StatelessWidget {
-  const FrostedBar({
-    super.key,
-    required this.child,
-    this.showTopDivider = true,
-    this.liquid = true,
-  });
-
-  final Widget child;
-  final bool showTopDivider;
-  final bool liquid;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return FrostedSurface(
-      liquid: liquid,
-      border: showTopDivider
-          ? Border(top: BorderSide(color: scheme.outlineVariant, width: 0.5))
-          : null,
-      child: child,
-    );
-  }
-}

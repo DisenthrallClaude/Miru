@@ -58,3 +58,6 @@ android/build/reports/problems/
 # 构建产物不入库, 安装包统一走 GitHub Releases 分发
 *.apk
 *.aab
+
+# golden 测试失败时的差异反馈目录（flutter test 本地产物）
+test/failures/

@@ -57,14 +57,15 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
           MiruDialog.showToast(message: '观看记录同步完成');
         } catch (e) {
           MiruLogger().w('WebDav: manual history sync failed', error: e);
-          MiruDialog.showToast(message: '观看记录同步失败 ${e.toString()}');
+          // 原始异常对用户没有信息量，日志里已留完整堆栈。
+          MiruDialog.showToast(message: '观看记录同步失败，请稍后重试');
         }
       } catch (e) {
         MiruLogger().w('WebDav: manual history sync ping failed', error: e);
-        MiruDialog.showToast(message: 'WebDav连接失败');
+        MiruDialog.showToast(message: 'WebDAV 连接失败');
       }
     } else {
-      MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
+      MiruDialog.showToast(message: '未开启 WebDAV 同步或配置无效');
     }
   }
 
@@ -165,7 +166,8 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
               ],
             ),
             SettingsSection(
-              title: Text('WEBDAV'),
+              // 专有品牌统一大小写「WebDAV」，不再与 WebDav/WEBDAV 混用。
+              title: Text('WebDAV'),
               tiles: [
                 SettingsTile.switchTile(
                   leading: Icons.cloud_sync_rounded,
@@ -176,7 +178,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                         await WebDav().init();
                       } catch (e) {
                         webDavEnable = false;
-                        MiruDialog.showToast(message: 'WEBDAV初始化失败 $e');
+                        MiruDialog.showToast(message: 'WebDAV 初始化失败，请检查配置');
                       }
                     }
                     if (!webDavEnable) {
@@ -193,14 +195,14 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                       setState(() {});
                     }
                   },
-                  title: Text('WEBDAV同步'),
+                  title: Text('WebDAV 同步'),
                   initialValue: webDavEnable,
                 ),
                 SettingsTile.switchTile(
                   leading: Icons.history_rounded,
                   onToggle: (value) async {
                     if (!webDavEnable) {
-                      MiruDialog.showToast(message: '请先开启WEBDAV同步');
+                      MiruDialog.showToast(message: '请先开启 WebDAV 同步');
                       return;
                     }
                     webDavEnableHistory = value ?? !webDavEnableHistory;
@@ -216,7 +218,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                   leading: Icons.favorite_rounded,
                   onToggle: (value) async {
                     if (!webDavEnable) {
-                      MiruDialog.showToast(message: '请先开启WEBDAV同步');
+                      MiruDialog.showToast(message: '请先开启 WebDAV 同步');
                       return;
                     }
                     webDavEnableCollect = value ?? !webDavEnableCollect;
@@ -233,7 +235,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                   onPressed: (_) async {
                     context.pushNamed('/settings/webdav/editor');
                   },
-                  title: Text('WEBDAV配置'),
+                  title: Text('WebDAV 配置'),
                 ),
                 SettingsTile(
                   leading: Icons.cloud_upload_rounded,
@@ -242,7 +244,7 @@ class _WebDavSettingsPageState extends State<WebDavSettingsPage> {
                     syncHistoryWithWebDav();
                   },
                   title: Text('立即同步观看记录'),
-                  description: Text('与WEBDAV双向合并观看记录'),
+                  description: Text('与 WebDAV 双向合并观看记录'),
                 ),
               ],
             ),

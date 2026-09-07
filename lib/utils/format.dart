@@ -17,7 +17,9 @@ String formatSpeed(double bytesPerSec) {
 
 String durationToString(Duration duration) {
   String pad(int n) => n.toString().padLeft(2, '0');
-  final hours = pad(duration.inHours % 24);
+  // 直接取 inHours：此前 inHours % 24 会让超过 24 小时的时长
+  // 回绕成 00:xx（下载剩余时间、图片搜索时间行都受影响）。
+  final hours = pad(duration.inHours);
   final minutes = pad(duration.inMinutes % 60);
   final seconds = pad(duration.inSeconds % 60);
   if (hours == '00') {

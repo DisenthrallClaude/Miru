@@ -12,6 +12,8 @@ import 'package:miru/utils/constants.dart';
 import 'package:miru/utils/theme.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:miru/navigation.dart';
+import 'package:skeletonizer/skeletonizer.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -48,6 +50,36 @@ class _PopularPageState extends State<PopularPage> {
   /// 既晕又会打断滚动。这是「图片优先」和「可用性」之间的取舍。
   bool _reorderFrozen = false;
   bool _reorderScheduled = false;
+
+  /// 骨架占位条目：字段全空/零值，封面层拿到空 src 走灰底占位
+  /// （不发请求），Skeletonizer 再把整张卡画成 bone。
+  static final BangumiItem _skeletonBangumi = BangumiItem(
+    id: 0,
+    type: 2,
+    name: '',
+    nameCn: '占位标题',
+    summary: '',
+    airDate: '',
+    airWeekday: 0,
+    rank: 0,
+    images: const {},
+    tags: const [],
+    alias: const [],
+    ratingScore: 0,
+    votes: 0,
+    votesCount: const [],
+    info: '',
+  );
+
+  /// B2：双击当前 tab 回顶——把回顶回调登记给 shell。
+  /// （方法 tear-off：同一实例上的 tear-off 互相 ==，
+  /// 登记与注销两端天然匹配。）
+  void _scrollToTop() {
+    if (scrollController.hasClients) {
+      scrollController.animateTo(0,
+          duration: Motion.normal, curve: Motion.standard);
+    }
+  }
 
   void _onCoverLoaded(int id) {
     if (_loadedIds.contains(id)) return;
@@ -93,10 +125,16 @@ class _PopularPageState extends State<PopularPage> {
       initialScrollOffset: popularController.scrollOffset,
     );
     scrollController.addListener(scrollListener);
+    // B2：当前 tab 存活期间向 shell 登记回顶回调。
+    TabScrollToTop.register(_scrollToTop);
     // 先尝试读本地缓存；命中就完全不联网，
     // 只有第一次使用（或用户主动刷新）才走网络。
     if (popularController.trendList.isEmpty) {
-      if (!popularController.restoreFromCache()) {
+      if (popularController.restoreFromCache()) {
+        // C8：缓存会话的封面磁盘秒开，无需「先加载完的排前面」——
+        // 直接冻结重排，静止首屏不再跳动一次。
+        _reorderFrozen = true;
+      } else {
         popularController.queryBangumiByTrend();
       }
     }
@@ -104,6 +142,7 @@ class _PopularPageState extends State<PopularPage> {
 
   @override
   void dispose() {
+    TabScrollToTop.unregister(_scrollToTop);
     scrollController.removeListener(scrollListener);
     scrollController.dispose();
     super.dispose();
@@ -131,25 +170,48 @@ class _PopularPageState extends State<PopularPage> {
     return GStorage.getSetting(SettingsKeys.showWindowButton);
   }
 
+  /// 手动刷新（顶栏按钮 / 下拉）：C2——请求期间旧列表保留
+  /// （controller 一次性替换），新数据落地后平滑回顶，
+  /// 阅读位置不再被「清空→坍缩到 0」丢掉。
+  /// 刷新失败时保持原位（内容原样保留，底部有重试入口）。
+  Future<void> _refreshFeed() async {
+    await popularController.refresh();
+    if (mounted &&
+        !popularController.loadMoreFailed &&
+        scrollController.hasClients) {
+      await scrollController.animateTo(0,
+          duration: Motion.normal, curve: Motion.standard);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: CustomScrollView(
-        controller: scrollController,
-        slivers: [
-          buildSliverAppBar(),
-          SliverToBoxAdapter(
-            child: Observer(
-              builder: (_) => AnimatedOpacity(
-                opacity: popularController.isLoadingMore ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 300),
-                child: popularController.isLoadingMore
-                    ? const LinearProgressIndicator(minHeight: 4)
-                    : const SizedBox(height: 4),
+      body: RefreshIndicator(
+        // C3：移动端信息流的第一肌肉记忆——下拉刷新。
+        // edgeOffset 略过钉住的磨砂工具栏，转圈出现在工具栏下方。
+        onRefresh: _refreshFeed,
+        displacement: 60,
+        edgeOffset: MediaQuery.paddingOf(context).top + kToolbarHeight,
+        child: CustomScrollView(
+          // 内容不满一屏时也要能拉出刷新（Clamping 物理下
+          // 默认滚不动，RefreshIndicator 便无从触发）。
+          physics: const AlwaysScrollableScrollPhysics(),
+          controller: scrollController,
+          slivers: [
+            buildSliverAppBar(),
+            SliverToBoxAdapter(
+              child: Observer(
+                builder: (_) => AnimatedOpacity(
+                  opacity: popularController.isLoadingMore ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: popularController.isLoadingMore
+                      ? const LinearProgressIndicator(minHeight: 4)
+                      : const SizedBox(height: 4),
+                ),
               ),
             ),
-          ),
-          SliverPadding(
+            SliverPadding(
               padding: const EdgeInsets.fromLTRB(
                   StyleString.cardSpace, 0, StyleString.cardSpace, 0),
               sliver: Observer(builder: (_) {
@@ -182,14 +244,16 @@ class _PopularPageState extends State<PopularPage> {
                       ? popularController.trendList
                       : popularController.bangumiList,
                 );
-              })),
-          // 底部让出毛玻璃导航条高度
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: Space.lg + MediaQuery.paddingOf(context).bottom,
+              }),
             ),
-          ),
-        ],
+            // 底部让出毛玻璃导航条高度
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: Space.lg + MediaQuery.paddingOf(context).bottom,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -219,6 +283,44 @@ class _PopularPageState extends State<PopularPage> {
             StyleString.cardSpace * (crossCount - 1)) /
         crossCount;
     final double extent = cardWidth / 0.65 + ts.scale(46.0);
+
+    // C1：网格空且正在拉取（冷启动 / 首次切 tag）时铺 bone 骨架——
+    // 「页面被抽掉」的观感来自空白帧；数据到达后 Observer 重建
+    // 自动替换为真实卡片。轮播是内置固定图，照常展示。
+    if (bangumiList.isEmpty && popularController.isLoadingMore) {
+      return SliverMainAxisGroup(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: Space.lg),
+              child: BangumiHeroCarousel(source: bangumiList),
+            ),
+          ),
+          SliverToBoxAdapter(
+            // IgnorePointer：骨架不可点——占位卡带的假数据
+            // 点进去会导航到不存在的条目。
+            child: IgnorePointer(
+              child: Skeletonizer(
+                child: GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossCount,
+                    mainAxisSpacing: Space.md,
+                    crossAxisSpacing: StyleString.cardSpace,
+                    mainAxisExtent: extent,
+                  ),
+                  itemCount: crossCount * 2,
+                  itemBuilder: (_, __) =>
+                      BangumiFeedCardV(bangumiItem: _skeletonBangumi),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
     return SliverMainAxisGroup(
       slivers: [
@@ -381,7 +483,8 @@ class _PopularPageState extends State<PopularPage> {
         tooltip: '刷新推荐',
         onPressed: () async {
           MiruDialog.showToast(message: '正在刷新推荐…', context: context);
-          await popularController.refresh();
+          // C2：刷新期间旧列表保留，落地后平滑回顶（见 _refreshFeed）。
+          await _refreshFeed();
         },
         icon: const Icon(Icons.refresh_rounded),
       ),

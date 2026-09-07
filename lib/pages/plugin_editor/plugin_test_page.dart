@@ -138,14 +138,12 @@ class _PluginTestPageState extends State<PluginTestPage> {
       _validateActiveXPathFields();
       await widget.controller.updatePlugin(plugin);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${plugin.name} 已保存')),
-      );
+      // 与全应用统一提示通道（此前裸 SnackBar，样式/时长与
+      // MiruDialog.showToast 不一致）。
+      MiruDialog.showToast(message: '${plugin.name} 已保存');
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败：$error')),
-      );
+      MiruDialog.showToast(message: '保存失败：$error');
     }
   }
 

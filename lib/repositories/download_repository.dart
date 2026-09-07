@@ -126,6 +126,7 @@ class DownloadRepository implements IDownloadRepository {
       await _downloadsBox.flush();
       _progressCache.remove(key);
       _lastPersistedStatus.removeWhere((k, v) => k.startsWith('${key}_'));
+      _lastPersistedDir.removeWhere((k, v) => k.startsWith('${key}_'));
     } catch (e, stackTrace) {
       MiruLogger().e(
         'DownloadRepository: delete record failed. key=$key',
@@ -138,6 +139,10 @@ class DownloadRepository implements IDownloadRepository {
 
   /// Track last persisted status to avoid unnecessary writes
   final Map<String, int> _lastPersistedStatus = {};
+
+  /// Track last persisted download directory per episode (v1.6.6：
+  /// downloadDirectory 首次就绪也强制落盘，防止崩溃后变孤儿)。
+  final Map<String, String> _lastPersistedDir = {};
 
   /// In-memory cache for progress updates (not persisted until status changes)
   final Map<String, Map<int, DownloadEpisode>> _progressCache = {};
@@ -154,7 +159,13 @@ class DownloadRepository implements IDownloadRepository {
       // This dramatically reduces disk I/O and prevents corruption on crash
       final statusKey = '${recordKey}_$episodeNumber';
       final lastStatus = _lastPersistedStatus[statusKey];
-      final shouldPersist = lastStatus != episode.status;
+      // v1.6.6 修复：downloadDirectory 只在「状态翻转」时落盘的缺口——
+      // 下载中崩溃后 Hive 里是空串，重启删除该集时回落默认目录删
+      // 扑空，自定义下载目录下的文件成永久孤儿。目录首次就绪也
+      // 强制落盘。
+      final shouldPersist = lastStatus != episode.status ||
+          (episode.downloadDirectory.isNotEmpty &&
+              _lastPersistedDir[statusKey] != episode.downloadDirectory);
 
       if (shouldPersist) {
         final record = _downloadsBox.get(recordKey);
@@ -163,6 +174,7 @@ class DownloadRepository implements IDownloadRepository {
         await _downloadsBox.put(recordKey, record);
         await _downloadsBox.flush();
         _lastPersistedStatus[statusKey] = episode.status;
+        _lastPersistedDir[statusKey] = episode.downloadDirectory;
       }
     } catch (e, stackTrace) {
       MiruLogger().e(
@@ -201,10 +213,12 @@ class DownloadRepository implements IDownloadRepository {
         _progressCache.remove(recordKey);
         _lastPersistedStatus
             .removeWhere((k, v) => k.startsWith('${recordKey}_'));
+        _lastPersistedDir.removeWhere((k, v) => k.startsWith('${recordKey}_'));
       } else {
         await _downloadsBox.put(recordKey, record);
         _progressCache[recordKey]?.remove(episodeNumber);
         _lastPersistedStatus.remove('${recordKey}_$episodeNumber');
+        _lastPersistedDir.remove('${recordKey}_$episodeNumber');
       }
       await _downloadsBox.flush();
     } catch (e, stackTrace) {

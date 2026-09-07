@@ -128,6 +128,17 @@ class WebDav {
   }
 
   Future<void> _updateBox(String boxName) async {
+    // v1.6.6 修复（B3-C9）：上传前捕获变更日志水位线候选——此刻盒内的
+    // 记录随后必然随 flush 落盘进上传文件，上传成功后写入水位线，
+    // 供 _trimCollectChangesLocked 只裁「已同步」记录。
+    int? maxChangeId;
+    if (boxName == 'collectchanges') {
+      for (final key in GStorage.collectChanges.keys) {
+        if (key is int && (maxChangeId == null || key > maxChangeId)) {
+          maxChangeId = key;
+        }
+      }
+    }
     // 先 flush 让 Hive 把内存中的追加完整落盘，缩小与用户写入之间的
     // 撕裂窗口（与 GithubSync._updateBox 同策略）。
     try {
@@ -156,14 +167,26 @@ class WebDav {
       );
       return;
     }
+    // v1.6.6 修复（B3-B5）：远端临时名加设备标识（与历史快照同模式）。
+    // 此前双设备并发上传对同一个 .cache 交错分块 PUT，混合损坏数据被
+    // 晋升为正式收藏快照并在设备间扩散。
+    final deviceId = await HistorySyncService().getDeviceId();
     await _publishRemoteFile(
       sourceFilePath: tempFilePath,
       destinationPath: webDavPath,
-      temporaryPath: '$webDavPath.cache',
+      temporaryPath: '$webDavPath.$deviceId.cache',
     );
     try {
       await File(tempFilePath).delete();
     } catch (_) {}
+    // v1.6.6 修复（B3-C9）：写入同步水位线（只增不减）。
+    if (boxName == 'collectchanges' && maxChangeId != null) {
+      final prev = GStorage.getSetting(SettingsKeys.lastSyncedCollectChangeId);
+      if (maxChangeId > prev) {
+        await GStorage.putSetting(
+            SettingsKeys.lastSyncedCollectChangeId, maxChangeId);
+      }
+    }
   }
 
   Future<void> syncHistory() {

@@ -165,27 +165,33 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(' 本集标题  '),
+          const Text('本集标题'),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    '${videoPageController.episodeInfo.readType()}.${videoPageController.episodeInfo.episode} ${videoPageController.episodeInfo.name}',
+            child: Builder(builder: (context) {
+              final epInfo = videoPageController.episodeInfo;
+              // 国产/中文条目 name == nameCn 极常见，原先两行原样重复展示
+              // 占双倍竖向空间还显得像 bug：中文名与日文名相同时只渲染一行。
+              final bool showCn =
+                  epInfo.nameCn.isNotEmpty && epInfo.nameCn != epInfo.name;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${epInfo.readType()}.${epInfo.episode} ${epInfo.name}',
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 12,
                         color: Theme.of(context).colorScheme.outline)),
-                Text(
-                    (videoPageController.episodeInfo.nameCn != '')
-                        ? '${videoPageController.episodeInfo.readType()}.${videoPageController.episodeInfo.episode} ${videoPageController.episodeInfo.nameCn}'
-                        : '${videoPageController.episodeInfo.readType()}.${videoPageController.episodeInfo.episode} ${videoPageController.episodeInfo.name}',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.outline)),
-              ],
-            ),
+                  if (showCn)
+                    Text(
+                      '${epInfo.readType()}.${epInfo.episode} ${epInfo.nameCn}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.outline)),
+                ],
+              );
+            }),
           ),
           const SizedBox(width: 10),
           SizedBox(

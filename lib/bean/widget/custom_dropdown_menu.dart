@@ -56,11 +56,18 @@ class CustomDropdownMenu extends StatelessWidget {
             left: offset.dx,
             top: offset.dy + buttonSize.height + gap,
             child: Material(
-              elevation: 6,
+              // C7：全局零投影语言（theme.dart shadowColor 透明 +
+              // 所有浮层 elevation 0），此菜单是全 app 唯一带投影的
+              // 面；改零投影 + 发丝描边，与 popupMenuTheme 对齐。
+              elevation: 0,
               borderRadius: BorderRadius.circular(8),
               color: theme.colorScheme.surface,
               surfaceTintColor: Colors.transparent,
-              shadowColor: Colors.black26,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                    color: theme.colorScheme.outlineVariant, width: 0.5),
+              ),
               child: AnimatedBuilder(
                 animation: animation,
                 builder: (context, child) {

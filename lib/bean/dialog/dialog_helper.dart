@@ -183,7 +183,9 @@ class MiruDialog {
         final result = await showModalBottomSheet<T>(
           context: ctx,
           // 统一玻璃化：底色交给玻璃层，因此这里强制透明。
-          // 调用方传入的 backgroundColor 会作为玻璃的色调参考。
+          // 注意：backgroundColor 参数仅为 API 兼容保留，_GlassSheet
+          // 并不消费它——玻璃色调由 FrostedSurface 自行决定（E1 复审
+          // 修正：原注释声称「作为玻璃的色调参考」与实现不符）。
           builder: (context) => _GlassSheet(child: builder(context)),
           backgroundColor: Colors.transparent,
           elevation: elevation,

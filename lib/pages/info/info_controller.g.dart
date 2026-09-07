@@ -196,6 +196,17 @@ mixin _$InfoController on _InfoController, Store {
   }
 
   @override
+  void invalidateAncillaryRequests() {
+    final _$actionInfo = _$_InfoControllerActionController.startAction(
+        name: '_InfoController.invalidateAncillaryRequests');
+    try {
+      return super.invalidateAncillaryRequests();
+    } finally {
+      _$_InfoControllerActionController.endAction(_$actionInfo);
+    }
+  }
+
+  @override
   String toString() {
     return '''
 isLoading: ${isLoading},

@@ -419,7 +419,12 @@ class CloudVideoSourceResolver {
       final formatName = data['format'] as String? ?? 'auto';
       // Worker 提取直链时确认的源站 referer（防盗链要求），
       // 一并带回给 mpv 播放头（v1.5.2）。
-      final resolvedReferer = (data['referer'] as String?) ?? '';
+      // v1.6.6 修复（B1-🟡6）：非字符串（MacCMS 模板会把 player 变量
+      // 写成数字）不再硬转型——此前一次 TypeError 把本已提取成功的
+      // videoUrl 整端点白干。
+      final resolvedReferer = data['referer'] is String
+          ? data['referer'] as String
+          : '';
       final elapsed = DateTime.now().difference(started).inMilliseconds;
       _recordEndpointSuccess(endpoint);
       return (

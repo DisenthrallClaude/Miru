@@ -63,6 +63,13 @@ class GithubSync {
   /// 初始化：解密 Token → 验证身份 → 校验仓库可访问。
   /// Token 无效抛 [GithubAuthException]，仓库不存在抛 [GithubNotFoundException]。
   Future<void> init() async {
+    // v1.6.6 修复（B3-A3）：凭据生命周期纳入同步串行队列——此前
+    // init/logout 不经队列可随时打断运行中的同步（dio 被 dispose /
+    // _api 变 null → Null check 崩溃或 state error）。
+    await _operationQueue.run(_initLocked);
+  }
+
+  Future<void> _initLocked() async {
     final storedToken = GStorage.getSetting(SettingsKeys.githubToken);
     final token = await SecureFieldCodec.decrypt(storedToken);
     if (token == null || token.isEmpty) {
@@ -114,6 +121,11 @@ class GithubSync {
   /// 登录：验证 Token 并确保私有仓库存在（不存在则自动创建私有仓库）。
   /// 返回 "owner/repo" 全名。
   Future<String> loginAndEnsureRepo({String? repoName}) async {
+    // v1.6.6 修复（B3-A3）：与 init/logout 同款队列互斥。
+    return _operationQueue.run(() => _loginAndEnsureRepoLocked(repoName));
+  }
+
+  Future<String> _loginAndEnsureRepoLocked(String? repoName) async {
     final storedToken = GStorage.getSetting(SettingsKeys.githubToken);
     final token = await SecureFieldCodec.decrypt(storedToken);
     if (token == null || token.isEmpty) {
@@ -158,6 +170,11 @@ class GithubSync {
 
   /// 退出登录：清除凭据与缓存，停用同步。本地数据不受影响。
   Future<void> logout() async {
+    // v1.6.6 修复（B3-A3）：与 init 同款队列互斥，不再打断运行中的同步。
+    await _operationQueue.run(_logoutLocked);
+  }
+
+  Future<void> _logoutLocked() async {
     _api?.dispose();
     _api = null;
     _owner = '';
@@ -449,6 +466,17 @@ class GithubSync {
   /// 上传本地 Hive 盒文件到远端（与 WebDav._updateBox 同语义）。
   Future<void> _updateBox(String boxName) async {
     _requireInitialized();
+    // v1.6.6 修复（B3-C9）：上传前捕获变更日志水位线候选（此刻盒内的
+    // 记录随后必然随 flush 落盘进上传文件），上传成功后写入水位线，
+    // 供 _trimCollectChangesLocked 只裁「已同步」记录。
+    int? maxChangeId;
+    if (boxName == 'collectchanges') {
+      for (final key in GStorage.collectChanges.keys) {
+        if (key is int && (maxChangeId == null || key > maxChangeId)) {
+          maxChangeId = key;
+        }
+      }
+    }
     // 先 flush 让 Hive 把内存中的追加完整落盘，缩小与用户写入之间的
     // 撕裂窗口（盒写入与本读取都在主 isolate，flush 返回后读到的
     // 是自洽的盒文件）。
@@ -480,6 +508,14 @@ class GithubSync {
       message: 'miru: $boxName backup',
       bytes: bytes,
     );
+    // v1.6.6 修复（B3-C9）：写入同步水位线（只增不减）。
+    if (boxName == 'collectchanges' && maxChangeId != null) {
+      final prev = GStorage.getSetting(SettingsKeys.lastSyncedCollectChangeId);
+      if (maxChangeId > prev) {
+        await GStorage.putSetting(
+            SettingsKeys.lastSyncedCollectChangeId, maxChangeId);
+      }
+    }
   }
 
   /// 上传前尽力把对应 Hive 盒的内存写入 flush 到磁盘。

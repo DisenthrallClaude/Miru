@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/modules/download/download_module.dart';
 import 'package:miru/modules/danmaku/danmaku_module.dart';
 import 'package:miru/plugins/plugins.dart';
@@ -132,6 +133,11 @@ abstract class _DownloadController with Store {
         _backgroundService.handleNotificationAction(data['id'] as String);
       } else if (action == 'navigate_to_download') {
         _backgroundService.handleNavigateToDownload();
+      } else if (action == 'service_destroyed') {
+        // v1.6.6 修复：原生前台服务被系统杀死时回写 Dart 侧运行
+        // 状态，避免之后 startService 被 _isRunning 短路、下载失去
+        // 保活且不再自愈。
+        _backgroundService.markServiceDestroyed();
       }
     }
   }
@@ -263,7 +269,9 @@ abstract class _DownloadController with Store {
       activeCount: activeCount,
       pendingCount: pendingCount,
       totalCount: totalCount,
-      overallProgress: totalCount > 0 ? totalProgress / totalCount : 0.0,
+      // v1.6.6 修复：整体进度分母仅计入真正在下载的集数——
+      // pending（进度 0）混入分母会把多集排队时的通知栏进度稀释。
+      overallProgress: activeCount > 0 ? totalProgress / activeCount : 0.0,
       activeKeys: activeKeys,
     );
   }
@@ -358,6 +366,8 @@ abstract class _DownloadController with Store {
       episode.episodePageUrl,
       danmakuData: episode.danmakuData,
       danDanBangumiID: episode.danDanBangumiID,
+      playlistFingerprint: episode.playlistFingerprint,
+      downloadedBytes: episode.downloadedBytes,
     );
   }
 
@@ -511,10 +521,52 @@ abstract class _DownloadController with Store {
     if (episodePageUrl.isNotEmpty) {
       for (final entry in record.episodes.entries) {
         if (entry.value.episodePageUrl == episodePageUrl) {
+          final oldStatus = entry.value.status;
+          if (oldStatus == DownloadStatus.failed ||
+              oldStatus == DownloadStatus.paused) {
+            // v1.6.6 修复：失败/暂停的集在选集面板重新勾选时转投重试
+            // （此前静默跳过，但批量 toast 仍报「已添加 N 集」，
+            // 用户感知等价于下载按钮失灵）。
+            unawaited(retryDownload(
+              bangumiId: bangumiId,
+              pluginName: pluginName,
+              episodeNumber: entry.key,
+            ));
+            return;
+          }
           MiruLogger().i(
               'DownloadController: episode URL already exists at position ${entry.key}, skipping');
           return;
         }
+      }
+    }
+
+    // v1.6.6 修复：同集号不同线路/URL 覆盖旧条目前先清理旧任务与旧
+    // 分片——resume 的磁盘扫描会把旧线路的 seg_*.ts 当作本次已下载
+    // 分片，两套清单错位拼接产出损坏视频（旧分片数≥新数时甚至
+    // 「秒完成」产出旧内容）。completed 条目直接拒绝覆盖。
+    final sameNumberOld = record.episodes[episodeNumber];
+    if (sameNumberOld != null) {
+      if (sameNumberOld.status == DownloadStatus.completed) {
+        MiruDialog.showToast(
+          message: '第$episodeNumber集已下载完成，如需重新下载请先删除原任务',
+        );
+        return;
+      }
+      _downloadManager.cancel(recordKey, episodeNumber);
+      _cancelResolve(recordKey, episodeNumber);
+      try {
+        await _downloadManager.deleteEpisodeFiles(
+          bangumiId,
+          pluginName,
+          episodeNumber,
+          episode: sameNumberOld,
+        );
+      } catch (e) {
+        // 清理失败不阻断新任务：manager 侧的清单指纹校验会兜底重建目录。
+        MiruLogger().w(
+            'DownloadController: failed to clean old episode files for episode $episodeNumber',
+            error: e);
       }
     }
 
@@ -620,6 +672,10 @@ abstract class _DownloadController with Store {
 
       String? m3u8Url;
       var resolvedPlaybackHeaders = const <String, String>{};
+      // v1.6.6 修复：真实失败原因透传——此前非超时异常（站点 403、
+      // 脚本错误等）只记日志，下载面板一律显示「解析视频源超时」，
+      // 误导排查方向（改超时设置无用）。
+      String? resolveError;
       try {
         if (lease.isCancelled) {
           throw const VideoSourceCancelledException();
@@ -655,6 +711,7 @@ abstract class _DownloadController with Store {
         if (lease.isCancelled) {
           wasCancelled = true;
         } else {
+          resolveError = '解析视频源超时';
           MiruLogger().w('DownloadController: video resolution timed out');
         }
       } on VideoSourceCancelledException {
@@ -665,6 +722,7 @@ abstract class _DownloadController with Store {
           wasCancelled = true;
         } else {
           lease.retire();
+          resolveError = '视频源解析失败：${e.toString()}';
           MiruLogger()
               .e('DownloadController: video resolution failed', error: e);
         }
@@ -678,7 +736,8 @@ abstract class _DownloadController with Store {
       }
 
       if (m3u8Url == null || m3u8Url.isEmpty) {
-        _failEpisode(request.recordKey, request.episodeNumber, '解析视频源超时');
+        _failEpisode(request.recordKey, request.episodeNumber,
+            resolveError ?? '解析视频源超时');
         return;
       }
 
@@ -902,7 +961,9 @@ abstract class _DownloadController with Store {
     if (episode == null) return;
     episode.status = DownloadStatus.failed;
     episode.errorMessage = message;
-    _repository.updateEpisode(recordKey, episodeNumber, episode);
+    // v1.6.6 修复：仓库 updateEpisode 失败会 rethrow，此前未 await 也
+    // 未 unawaited，逃逸进被丢弃的 Future 成 unhandled async exception。
+    unawaited(_repository.updateEpisode(recordKey, episodeNumber, episode));
     _refreshRecord(recordKey);
     MiruLogger()
         .w('DownloadController: episode $episodeNumber failed: $message');
@@ -970,8 +1031,11 @@ abstract class _DownloadController with Store {
     if (episode.networkM3u8Url.isNotEmpty) {
       episode.status = DownloadStatus.downloading;
       episode.errorMessage = '';
-      episode.progressPercent = 0.0;
-      episode.downloadedSegments = 0;
+      // v1.6.6 修复：URL 复用续传分支不重置进度字段——manager 会在
+      // 磁盘扫描后重算；此前先抹成 0，恢复后若解析在扫描前失败就
+      // 显示「下载失败 0%」（真实进度只在磁盘上）。清单指纹同样
+      // 保留，由 manager 的指纹校验决定是否重建目录（与
+      // priorityDownload 的现行做法对齐）。
       await _repository.updateEpisode(recordKey, episodeNumber, episode);
       _refreshRecord(recordKey);
 
@@ -997,6 +1061,7 @@ abstract class _DownloadController with Store {
       episode.errorMessage = '';
       episode.progressPercent = 0.0;
       episode.downloadedSegments = 0;
+      episode.downloadedBytes = 0;
       await _repository.updateEpisode(recordKey, episodeNumber, episode);
       _refreshRecord(recordKey);
 
@@ -1009,24 +1074,6 @@ abstract class _DownloadController with Store {
       ));
       _processResolveQueue();
     }
-  }
-
-  Future<void> cancelDownload(
-      int bangumiId, String pluginName, int episodeNumber) async {
-    final recordKey = '${pluginName}_$bangumiId';
-    final episode =
-        _repository.getEpisode(bangumiId, pluginName, episodeNumber);
-    _downloadManager.cancel(recordKey, episodeNumber);
-    _cancelResolve(recordKey, episodeNumber);
-    await _downloadManager.deleteEpisodeFiles(
-      bangumiId,
-      pluginName,
-      episodeNumber,
-      episode: episode,
-    );
-    await _repository.deleteEpisode(recordKey, episodeNumber);
-    _refreshRecord(recordKey);
-    _queueBackgroundNotificationUpdate();
   }
 
   Future<void> deleteRecord(int bangumiId, String pluginName) async {

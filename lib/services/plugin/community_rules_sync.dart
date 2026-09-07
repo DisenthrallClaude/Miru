@@ -54,14 +54,27 @@ class CommunityRulesSync {
         if (local == null && shouldSkipAutoInstall(name)) {
           continue;
         }
-        if (local != null && !_remoteIsNewer(local.version, remoteVersion)) {
-          continue;
+        if (local != null) {
+          // v1.6.6 修复：本地已修改的规则不做静默覆盖——此前版本升级是
+          // 全字段整对象替换，用户在编辑器里改的 referer/UA/反爬配置
+          // 被静默重置（「边看边下」等依赖自定义 referer 的场景会突然
+          // 回到 403 且极难排查）。记日志提示远端有新版本未同步。
+          if (local.localModified) {
+            MiruLogger().i(
+              'CommunityRules: skip locally modified rule ${local.name} '
+              '(remote version $remoteVersion available)',
+            );
+            continue;
+          }
+          if (!_remoteIsNewer(local.version, remoteVersion)) {
+            continue;
+          }
         }
 
         final plugin = await _fetchRule(name);
         if (plugin == null) continue;
         try {
-          await controller.updatePlugin(plugin);
+          await controller.updatePlugin(plugin, localModified: false);
           updated++;
           MiruLogger().i(
             'CommunityRules: $local -> $remoteVersion (${plugin.name})',

@@ -318,9 +318,15 @@ abstract class _PluginsController with Store {
     }
   }
 
-  Future<void> updatePlugin(Plugin plugin) {
+  Future<void> updatePlugin(Plugin plugin, {bool localModified = true}) {
     return _mutateAndPersist(
-      () => _replacePlugin(plugin),
+      () {
+        // v1.6.6 修复：编辑器保存/用户导入视为本地修改（置标记），
+        // 社区规则静默同步会跳过带标记的规则，防止整对象替换静默
+        // 覆盖用户自定义的 referer/UA/反爬配置；同步链路显式传 false。
+        plugin.localModified = localModified;
+        _replacePlugin(plugin);
+      },
       errorMessage: 'Plugin: failed to persist rule update',
     );
   }

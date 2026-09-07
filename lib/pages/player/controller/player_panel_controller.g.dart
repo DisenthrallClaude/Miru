@@ -169,6 +169,22 @@ mixin _$PlayerPanelController on _PlayerPanelController, Store {
     });
   }
 
+  late final _$seekDirectionAtom =
+      Atom(name: '_PlayerPanelController.seekDirection', context: context);
+
+  @override
+  int get seekDirection {
+    _$seekDirectionAtom.reportRead();
+    return super.seekDirection;
+  }
+
+  @override
+  set seekDirection(int value) {
+    _$seekDirectionAtom.reportWrite(value, super.seekDirection, () {
+      super.seekDirection = value;
+    });
+  }
+
   late final _$canHidePlayerPanelAtom =
       Atom(name: '_PlayerPanelController.canHidePlayerPanel', context: context);
 
@@ -212,6 +228,7 @@ showVolume: ${showVolume},
 showPlaySpeed: ${showPlaySpeed},
 brightnessSeeking: ${brightnessSeeking},
 volumeSeeking: ${volumeSeeking},
+seekDirection: ${seekDirection},
 canHidePlayerPanel: ${canHidePlayerPanel}
     ''';
   }

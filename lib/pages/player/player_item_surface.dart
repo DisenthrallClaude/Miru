@@ -44,28 +44,28 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         controls: NoVideoControls,
         pauseUponEnteringBackgroundMode: false,
         fit: aspectRatioMode.fit,
+        // v1.6.6：这里曾是 media_kit README 示例的原样默认值（粉色 48px
+        // 粗体）——从未被定制。48px 在手机 16:9 播放区（高约 220dp）能占
+        // 1/4 高度且遮画面。回落到主流播放器的克制样式：白字、常规偏中等
+        // 字重、淡黑软投影当描边；字号后续可接设置项（与弹幕字号同套）。
         subtitleViewConfiguration: SubtitleViewConfiguration(
           style: TextStyle(
-            color: Colors.pink,
-            fontSize: 48.0,
+            color: Colors.white,
+            fontSize: 22.0,
+            height: 1.35,
+            fontWeight: FontWeight.w500,
             background: Paint()..color = Colors.transparent,
             decoration: TextDecoration.none,
-            fontWeight: FontWeight.bold,
             shadows: const [
               Shadow(
-                offset: Offset(1.0, 1.0),
-                blurRadius: 3.0,
-                color: Color.fromARGB(255, 255, 255, 255),
-              ),
-              Shadow(
-                offset: Offset(-1.0, -1.0),
-                blurRadius: 3.0,
-                color: Color.fromARGB(125, 255, 255, 255),
+                offset: Offset(0, 1),
+                blurRadius: 2.0,
+                color: Colors.black87,
               ),
             ],
           ),
           textAlign: TextAlign.center,
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
         ),
       );
 

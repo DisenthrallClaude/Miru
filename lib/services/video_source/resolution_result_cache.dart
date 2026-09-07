@@ -41,13 +41,18 @@ class ResolutionResultCache {
 
   final Map<String, _CacheEntry> _entries = {};
   File? _file;
-  bool _loaded = false;
   bool _dirty = false;
   Timer? _flushTimer;
 
-  Future<void> _ensureLoaded() async {
-    if (_loaded) return;
-    _loaded = true;
+  /// v1.6.6 修复（B1-🟡2）：加载 future 记忆化（仿 RoadHealthTracker 的
+  /// `_loadFuture ??= _load()`）。此前 `_loaded` 同步先置位、读盘完成前
+  /// 并发的 get()（预取 ∥ 正式解析 ∥ 下载批量）直接读空 `_entries` ——
+  /// 持久缓存被无视一整轮、整轮重解析。
+  Future<void>? _loadFuture;
+
+  Future<void> _ensureLoaded() => _loadFuture ??= _doLoad();
+
+  Future<void> _doLoad() async {
     try {
       final dir = await getApplicationSupportDirectory();
       _file = File('${dir.path}/resolution_cache.json');
@@ -68,6 +73,8 @@ class ResolutionResultCache {
         }
       }
     } catch (e) {
+      // 读盘失败允许下次重试（不把失败钉死在记忆化 future 里）
+      _loadFuture = null;
       MiruLogger().w('ResolutionCache: load failed, starting empty', error: e);
     }
   }

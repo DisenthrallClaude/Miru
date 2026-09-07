@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
@@ -20,6 +22,10 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
   final TextEditingController urlController = TextEditingController();
   final TextEditingController testUrlController = TextEditingController();
 
+  /// 测试进行中（最长 15s+）：FAB 禁用防连点，否则并发两轮
+  /// 「临时启用代理→回滚」会互相踩状态。
+  bool _testing = false;
+
   @override
   void initState() {
     super.initState();
@@ -35,6 +41,7 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
   }
 
   Future<void> saveAndTest() async {
+    if (_testing) return;
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -66,6 +73,7 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
     await GStorage.putSetting(SettingsKeys.proxyEnable, true);
     ProxyManager.applyProxy();
 
+    setState(() => _testing = true);
     try {
       final parsed = ProxyUtils.parseProxyUrl(url);
       if (parsed == null) {
@@ -102,7 +110,15 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
       } else {
         ProxyManager.clearProxy();
       }
-      MiruDialog.showToast(message: '代理连接失败');
+      // 失败信息带原因分类：超时与一般连接失败对用户排障指向不同。
+      final message = e is TimeoutException
+          ? '代理连接超时（15 秒），请检查代理是否可达'
+          : '代理连接失败，请检查地址格式与认证信息';
+      MiruDialog.showToast(message: message);
+    } finally {
+      if (mounted) {
+        setState(() => _testing = false);
+      }
     }
   }
 
@@ -152,9 +168,10 @@ class _ProxyEditorPageState extends State<ProxyEditorPage> {
         ),
       ),
       floatingActionButton: GlassFab.extended(
-        onTap: saveAndTest,
-        icon: Icons.save_rounded,
-        label: '保存并测试',
+        onTap: _testing ? null : saveAndTest,
+        enabled: !_testing,
+        icon: _testing ? Icons.hourglass_top_rounded : Icons.save_rounded,
+        label: _testing ? '测试中…' : '保存并测试',
       ),
     );
   }

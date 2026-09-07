@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -98,6 +99,27 @@ class _AboutPageState extends State<AboutPage> {
     return total;
   }
 
+  /// 统一外链安全打开：无浏览器/无邮件客户端的设备上 launchUrl
+  /// 会抛 PlatformException（反馈弹窗与 GitHub 页都有兜底，本页
+  /// 此前 8 处裸调，异常直接进全局错误处理）。
+  Future<void> _safeLaunch(Uri uri) async {
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      MiruLogger().w('AboutPage: failed to launch $uri', error: e);
+      MiruDialog.showToast(message: '无法打开浏览器');
+    }
+  }
+
+  /// 缓存大小展示：与 formatBytes 同款「数值 + 空格 + 单位」，
+  /// 超过 1GB 用 GB 单位（此前无空格且永远 MB）。
+  String _formatCacheSize(double mb) {
+    if (mb >= 1024) {
+      return '${(mb / 1024).toStringAsFixed(2)} GB';
+    }
+    return '${mb.toStringAsFixed(2)} MB';
+  }
+
   Future<void> _clearCache() async {
     final Directory libCacheDir = await _getCacheDir();
     // 封面图片缓存可能从未生成（首次使用即点清除），删除前先确认存在，
@@ -174,36 +196,19 @@ class _AboutPageState extends State<AboutPage> {
     );
   }
 
-  void _showCacheDialog() {
-    MiruDialog.show(
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('缓存管理'),
-          content: const Text(
-              '将清除封面图片缓存与播放加速缓存（解析结果、预取的视频开头数据），清除后相关内容需要重新下载。确认清除吗？'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                MiruDialog.dismiss();
-              },
-              child: Text(
-                '取消',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                try {
-                  await _clearCache();
-                } catch (_) {}
-                MiruDialog.dismiss();
-              },
-              child: const Text('确认'),
-            ),
-          ],
-        );
-      },
+  void _showCacheDialog() async {
+    // 统一危险确认样式（确认键 error 色）。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '缓存管理',
+      message:
+          '将清除封面图片缓存与播放加速缓存（解析结果、预取的视频开头数据），清除后相关内容需要重新下载。确定清除吗？',
+      confirmLabel: '清除',
     );
+    if (!confirmed) return;
+    try {
+      await _clearCache();
+    } catch (_) {}
   }
 
   @override
@@ -234,8 +239,7 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.code_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.sourceUrl),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.sourceUrl));
                   },
                   title: Text('本项目仓库'),
                   description: Text('DisenthrallClaude/Miru'),
@@ -243,8 +247,7 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.source_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.upstreamSourceUrl),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.upstreamSourceUrl));
                   },
                   title: Text('原项目仓库'),
                   description: Text('Predidit/Kazumi · 上游源码'),
@@ -291,25 +294,22 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.home_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.projectUrl),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.projectUrl));
                   },
                   title: Text('项目主页'),
                 ),
                 SettingsTile(
                   leading: Icons.code_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.sourceUrl),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.sourceUrl));
                   },
                   title: Text('代码仓库'),
-                  value: Text('Github'),
+                  value: Text('GitHub'),
                 ),
                 SettingsTile(
                   leading: Icons.menu_book_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.bangumiIndex),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.bangumiIndex));
                   },
                   title: Text('番剧索引'),
                   value: Text('Bangumi'),
@@ -317,8 +317,7 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.image_search_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse('https://trace.moe'),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse('https://trace.moe'));
                   },
                   title: Text('以图搜番'),
                   value: Text('trace.moe'),
@@ -326,8 +325,7 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.subtitles_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.dandanIndex),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.dandanIndex));
                   },
                   title: Text('弹幕来源'),
                   description: Text('ID: ${dandanCredentials['id']}'),
@@ -341,8 +339,7 @@ class _AboutPageState extends State<AboutPage> {
                 SettingsTile(
                   leading: Icons.forum_rounded,
                   onPressed: (_) {
-                    launchUrl(Uri.parse(ApiEndpoints.telegramGroup),
-                        mode: LaunchMode.externalApplication);
+                    _safeLaunch(Uri.parse(ApiEndpoints.telegramGroup));
                   },
                   title: Text('讨论区'),
                   value: Text('GitHub Discussions'),
@@ -417,8 +414,8 @@ class _AboutPageState extends State<AboutPage> {
                   title: Text('清除缓存'),
                   description: Text('封面图片缓存大小；确认清除时将一并清理播放加速缓存'),
                   value: _cacheSizeMB == -1
-                      ? Text('统计中...')
-                      : Text('${_cacheSizeMB.toStringAsFixed(2)}MB'),
+                      ? Text('统计中…')
+                      : Text(_formatCacheSize(_cacheSizeMB)),
                 ),
               ],
             ),

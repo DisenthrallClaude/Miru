@@ -112,7 +112,12 @@ class _LiquidGlassIndicatorState extends State<LiquidGlassIndicator>
         final baseWidth = slot * widget.widthFactor;
 
         // 速度越大越扁长。除数决定灵敏度，clamp 防止极端形变。
-        final stretch = (_velocity.abs() / 26).clamp(0.0, 0.5);
+        // B5：除数 26→38——单槽一跳即接近 0.5 饱和（宽 +40%）过猛，
+        // 跨槽必满；提到 38 让相邻 tab 一跳落在 ~0.28，只有连续
+        // 快滑才见满形变，观感更克制（与 Dock 双 pass 磨砂的
+        // 叠加也更稳）。120Hz 下的速度过估（×60 固定折算）顺带
+        // 被更高的除数吸收。
+        final stretch = (_velocity.abs() / 38).clamp(0.0, 0.5);
         final width = baseWidth * (1 + stretch);
         final height = widget.height * (1 - stretch * 0.42);
 

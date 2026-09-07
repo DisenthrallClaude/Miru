@@ -236,7 +236,13 @@ class XPathRuleStrategy {
     if (detectValue.isNotEmpty) {
       switch (config.captchaDetectType) {
         case CaptchaDetectType.text:
-          return raw.contains(detectValue);
+          // v1.6.6 修复：text 模式剔除 <script> 块后再匹配——脚本/注释
+          // 里出现关键词（如 JS 常量名）即误报验证页，规则作者无法规避。
+          final visibleText = raw.replaceAll(
+              RegExp(r'<script\b[^>]*>[\s\S]*?</script>',
+                  caseSensitive: false),
+              '');
+          return visibleText.contains(detectValue);
         case CaptchaDetectType.regex:
           try {
             return RegExp(

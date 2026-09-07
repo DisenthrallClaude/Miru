@@ -87,6 +87,19 @@ class DownloadEpisode {
   @HiveField(15, defaultValue: 0)
   int danDanBangumiID;
 
+  /// v1.6.6 修复：m3u8 清单指纹（URL + 广告过滤开关 + 分片数 + 首尾分片
+  /// URI）。断点续传时与当前指纹比对，不一致则丢弃旧分片重建，
+  /// 防止「按文件名信任磁盘分片」把两套清单的内容错位拼接。
+  @HiveField(16, defaultValue: '')
+  String playlistFingerprint;
+
+  /// v1.6.6：已落盘字节数（下载页「剩余时间」= (totalBytes-
+  /// downloadedBytes)/速度）。m3u8 的完整大小在完成前不可知，
+  /// 下载中 totalBytes 为按进度估算的完整大小，完成后两者都回写
+  /// 实际值。
+  @HiveField(17, defaultValue: 0)
+  int downloadedBytes;
+
   DownloadEpisode(
     this.episodeNumber,
     this.episodeName,
@@ -104,6 +117,8 @@ class DownloadEpisode {
     this.episodePageUrl, {
     this.danmakuData = '',
     this.danDanBangumiID = 0,
+    this.playlistFingerprint = '',
+    this.downloadedBytes = 0,
   });
 }
 

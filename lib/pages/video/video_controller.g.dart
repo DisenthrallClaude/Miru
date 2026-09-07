@@ -268,11 +268,13 @@ mixin _$VideoPageController on _VideoPageController, Store {
   }
 
   @override
-  void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
+  void _beginEpisodeSwitch(VideoEpisodeSelection selection,
+      {bool resetAutoFallback = true}) {
     final _$actionInfo = _$_VideoPageControllerActionController.startAction(
         name: '_VideoPageController._beginEpisodeSwitch');
     try {
-      return super._beginEpisodeSwitch(selection);
+      return super
+          ._beginEpisodeSwitch(selection, resetAutoFallback: resetAutoFallback);
     } finally {
       _$_VideoPageControllerActionController.endAction(_$actionInfo);
     }

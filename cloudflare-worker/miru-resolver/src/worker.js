@@ -239,7 +239,13 @@ async function resolveEpisode(episodeUrl, ua, referer, uid, env, ctx) {
   const day = dayKey();
 
   // 1) KV 缓存（命中不受配额限制——KV 读很便宜，已超限用户也照常享受缓存）
-  const cachedRaw = await env.RESOLVE_CACHE.get(key);
+  // v1.6.6 修复（B1-🟡5）：首个 KV get 容错——KV 异常/绑定缺失时视为
+  // 未命中继续远程解析，而不是抛错被客户端归因为「站点级提取失败」
+  // → host 级 10min 负缓存（一次基础设施抖动关掉整站云端层）。
+  let cachedRaw = null;
+  try {
+    cachedRaw = await env.RESOLVE_CACHE.get(key);
+  } catch (_) {}
   if (cachedRaw) {
     try {
       const cached = JSON.parse(cachedRaw);
@@ -486,7 +492,10 @@ function extractMaccmsPlayerVar(html) {
     // encrypt=1 → escape()；encrypt=2 → base64(escape())；0 → 原文
     const decoded = resolvePlayerAaaaUrl(obj);
     if (decoded && VIDEO_EXT_RE.test(stripQuery(decoded))) {
-      return { url: decoded, varName: m[1], referer: obj.referer || '' };
+      // v1.6.6 修复（B1-🟡6）：referer 强制字符串化——个别 MacCMS 模板
+      // 把 player 变量的 referer 写成数字，原样序列化为 JSON 数字会让
+      // 客户端硬转型抛 TypeError、丢掉本已提取成功的 videoUrl。
+      return { url: decoded, varName: m[1], referer: String(obj.referer || '') };
     }
   }
   return null;
@@ -520,7 +529,9 @@ function macUnescape(s) {
 
 /** 按官方 encrypt 字段解码 player_aaaa.url。 */
 function resolvePlayerAaaaUrl(a) {
-  let u = (a && a.url) || (a && a.link) || '';
+  // v1.6.6（B1-🔵13）：补 link_next 回退，与 APP 端 fast 层字段族对齐
+  // （同站两端不再解出不同结果）。
+  let u = (a && a.url) || (a && a.link) || (a && a.link_next) || '';
   if (typeof u !== 'string' || !u.trim()) return '';
   u = u.trim();
   try {
@@ -602,7 +613,8 @@ async function extractFromPage(pageUrl, ua, referer, depth) {
       return {
         videoUrl: resolved,
         format: formatOf(resolved),
-        referer: playerVar.referer || referer || pageUrl,
+        // v1.6.6（B1-🟡6）：同上强制字符串化，防数字真值穿透。
+        referer: String(playerVar.referer || referer || pageUrl),
       };
     }
   }
@@ -661,7 +673,9 @@ function pickCacheFields(cached) {
   return {
     videoUrl: cached.videoUrl,
     format: cached.format || 'auto',
-    referer: cached.referer,
+    // v1.6.6（B1-🟡6）：旧 KV 条目可能存有非字符串 referer，
+    // 回传前归一为 string 或缺省（客户端侧另有 is String 容错）。
+    referer: typeof cached.referer === 'string' ? cached.referer : undefined,
   };
 }
 

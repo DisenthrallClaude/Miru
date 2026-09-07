@@ -361,10 +361,17 @@ class _VideoPageState extends State<VideoPage>
       if (!mounted) {
         return;
       }
+      // 第 1 集应跳到 index 0：原先 episode>1?episode-1:episode 把第 1 集
+      // 跳到 index 1（第二格），固定 4 列同行看不出来，列数自适应后会
+      // 真实跳偏。
+      final selection = videoPageController.selectedEpisode;
+      final maxIndex =
+          selection.road >= 0 && selection.road < videoPageController.roadList.length
+              ? videoPageController.roadList[selection.road].data.length - 1
+              : 0;
       await observerController.jumpTo(
-          index: videoPageController.selectedEpisode.episode > 1
-              ? videoPageController.selectedEpisode.episode - 1
-              : videoPageController.selectedEpisode.episode);
+        index: (selection.episode - 1).clamp(0, maxIndex < 0 ? 0 : maxIndex),
+      );
     });
   }
 
@@ -547,6 +554,16 @@ class _VideoPageState extends State<VideoPage>
     return true;
   }
 
+  /// video_controller 的兑底 catch 会把原始异常拼进「视频解析失败：…」，
+  /// DioException 堆栈味内容直接怼给用户与全 app 其余克制文案撕裂。
+  /// 视图层先收敛成克制文案（源头文案归 B2 域收敛，这里只做展示兑底）。
+  String _friendlyErrorMessage(String raw) {
+    if (raw.startsWith('视频解析失败：')) {
+      return '视频解析失败，请重试或切换线路';
+    }
+    return raw;
+  }
+
   Future<void> showMobileDanmakuInput() async {
     final message = await showMobileDanmakuInputSheet(context);
 
@@ -717,13 +734,73 @@ class _VideoPageState extends State<VideoPage>
           controller: observerController,
           child: (isDesktop() || isTablet())
               ? tabBody
-              : Column(
+              : _mobileLandscapeSidePanel,
+        ),
+      ),
+    );
+  }
+
+  /// 横屏手机侧栏：双 Tab（选集/评论）+ 底部发弹幕入口 + 下载 FAB。
+  ///
+  /// 原先手机横屏展开侧栏只有精简版（线路菜单+选集网格），完整版
+  /// tabBody 里的评论 Tab、发弹幕药丸、下载 FAB 全部缺席——看评论/
+  /// 缓存必须退出全屏。评论复用现成的 EpisodeCommentsSheet；弹幕入口
+  /// 与竖屏共用同一条链路（手机横屏下不适合内嵌输入框，仍走输入 sheet）。
+  Widget get _mobileLandscapeSidePanel {
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TabBar(
+            dividerHeight: 0,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelPadding:
+                const EdgeInsetsDirectional.only(start: 16, end: 16),
+            onTap: (index) {
+              if (index == 0) {
+                menuJumpToCurrentEpisode();
+              }
+            },
+            tabs: const [
+              Tab(text: '选集'),
+              Tab(text: '评论'),
+            ],
+          ),
+          Divider(height: 0.2),
+          Expanded(
+            child: TabBarView(
+              children: [
+                Stack(
                   children: [
-                    menuBar,
-                    menuBody,
+                    Column(
+                      children: [
+                        menuBar,
+                        menuBody,
+                      ],
+                    ),
+                    if (!videoPageController.isOfflineMode)
+                      _buildDownloadFab(),
                   ],
                 ),
-        ),
+                EpisodeCommentsSheet(
+                  episode: videoPageController.commentsEpisode,
+                  selection: videoPageController.selectedEpisode,
+                  videoPageController: videoPageController,
+                ),
+              ],
+            ),
+          ),
+          // 侧栏底部固定发弹幕入口：与竖屏「点我发弹幕」同一条链路。
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _buildDanmakuEntryPill(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -785,12 +862,36 @@ class _VideoPageState extends State<VideoPage>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 32),
                                   child: Text(
-                                    videoPageController.errorMessage!,
+                                    _friendlyErrorMessage(
+                                        videoPageController.errorMessage!),
                                     style: const TextStyle(
                                         color: Colors.white, fontSize: 16),
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
+                                // 解析失败是本应用最高频失败态（线路挂/防
+                                // 盗链），黑屏只有一行字没有任何动作——用户
+                                // 得自己去顶栏摸小刷新图标。直接给「重试当
+                                // 前集」；横屏侧栏布局下再给「换个线路」。
+                                const SizedBox(height: 24),
+                                FilledButton.icon(
+                                  onPressed: () {
+                                    changeEpisode(
+                                        videoPageController
+                                            .selectedEpisode.episode,
+                                        currentRoad: videoPageController
+                                            .selectedEpisode.road);
+                                  },
+                                  icon: const Icon(Icons.refresh_rounded),
+                                  label: const Text('重试'),
+                                ),
+                                if (videoPageController.roadList.length > 1 &&
+                                    MediaQuery.sizeOf(context).width >
+                                        MediaQuery.sizeOf(context).height)
+                                  TextButton(
+                                    onPressed: _toggleTabBodyAnimated,
+                                    child: const Text('换个线路'),
+                                  ),
                               ],
                             )
                           : Column(
@@ -928,7 +1029,12 @@ class _VideoPageState extends State<VideoPage>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(' 合集 '),
+          // 全角空格伪 padding 换真实 Padding：空格宽度随字号缩放，
+          // 放大字体下间距失真。
+          const Padding(
+            padding: EdgeInsets.only(left: 8),
+            child: Text('合集'),
+          ),
           Expanded(
             child: Text(
               videoPageController.title,
@@ -1071,6 +1177,8 @@ class _VideoPageState extends State<VideoPage>
     return Observer(
       builder: (context) {
         var cardList = <Widget>[];
+        final scheme = Theme.of(context).colorScheme;
+        final selection = videoPageController.selectedEpisode;
         if (visibleRoad >= 0 &&
             visibleRoad < videoPageController.roadList.length) {
           final road = videoPageController.roadList[visibleRoad];
@@ -1080,10 +1188,19 @@ class _VideoPageState extends State<VideoPage>
             final episodeName = count0 - 1 < road.identifier.length
                 ? road.identifier[count0 - 1]
                 : '第$count0集';
+            // 当前集：底色填充 + 粗体——原先只有文字变色 + 12px 小 gif，
+            // 卡片底色与普通集相同，4 列网格里扫一眼找不到「我放到哪了」。
+            final bool isCurrent =
+                count0 == selection.episode && visibleRoad == selection.road;
+            // 「已看」按当前播放位置粗略推断（历史所在集之前的集视为看过；
+            // per-episode 精确进度记录属数据层另立项）。
+            final bool isWatched = !isCurrent && count0 < selection.episode;
             cardList.add(Container(
               margin: const EdgeInsets.only(bottom: 4),
               child: Material(
-                color: Theme.of(context).colorScheme.onInverseSurface,
+                color: isCurrent
+                    ? scheme.primaryContainer
+                    : scheme.onInverseSurface,
                 borderRadius: BorderRadius.circular(6),
                 clipBehavior: Clip.hardEdge,
                 child: InkWell(
@@ -1106,37 +1223,35 @@ class _VideoPageState extends State<VideoPage>
                       children: <Widget>[
                         Row(
                           children: [
-                            if (count0 ==
-                                    (videoPageController
-                                        .selectedEpisode.episode) &&
-                                visibleRoad ==
-                                    videoPageController
-                                        .selectedEpisode.road) ...<Widget>[
+                            if (isCurrent) ...<Widget>[
                               Image.asset(
                                 'assets/images/playing.gif',
-                                color: Theme.of(context).colorScheme.primary,
+                                color: scheme.onPrimaryContainer,
                                 height: 12,
                               ),
                               const SizedBox(width: 6)
                             ],
                             Expanded(
                                 child: Text(
-                              episodeName,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: (count0 ==
-                                              videoPageController
-                                                  .selectedEpisode.episode &&
-                                          visibleRoad ==
-                                              videoPageController
-                                                  .selectedEpisode.road)
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Theme.of(context)
-                                          .colorScheme
-                                          .onSurface),
-                            )),
+                                  episodeName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight:
+                                        isCurrent ? FontWeight.w600 : null,
+                                    color: isCurrent
+                                        ? scheme.onPrimaryContainer
+                                        : (isWatched
+                                            ? scheme.onSurfaceVariant
+                                            : scheme.onSurface),
+                                  ),
+                                ),
+                            ),
+                            // 已看角标：100+ 集长番选集面板最大的信息缺口。
+                            if (isWatched)
+                              Icon(Icons.done_all_rounded,
+                                  size: 14, color: scheme.outline),
                             _buildDownloadStatusIcon(count0, urlItem),
                             const SizedBox(width: 2),
                           ],
@@ -1154,22 +1269,28 @@ class _VideoPageState extends State<VideoPage>
         return Expanded(
           child: Padding(
             padding: const EdgeInsets.only(top: 0, right: 8, left: 8),
-            child: GridView.builder(
-              scrollDirection: Axis.vertical,
-              controller: scrollController,
-              // 选集方框调小：每行 4 个、高度 70→54，
-              // 一屏能看到更多集数，也不会显得笨重
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 6,
-                mainAxisExtent: 54,
-              ),
-              itemCount: cardList.length,
-              itemBuilder: (context, index) {
-                return cardList[index];
-              },
-            ),
+            child: LayoutBuilder(builder: (context, constraints) {
+              // 列宽目标 ~100dp：手机 4 列起步，平板/桌面竖向 tabBody 占满
+              // 整屏宽时按宽度自适应加列（上限 8）——固定 4 列会把格子拉成
+              // 横跨大半屏的宽条，水波纹跟着横跨大半屏。
+              final int columns =
+                  (constraints.maxWidth / 100).floor().clamp(4, 8).toInt();
+              return GridView.builder(
+                scrollDirection: Axis.vertical,
+                controller: scrollController,
+                // 选集方框调小：高度 70→54，一屏能看到更多集数
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 6,
+                  mainAxisExtent: 54,
+                ),
+                itemCount: cardList.length,
+                itemBuilder: (context, index) {
+                  return cardList[index];
+                },
+              );
+            }),
           ),
         );
       },
@@ -1177,7 +1298,6 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget get tabBody {
-    final bool danmakuOn = playerController.danmaku.danmakuOn;
     final int episodeNum = videoPageController.commentsEpisode;
 
     return Container(
@@ -1209,49 +1329,7 @@ class _VideoPageState extends State<VideoPage>
                 if (MediaQuery.sizeOf(context).width <=
                     MediaQuery.sizeOf(context).height) ...[
                   const Spacer(),
-                  Container(
-                    padding: EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(25),
-                      border: Border.all(
-                        color: danmakuOn
-                            ? Theme.of(context).hintColor
-                            : Theme.of(context).disabledColor,
-                        width: 0.5,
-                      ),
-                    ),
-                    child: GestureDetector(
-                      onTap: () {
-                        if (danmakuOn && !videoPageController.loading) {
-                          showMobileDanmakuInput();
-                        } else if (videoPageController.loading) {
-                          MiruDialog.showToast(message: '请等待视频加载完成');
-                        } else {
-                          MiruDialog.showToast(message: '请先打开弹幕');
-                        }
-                      },
-                      child: Row(
-                        children: [
-                          Text(
-                            danmakuOn ? '  点我发弹幕  ' : '  已关闭弹幕  ',
-                            softWrap: false,
-                            overflow: TextOverflow.clip,
-                            style: TextStyle(
-                              color: danmakuOn
-                                  ? Theme.of(context).hintColor
-                                  : Theme.of(context).disabledColor,
-                            ),
-                          ),
-                          if (danmakuOn)
-                            Icon(
-                              Icons.send_rounded,
-                              size: 20,
-                              color: Theme.of(context).hintColor,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _buildDanmakuEntryPill(),
                 ],
                 const SizedBox(width: 8),
               ],
@@ -1273,23 +1351,7 @@ class _VideoPageState extends State<VideoPage>
                         ),
                       ),
                       if (!videoPageController.isOfflineMode)
-                        Positioned(
-                          right: 16,
-                          bottom: 16,
-                          child: GlassFab(
-                            onTap: () {
-                              showAdaptiveBottomSheet<void>(
-                                context: context,
-                                builder: (context) => DownloadEpisodeSheet(
-                                  road: visibleRoad,
-                                  videoPageController: videoPageController,
-                                ),
-                              );
-                            },
-                            icon: Icons.download_rounded,
-                            tooltip: '下载',
-                          ),
-                        ),
+                        _buildDownloadFab(),
                     ],
                   ),
                   EpisodeCommentsSheet(
@@ -1302,6 +1364,74 @@ class _VideoPageState extends State<VideoPage>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 「点我发弹幕」药丸：竖屏 tabBody 头部与横屏侧栏底部共用。
+  ///
+  /// 触达面积 ≥44dp（原先药丸高度仅文本行高+2，约 24dp，在可滚动的
+  /// 选集区旁极易点空）；去掉全角空格伪 padding（空格宽度随字号缩放）。
+  Widget _buildDanmakuEntryPill() {
+    final bool danmakuOn = playerController.danmaku.danmakuOn;
+    final Color color = danmakuOn
+        ? Theme.of(context).hintColor
+        : Theme.of(context).disabledColor;
+    return GestureDetector(
+      onTap: () {
+        if (danmakuOn && !videoPageController.loading) {
+          showMobileDanmakuInput();
+        } else if (videoPageController.loading) {
+          MiruDialog.showToast(message: '请等待视频加载完成');
+        } else {
+          MiruDialog.showToast(message: '请先打开弹幕');
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: const BoxConstraints(minHeight: 44),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: color, width: 0.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              danmakuOn ? '发弹幕' : '已关闭弹幕',
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: TextStyle(color: color),
+            ),
+            if (danmakuOn)
+              Icon(
+                Icons.send_rounded,
+                size: 18,
+                color: color,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 下载 FAB：竖屏 tabBody 与横屏手机侧栏的选集 Tab 共用。
+  Widget _buildDownloadFab() {
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: GlassFab(
+        onTap: () {
+          showAdaptiveBottomSheet<void>(
+            context: context,
+            builder: (context) => DownloadEpisodeSheet(
+              road: visibleRoad,
+              videoPageController: videoPageController,
+            ),
+          );
+        },
+        icon: Icons.download_rounded,
+        tooltip: '下载',
       ),
     );
   }
@@ -1327,22 +1457,25 @@ class _RoadHealthBadge extends StatelessWidget {
         semanticLabel: '线路不可用',
       );
     }
-    // 800ms 以内算快（秒开目标的一半），超过显示琥珀色提醒。
+    // 800ms 以内算快（秒开目标的一半），超过显示提醒色。
+    // 走语义色：硬编码 greenAccent(#69F0AE) 在亮色主题浅底菜单上
+    // 对比度仅 ~1.6:1（WCAG 最低 4.5:1），延迟数字基本读不清。
     final fast = health.latencyMs <= 800;
+    final color = fast ? scheme.primary : scheme.tertiary;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
           Icons.bolt_rounded,
           size: 14,
-          color: fast ? Colors.greenAccent.shade400 : Colors.amber.shade300,
+          color: color,
           semanticLabel: '线路健康',
         ),
         Text(
           '${health.latencyMs}ms',
           style: TextStyle(
             fontSize: 11,
-            color: fast ? Colors.greenAccent.shade400 : Colors.amber.shade300,
+            color: color,
           ),
         ),
       ],

@@ -46,6 +46,11 @@ class Plugin {
   ApiChapterConfig chapterApiConfig;
   AntiCrawlerConfig antiCrawlerConfig;
 
+  /// v1.6.6 修复：本地修改标记。编辑器保存/用户导入时置 true，
+  /// 社区规则静默同步跳过带标记的规则——此前版本升级是全字段整对象
+  /// 替换，用户在编辑器里改的 referer/UA/反爬配置被静默重置。
+  bool localModified;
+
   Plugin({
     required this.api,
     required this.type,
@@ -71,6 +76,7 @@ class Plugin {
     ApiSearchConfig? searchApiConfig,
     ApiChapterConfig? chapterApiConfig,
     AntiCrawlerConfig? antiCrawlerConfig,
+    this.localModified = false,
   })  : searchApiConfig = searchApiConfig ?? ApiSearchConfig(),
         chapterApiConfig = chapterApiConfig ?? ApiChapterConfig(),
         antiCrawlerConfig = antiCrawlerConfig ?? AntiCrawlerConfig.empty();
@@ -113,6 +119,7 @@ class Plugin {
               Map<String, dynamic>.from(json['antiCrawlerConfig']),
             )
           : AntiCrawlerConfig.empty(),
+      localModified: json['localModified'] as bool? ?? false,
     );
   }
 
@@ -176,6 +183,7 @@ class Plugin {
           chapterApiConfig.request.url.isNotEmpty)
         'chapterApiConfig': chapterApiConfig.toJson(),
       'antiCrawlerConfig': antiCrawlerConfig.toJson(),
+      'localModified': localModified,
     };
   }
 

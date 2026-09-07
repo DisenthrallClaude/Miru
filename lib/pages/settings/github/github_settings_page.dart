@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/bean/settings/settings_list.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -98,6 +99,16 @@ class _GithubSettingsPageState extends State<GithubSettingsPage> {
   }
 
   Future<void> _logout() async {
+    // 退出登录会清 token 并停用云同步（重登需再次粘贴 Token），
+    // 按钮就在账号行尾部、易误触——与同页「恢复默认设置」一致加确认。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '退出登录',
+      message: '将断开 GitHub 云同步。本地数据完整保留，'
+          '重新登录需再次粘贴 Personal Access Token。',
+      confirmLabel: '退出',
+    );
+    if (!confirmed) return;
     await GithubSync().logout();
     if (!mounted) {
       return;
@@ -170,7 +181,7 @@ class _GithubSettingsPageState extends State<GithubSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsDetailScaffold(
-      title: const Text('GITHUB 云同步'),
+      title: const Text('GitHub 云同步'),
       body: SettingsList(
         maxWidth: 700,
         sections: [

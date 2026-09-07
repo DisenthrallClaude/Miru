@@ -362,7 +362,12 @@ ThemeData buildMiruTheme({
         return textTheme.labelSmall!.copyWith(
           fontSize: 11,
           fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+          // A4：雪景封面磨砂后玻璃 interior 近纯白，onSurfaceVariant
+          // (#6E6E73) 在 11px w400 下对比度 ~4.9:1 贴 WCAG AA 线；
+          // 未选中标签换 onSurface@0.8 拉开余量（选中 primary 不变）。
+          color: selected
+              ? scheme.primary
+              : scheme.onSurface.withValues(alpha: 0.8),
         );
       }),
       iconTheme: WidgetStateProperty.resolveWith((states) {

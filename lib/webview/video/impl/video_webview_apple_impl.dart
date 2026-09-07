@@ -156,7 +156,10 @@ class VideoWebviewAppleImpl
           logEventController.add('Callback received: $message');
           logEventController.add(
               'If there is audio but no video, please report it to the rule developer.');
+          // v1.6.6 修复（B1-🟡7）：补 !isVideoSourceLoaded 守卫（与
+          // VideoBridgeDebug 对齐），防迟到 iframe 事件二次上报串扰。
           if ((message.contains('http') || message.startsWith('//')) &&
+              !isVideoSourceLoaded &&
               !SniffedUrlFilter.isAdUrl(message)) {
             logEventController.add('Parsing video source $message');
             String encodedUrl = Uri.encodeFull(message);

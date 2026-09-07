@@ -13,6 +13,8 @@ import 'package:miru/bean/widget/liquid_glass_tab_bar.dart';
 import 'package:miru/utils/anime_season.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/widget/bangumi_mirror_error_widget.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
+import 'package:miru/navigation.dart';
 import 'package:miru/utils/device.dart';
 
 class TimelinePage extends StatefulWidget {
@@ -34,12 +36,33 @@ class _TimelinePageState extends State<TimelinePage>
   late bool showRating;
   final GlobalKey filterSectionKey = GlobalKey();
 
+  /// B2：双击当前 tab 回顶——把回顶回调登记给 shell。
+  ///
+  /// 每天一个 CustomScrollView 且都不传 controller，垂直滚动在
+  /// Mobile 平台会自动挂到本路由的 PrimaryScrollController；
+  /// 驱动它即可让当前页（连同缓存的相邻页）一起归零。
+  /// （方法 tear-off：同一实例上的 tear-off 互相 ==，
+  /// 登记与注销两端天然匹配。）
+  void _scrollToTop() {
+    final primary = PrimaryScrollController.maybeOf(context);
+    if (primary != null && primary.hasClients) {
+      primary.animateTo(0,
+          duration: Motion.normal, curve: Motion.standard);
+    }
+  }
+
+  /// D3：下拉强制重拉当前季度（绕过当季缓存）。
+  Future<void> _refreshSeason() =>
+      timelineController.getSchedulesBySeason(forceRefresh: true);
+
   @override
   void initState() {
     super.initState();
     int weekday = DateTime.now().weekday - 1;
     tabController =
         TabController(vsync: this, length: tabs.length, initialIndex: weekday);
+    // B2：当前 tab 存活期间向 shell 登记回顶回调。
+    TabScrollToTop.register(_scrollToTop);
     showRating = GStorage.getSetting(SettingsKeys.showRating);
     if (timelineController.bangumiCalendar.isEmpty) {
       timelineController.init();
@@ -48,6 +71,7 @@ class _TimelinePageState extends State<TimelinePage>
 
   @override
   void dispose() {
+    TabScrollToTop.unregister(_scrollToTop);
     tabController?.dispose();
     super.dispose();
   }
@@ -124,7 +148,10 @@ class _TimelinePageState extends State<TimelinePage>
 
     return Container(
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        // E1：底色改半透明——_GlassSheet 的磨砂采样目前被这层
+        // 不透明 surface 完全盖死，玻璃白付；留 12% 透明度让
+        // 玻璃呼吸透出（内容卡仍是不透明块，可读性不受影响）。
+        color: colorScheme.surface.withValues(alpha: 0.88),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
@@ -714,6 +741,9 @@ class _TimelinePageState extends State<TimelinePage>
         bottom: LiquidGlassTabBar(
           controller: tabController!,
           tabs: tabs,
+          // D1：今日页签持续标记（primary 小圆点），
+          // 滑走后也能找回「今天」。
+          highlightIndex: DateTime.now().weekday - 1,
         ),
       ),
       body: Observer(builder: (context) {
@@ -757,7 +787,12 @@ class _TimelinePageState extends State<TimelinePage>
     if (MediaQuery.sizeOf(context).width > LayoutBreakpoint.medium['width']!) {
       crossCount = 3;
     }
-    double cardHeight = isDesktop() ? 160 : (isTablet() ? 140 : 120);
+    // D5：卡高随系统字号缩放——固定 120 在 1.3x 字体下 footer 的
+    // 三枚 chips 会被挤出内容区（Column overflow 裁切）；图片与
+    // 卡片内部布局按同一比例缩放，网格 extent 公式不变。
+    final ts = MediaQuery.textScalerOf(context);
+    final double cardHeight =
+        ts.scale(isDesktop() ? 160.0 : (isTablet() ? 140.0 : 120.0));
     for (var bangumiList in bangumiCalendar) {
       // 根据过滤器设置过滤番剧
       var filteredList = bangumiList;
@@ -784,38 +819,69 @@ class _TimelinePageState extends State<TimelinePage>
             .toList();
       }
 
-      gridViewList.add(
-        CustomScrollView(
-          slivers: [
-            SliverPadding(
-              // 底部让出毛玻璃导航条高度
-              padding: EdgeInsets.fromLTRB(
-                Space.sm,
-                0,
-                Space.sm,
-                MediaQuery.paddingOf(context).bottom,
-              ),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  mainAxisSpacing: StyleString.cardSpace - 2,
-                  crossAxisSpacing: StyleString.cardSpace,
-                  crossAxisCount: crossCount,
-                  mainAxisExtent: cardHeight + 12,
+      // D2：空番组日用共享空态组件渲染，不再是整页空白；
+      // 仍然保持可滚动（无 controller 的垂直 CustomScrollView
+      // 默认常滚动物理），空日也能下拉刷新。
+      if (filteredList.isEmpty) {
+        gridViewList.add(
+          RefreshIndicator(
+            onRefresh: _refreshSeason,
+            child: const CustomScrollView(
+              slivers: [
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: GeneralEmptyState(
+                      icon: Icons.event_busy_rounded,
+                      title: '这一天没有放送的番组',
+                    ),
+                  ),
                 ),
-                delegate: SliverChildBuilderDelegate(
-                  (BuildContext context, int index) {
-                    if (filteredList.isEmpty) return null;
-                    final item = filteredList[index];
-                    return BangumiTimelineCard(
-                        bangumiItem: item,
-                        cardHeight: cardHeight,
-                        showRating: showRating);
-                  },
-                  childCount: filteredList.length,
-                ),
-              ),
+              ],
             ),
-          ],
+          ),
+        );
+        continue;
+      }
+
+      gridViewList.add(
+        // D3：包在每天的滚动视图外层（RefreshIndicator 只响应
+        // depth 0 的滚动通知，隔着 TabBarView 包整层收不到）。
+        RefreshIndicator(
+          onRefresh: _refreshSeason,
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                // 底部让出毛玻璃导航条高度：Dock 实占 inset+12+70，
+                // B7：额外补 Space.lg 与推荐页对齐，最后一卡不再
+                // 被玻璃压边 12dp。
+                padding: EdgeInsets.fromLTRB(
+                  Space.sm,
+                  0,
+                  Space.sm,
+                  MediaQuery.paddingOf(context).bottom + Space.lg,
+                ),
+                sliver: SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    mainAxisSpacing: StyleString.cardSpace - 2,
+                    crossAxisSpacing: StyleString.cardSpace,
+                    crossAxisCount: crossCount,
+                    mainAxisExtent: cardHeight + 12,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (BuildContext context, int index) {
+                      final item = filteredList[index];
+                      return BangumiTimelineCard(
+                          bangumiItem: item,
+                          cardHeight: cardHeight,
+                          showRating: showRating);
+                    },
+                    childCount: filteredList.length,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }

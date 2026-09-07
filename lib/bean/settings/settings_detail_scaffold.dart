@@ -70,12 +70,15 @@ class SettingsDetailScaffold extends StatelessWidget {
       appBar: SysAppBar(
         title: title,
         actions: actions,
+        // 与 SysAppBar 全局自动 leading 同款细箭头（此前是粗箭头，
+        // 同一手势位置两种视觉符号，页面间跳变感明显）。
         leading: leading ??
             (onBack == null
                 ? null
                 : IconButton(
                     onPressed: onBack,
-                    icon: const Icon(Icons.arrow_back),
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        size: 20),
                   )),
       ),
       body: body,

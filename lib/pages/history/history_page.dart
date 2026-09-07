@@ -3,6 +3,7 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/card/bangumi_history_card.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/pages/history/history_controller.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -38,33 +39,18 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
-  void showHistoryClearDialog() {
-    MiruDialog.show(
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('记录管理'),
-          content: const Text('确认要清除所有历史记录吗?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                MiruDialog.dismiss();
-              },
-              child: Text(
-                '取消',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                MiruDialog.dismiss();
-                _clearAllHistories();
-              },
-              child: const Text('确认'),
-            ),
-          ],
-        );
-      },
+  Future<void> showHistoryClearDialog() async {
+    // 统一危险确认样式：标题如实描述动作（此前叫「记录管理」，
+    // 语义含糊），正文写清后果（续播进度也一并没了），确认键标 error 色。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '清除全部历史',
+      message: '将删除全部观看进度记录（含各番剧的续播位置），此操作不可恢复。',
+      confirmLabel: '清除',
     );
+    if (confirmed) {
+      await _clearAllHistories();
+    }
   }
 
   /// clearAll 是 async：之前用同步 try/catch 包裹，
@@ -146,31 +132,72 @@ class _HistoryPageState extends State<HistoryPage> {
     final double horizontalPadding =
         screenWidth > maxContentWidth ? (screenWidth - maxContentWidth) / 2 : 0;
 
+    // 按自然日分组（今天/昨天/本周/更早）：追番应用的历史页核心
+    // 诉求是回找「昨天看的那部」，纯平铺 + 卡内相对时间（3 天前/
+    // 2 个月前）在长列表里扫读成本高。列表已按观看时间倒序。
+    final now = DateTime.now();
+    String groupOf(DateTime t) {
+      final today = DateTime(now.year, now.month, now.day);
+      final day = DateTime(t.year, t.month, t.day);
+      final diffDays = today.difference(day).inDays;
+      if (diffDays <= 0) return '今天';
+      if (diffDays == 1) return '昨天';
+      if (diffDays < 7) return '本周';
+      return '更早';
+    }
+
+    final histories = historyController.histories;
+    final groups = <String, List<int>>{};
+    for (var i = 0; i < histories.length; i++) {
+      groups.putIfAbsent(groupOf(histories[i].lastWatchTime), () => []).add(i);
+    }
+
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
     return CustomScrollView(
       slivers: [
         const SliverPadding(padding: EdgeInsets.only(top: 4)),
         SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-          sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              mainAxisSpacing: 2,
-              crossAxisSpacing: StyleString.cardSpace,
-              crossAxisCount: crossCount,
-              mainAxisExtent: 136,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (BuildContext context, int index) {
-                return BangumiHistoryCardV(
-                  historyItem: historyController.histories[index],
-                  showDelete: showDelete,
-                  onDeleted: () {
-                    historyController
-                        .deleteHistory(historyController.histories[index]);
-                  },
-                );
-              },
-              childCount: historyController.histories.length,
-            ),
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              for (final entry in groups.entries) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                    child: Text(
+                      entry.key,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+                SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    mainAxisSpacing: 2,
+                    crossAxisSpacing: StyleString.cardSpace,
+                    crossAxisCount: crossCount,
+                    mainAxisExtent: 136,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (BuildContext context, int index) {
+                      final historyIndex = entry.value[index];
+                      return BangumiHistoryCardV(
+                        historyItem: histories[historyIndex],
+                        showDelete: showDelete,
+                        onDeleted: () {
+                          historyController
+                              .deleteHistory(histories[historyIndex]);
+                        },
+                      );
+                    },
+                    childCount: entry.value.length,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
         const SliverPadding(padding: EdgeInsets.only(bottom: 16)),

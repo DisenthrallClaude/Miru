@@ -142,13 +142,17 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 当前播放的自动兜底候选，按优先级排列，失败一次消费一个。
   final List<SourceFallback> _playbackFallbacks = [];
 
-  /// v1.6.4：本集已自动换源次数（换集/重进时归零）。
+  /// v1.6.4：本集已自动换源次数（仅用户手动换集/重进时归零）。
   ///
   /// 此前自动换源只受候选列表长度限制：列表里有 N 个备选就换 N 轮，
   /// 每轮都要烧完一次完整解析超时（12s+），多源失败时用户被连绵
   /// 不断的「解析失败，正在尝试 XX」toast 刷屏几十秒，观感即「死循环」。
   /// 现在熔断到 2 次：两源都打不开基本是网络/站点整体故障，
   /// 直接把选择权交回用户（错误页有手动换线路入口）。
+  ///
+  /// v1.6.6 修复：熔断计数不能被兜底链路自身的 changeEpisode 重置
+  /// （否则每轮换源后计数归零，永远达不到阈值，换源风暴回归）。
+  /// 只有用户手动换集才归零，自动兜底换源保持计数累加。
   int _autoFallbackCount = 0;
 
   /// 自动换源熔断阈值。
@@ -400,6 +404,28 @@ abstract class _VideoPageController with Store implements Disposable {
         : _resolveOnlineEpisode(selection.episode, road: selection.road);
   }
 
+  /// v1.6.6 修复（F3 移交）：顶栏标题安全读取。
+  ///
+  /// 播放器面板顶栏此前直接裸取
+  /// `roadList[road].identifier[episode - 1]`——不少插件的线路只给
+  /// 部分集名（identifier 短于集数）时直接 RangeError 崩掉整个控制
+  /// 面板。这里复用 _resolveOnlineEpisode 同款防护，越界回落
+  /// 「第N集」。视频页选集格（video_page）已是同样写法。
+  String get topBarEpisodeTitle {
+    final selection = selectedEpisode;
+    if (roadList.isEmpty ||
+        selection.road < 0 ||
+        selection.road >= roadList.length) {
+      return '第${selection.episode}集';
+    }
+    final index = selection.episode - 1;
+    final identifiers = roadList[selection.road].identifier;
+    if (index < 0 || index >= identifiers.length) {
+      return '第${selection.episode}集';
+    }
+    return identifiers[index];
+  }
+
   int commentEpisodeForSelection(VideoEpisodeSelection selection) {
     final resolvedEpisode = resolveEpisode(selection);
     return resolvedEpisode?.danmakuEpisodeNumber ?? selection.episode;
@@ -408,7 +434,8 @@ abstract class _VideoPageController with Store implements Disposable {
   /// Resets pre-switch state as a single transaction so observers see one
   /// notification instead of one per field.
   @action
-  void _beginEpisodeSwitch(VideoEpisodeSelection selection) {
+  void _beginEpisodeSwitch(VideoEpisodeSelection selection,
+      {bool resetAutoFallback = true}) {
     final targetCommentsEpisode = commentEpisodeForSelection(selection);
     selectedEpisode = selection;
     playingEpisode = null;
@@ -421,8 +448,10 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     _loading = true;
     _errorMessage = null;
-    // v1.6.4：换集事务重置自动换源熔断计数（新的一集重新开始计数）。
-    _autoFallbackCount = 0;
+    // v1.6.6 修复：仅用户手动换集归零自动换源熔断计数；兜底换源
+    // 链路（changeEpisode(resetAutoFallback: false)）保持计数累加，
+    // 否则熔断被每轮换源重置而永久失效。
+    if (resetAutoFallback) _autoFallbackCount = 0;
   }
 
   @action
@@ -514,6 +543,8 @@ abstract class _VideoPageController with Store implements Disposable {
         currentRoad: targetRoad,
         offset: offset,
         playerController: playerController,
+        // v1.6.6 修复：兜底换源不重置熔断计数，否则计数永不到 2。
+        resetAutoFallback: false,
       );
       return true;
     }
@@ -536,13 +567,14 @@ abstract class _VideoPageController with Store implements Disposable {
     int currentRoad = 0,
     int offset = 0,
     required PlayerController playerController,
+    bool resetAutoFallback = true,
   }) async {
     final session = _playbackSessions.begin();
     final selection = VideoEpisodeSelection(
       episode: episode,
       road: currentRoad,
     );
-    _beginEpisodeSwitch(selection);
+    _beginEpisodeSwitch(selection, resetAutoFallback: resetAutoFallback);
     _danmakuSessions.cancel();
     // 换集/兜底换源时旧「下一集预解析」Timer 不再有意义（新集 init 完成后
     // 才会重排），窗口内触发只会用旧线路 pageUrl 拼出错误 URL 白耗一次解析。
@@ -738,19 +770,22 @@ abstract class _VideoPageController with Store implements Disposable {
       }
     });
 
-    // 播放请求头提前构造：混合解析服务的探测/预取/代理回源与 mpv 播放
-    // 共用同一套 UA/Referer/Cookie，避免「探测可达但播放 403」。
-    final cookieHeader = await _playbackCookieHeader(url);
-    final playbackHeaders = <String, String>{
-      'user-agent': currentPlugin.userAgent.isEmpty
-          ? getSessionUA()
-          : currentPlugin.userAgent,
-      if (currentPlugin.referer.isNotEmpty)
-        'referer': currentPlugin.referer,
-      ...cookieHeader,
-    };
-
     try {
+      // 播放请求头提前构造：混合解析服务的探测/预取/代理回源与 mpv 播放
+      // 共用同一套 UA/Referer/Cookie，避免「探测可达但播放 403」。
+      // v1.6.6 修复：构造挪进 try 块——坏 pageUrl（normalizeEpisodeUrl
+      // 对非法输入原样透传）在此抛异常时也能走 _failLoading/兜底换源，
+      // 而不是把换集打死在永久 loading。
+      final cookieHeader = await _playbackCookieHeader(url);
+      final playbackHeaders = <String, String>{
+        'user-agent': currentPlugin.userAgent.isEmpty
+            ? getSessionUA()
+            : currentPlugin.userAgent,
+        if (currentPlugin.referer.isNotEmpty)
+          'referer': currentPlugin.referer,
+        ...cookieHeader,
+      };
+
       final timeoutSeconds = GStorage.getSetting(SettingsKeys.parseTimeout)
           .clamp(5, 120)
           .toInt();
@@ -895,11 +930,16 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 头而非 `Cookie:` 头，验证类站点「能下载、播放 403」。与
   /// download_controller._buildPlaybackHeaders / rule_engine 同格式。
   Future<Map<String, String>> _playbackCookieHeader(String url) async {
+    // v1.6.6 修复：Uri.parse → tryParse——坏 pageUrl（含 [/< 等非法字符
+    // 且 baseUrl 缺失时 normalizeEpisodeUrl 原样透传）不再抛
+    // FormatException 打死换集链路，降级为无 Cookie 播放。
+    final uri = Uri.tryParse(url);
+    if (uri == null) return const {};
     // 用真实播放页 URL 取 Cookie：验证可能发生在 www./m. 等子域上，
     // 与 baseUrl 的 host 不一致时按域过滤会拿不到。
     final cookies = await PluginCookieManager.instance.cookieHeaderFor(
       currentPlugin.name,
-      Uri.parse(url),
+      uri,
     );
     if (cookies.isEmpty) return const {};
     return {
@@ -962,6 +1002,9 @@ abstract class _VideoPageController with Store implements Disposable {
               ...cookies,
             },
           );
+        }).catchError((_) {
+          // v1.6.6 修复：预取链路异常不再逃逸成 unhandled zone error
+          // （prefetchResolve 自身有全量 catch，这里兜住 Cookie 段）。
         }),
       );
     });

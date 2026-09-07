@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 import 'package:miru/services/network/metered_network_service.dart';
@@ -200,55 +201,72 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
 
   Future<int?> _showSkipTimeChangeDialog(
       {required String title, required String initialValue}) async {
-    return MiruDialog.show<int>(builder: (context) {
-      String input = "";
-      return AlertDialog(
-        title: Text(title),
-        content: StatefulBuilder(
-            builder: (BuildContext context, StateSetter setState) {
-          return TextField(
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly, // 只允许输入数字
-            ],
-            decoration: InputDecoration(
-              floatingLabelBehavior:
-                  FloatingLabelBehavior.never, // 控制label的显示方式
-              labelText: initialValue,
-            ),
-            onChanged: (value) {
-              input = value;
-            },
-          );
-        }),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => MiruDialog.dismiss(),
-            child: Text(
-              '取消',
-              style: TextStyle(color: Theme.of(context).colorScheme.outline),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              final int? newValue = int.tryParse(input);
+    // 预填当前值：此前 labelText 只是「伪装」成预填（input 实际为空），
+    // 想把 85 微调到 90 也得全量重输，留空点确定只得到 toast。
+    // 现在真正预填 + 错误提示落在字段内（errorText）。控制器随
+    // 对话框结束统一释放，避免在 builder 里创建后泄漏。
+    final controller = TextEditingController(text: initialValue);
+    try {
+      return await MiruDialog.show<int>(builder: (context) {
+        String input = initialValue;
+        String? errorText;
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return AlertDialog(
+              title: Text(title),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly, // 只允许输入数字
+                ],
+                decoration: InputDecoration(
+                  labelText: '秒',
+                  errorText: errorText,
+                ),
+                onChanged: (value) {
+                  input = value;
+                  // 修正输入后即时清掉字段级错误。
+                  if (errorText != null) {
+                    setState(() => errorText = null);
+                  }
+                },
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => MiruDialog.dismiss(),
+                  child: Text(
+                    '取消',
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.outline),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final int? newValue = int.tryParse(input);
 
-              if (newValue == null) {
-                MiruDialog.showToast(message: '请输入数字');
-                return;
-              }
+                    if (newValue == null) {
+                      setState(() => errorText = '请输入数字');
+                      return;
+                    }
 
-              if (newValue <= 0) {
-                MiruDialog.showToast(message: '请输入大于0的数字');
-                return;
-              }
-              // 以新设置的值弹出
-              MiruDialog.dismiss(popWith: newValue);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      );
-    });
+                    if (newValue <= 0) {
+                      setState(() => errorText = '请输入大于 0 的数字');
+                      return;
+                    }
+                    // 以新设置的值弹出
+                    MiruDialog.dismiss(popWith: newValue);
+                  },
+                  child: const Text('确定'),
+                ),
+              ],
+            );
+          },
+        );
+      });
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<String?> _showCloudResolverUrlDialog() async {
@@ -441,8 +459,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                         SettingsKeys.playResume, playResume);
                     setState(() {});
                   },
-                  title: Text('自动跳转'),
-                  description: Text('跳转到上次播放位置'),
+                  title: Text('自动续播'),
+                  description: Text('从上次观看位置继续播放'),
                   initialValue: playResume,
                 ),
                 SettingsTile.switchTile(
@@ -597,12 +615,25 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                 SettingsTile(
                   leading: Icons.wifi_find_rounded,
                   onPressed: (_) => _testCloudResolver(),
+                  // 测试最长数秒，期间禁用防连点并发。
+                  enabled: !cloudResolverTesting,
                   title: Text('测试连接'),
                   description: Text(cloudResolverTesting ? '正在测试…' : '验证 Worker 是否可用'),
                 ),
                 SettingsTile(
                   leading: Icons.cleaning_services_rounded,
                   onPressed: (_) async {
+                    // 同一动作在关于页有确认弹窗且解释后果，这里保持一致
+                    // ——清除的是解析结果与预取数据，属可再生的破坏性操作。
+                    final confirmed = await showDestructiveConfirm(
+                      context,
+                      title: '清除播放加速缓存',
+                      message:
+                          '将清除解析结果与已预取的视频开头数据，'
+                          '下次播放需重新解析。确定清除吗？',
+                      confirmLabel: '清除',
+                    );
+                    if (!confirmed) return;
                     await LocalMediaProxy.instance.clearAll();
                     await ResolutionResultCache.instance.clear();
                     MiruDialog.showToast(message: '播放加速缓存已清除');

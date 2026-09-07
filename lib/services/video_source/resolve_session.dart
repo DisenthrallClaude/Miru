@@ -109,13 +109,26 @@ class ResolveSession<T> {
     required this.waves,
     required this.hardDeadline,
     this.onTrace,
-  }) : assert(waves.isNotEmpty, 'waves must not be empty');
+    // v1.6.6 修复（B1-🟡9）：硬上限/取消异常工厂可注入。默认仍抛
+    // TimeoutException（既有调用与单测兼容）；hybrid 层注入
+    // VideoSourceTimeoutException / VideoSourceCancelledException，
+    // 使调用方（video_controller / download_controller）的异常
+    // 特判生效——不再把「用户取消」记成插件失败并触发误换源，
+    // 用户可见文案也不再退化为「TimeoutException…」。
+    Object Function()? timeoutError,
+    Object Function()? cancelledError,
+  })  : assert(waves.isNotEmpty, 'waves must not be empty'),
+        _timeoutErrorFactory = timeoutError,
+        _cancelledErrorFactory = cancelledError;
 
   /// 波次表：启动延迟 → 任务。延迟需升序排列（不满足将排序修正）。
   final Map<Duration, ResolveLevelTask<T>> waves;
 
   /// 竞速硬上限：到点无产出即失败。
   final Duration hardDeadline;
+
+  final Object Function()? _timeoutErrorFactory;
+  final Object Function()? _cancelledErrorFactory;
 
   /// 每个层级启动/完成/产出/取消时回调（日志面板用）。
   final void Function(ResolveTrace trace)? onTrace;
@@ -168,7 +181,9 @@ class ResolveSession<T> {
         onTrace?.call(trace);
         _cancelInflight();
         completer.completeError(
-          TimeoutException('resolve race exceeded hard deadline', hardDeadline),
+          _timeoutErrorFactory?.call() ??
+              TimeoutException(
+                  'resolve race exceeded hard deadline', hardDeadline),
         );
       }
     });
@@ -227,7 +242,8 @@ class ResolveSession<T> {
     final completer = _completer;
     if (completer != null && !completer.isCompleted) {
       completer.completeError(
-        TimeoutException('resolve session cancelled', null),
+        _cancelledErrorFactory?.call() ??
+            TimeoutException('resolve session cancelled', null),
       );
     }
   }

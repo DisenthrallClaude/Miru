@@ -244,9 +244,12 @@ class _DefaultRuleRequestExecutor implements RuleRequestExecutor {
     // with ours instead of being sent as a second, conflicting header.
     final headers = <String, dynamic>{
       'referer': '${config.baseUrl}/',
-      if (cookieHeader.isNotEmpty) 'cookie': cookieHeader,
       for (final entry in request.headers.entries)
         entry.key.toLowerCase(): entry.value,
+      // v1.6.6 修复：已验证 Cookie 与下方 verified UA 同等地位——放在
+      // 规则自带头之后展开，规则若声明了 cookie 头不再顶掉 clearance
+      // 类验证 Cookie（否则验证通过后又回挑战页）。
+      if (cookieHeader.isNotEmpty) 'cookie': cookieHeader,
       // Clearance cookies are bound to the User-Agent they were issued to,
       // so the verified UA overrides the rule's own; sending a different one
       // would make the site serve the challenge page again.

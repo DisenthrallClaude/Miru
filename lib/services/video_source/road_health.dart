@@ -204,7 +204,15 @@ class RoadHealthTracker {
           await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
       request.headers.set('user-agent', _probeUserAgent);
       // HEAD 不少站返回 405；GET + 立刻断开同样只花一个 RTT。
-      final response = await request.close().timeout(probeTimeout);
+      final response = await request.close().timeout(
+        probeTimeout,
+        onTimeout: () {
+          // v1.6.6 修复（B1-🟡4）：超时 abort 底层请求，封住悬挂 socket
+          //（连接已建立但响应头永不到的源站，连接池不回收）。
+          request.abort();
+          throw TimeoutException('probe: $url', probeTimeout);
+        },
+      );
       ok = response.statusCode >= 200 && response.statusCode < 400;
       // 只取前几 KB 即断开：页面正文对健康判定无用。
       await response.drain<void>().timeout(probeTimeout).catchError((_) {});

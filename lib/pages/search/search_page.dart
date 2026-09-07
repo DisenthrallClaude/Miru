@@ -223,8 +223,14 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _submitSearch(String value) async {
     final parsed = SearchParser(value).toFilterState();
-    setState(() => filterState = parsed);
     final normalizedValue = SearchParser.fromFilterState(parsed);
+    // 空词守卫：键盘「搜索」键在输入为空时同样触发 onSubmitted，
+    // 不拦会把空关键词写进历史（建议列表出现空白条目）并发一次
+    // 无用网络请求。仅高级筛选（如 tag:百合）时空串仍可提交。
+    if (normalizedValue.trim().isEmpty && !parsed.hasAdvancedFilters) {
+      return;
+    }
+    setState(() => filterState = parsed);
     _setSearchText(normalizedValue);
     await searchPageController.searchBangumi(normalizedValue, type: 'init');
     if (searchController.isOpen) {
@@ -273,9 +279,12 @@ class _SearchPageState extends State<SearchPage> {
                   <WidgetStatesConstraint, double>{WidgetState.any: 0},
                 ),
                 viewElevation: 0,
+                // 建议视图是 overlay 而非路由：这里 pop 会把下层
+                // SearchPage 路由本身弹掉。改为 closeView 只收起
+                // 建议/键盘，与系统返回键行为一致。
                 viewLeading: IconButton(
                   onPressed: () {
-                    Navigator.of(context).pop();
+                    searchController.closeView(searchController.text);
                   },
                   icon: const Icon(Icons.arrow_back),
                 ),
@@ -1143,6 +1152,8 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
               ),
             );
           }
+          // 历史尾部补「清空」入口：controller 的 clearSearchHistory
+          // 此前已实现但无任何 UI 出口，隐私清理场景只能逐条删。
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1159,6 +1170,18 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
                     },
                   ),
                 ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        widget.searchPageController.clearSearchHistory(),
+                    icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                    label: const Text('清空搜索历史'),
+                  ),
+                ),
+              ),
             ],
           );
         },

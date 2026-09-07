@@ -93,7 +93,8 @@ final List<_SettingsGroup> _settingsGroups = [
       _SettingsCategory(
         id: 'theme',
         label: '外观设置',
-        description: '主题、配色与字体',
+        // v1.6.3 已删除「配色方案」，描述如实反映当前页面内容。
+        description: '深色模式、OLED 与字体',
         icon: Icons.palette_rounded,
         builder: (_) => const ThemeSettingsPage(),
       ),
@@ -107,7 +108,7 @@ final List<_SettingsGroup> _settingsGroups = [
       _SettingsCategory(
         id: 'sync',
         label: '同步设置',
-        description: 'WebDav 与 Bangumi 同步',
+        description: 'WebDAV、Bangumi 与规则仓库镜像',
         icon: Icons.cloud_rounded,
         builder: (_) => const WebDavSettingsPage(),
       ),
@@ -261,9 +262,10 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: SysAppBar(
         title: const Text('设置'),
         // First route of the nested Navigator, so back must pop the outer one.
+        // 与全局自动 leading 同款细箭头（见 SysAppBar）。
         leading: IconButton(
           onPressed: () => context.maybePop(),
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
         ),
       ),
       body: SafeArea(

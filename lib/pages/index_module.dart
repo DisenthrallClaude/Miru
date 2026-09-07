@@ -21,13 +21,11 @@ import 'package:miru/pages/collect/collect_controller.dart';
 import 'package:miru/pages/my/my_controller.dart';
 import 'package:miru/pages/download/download_controller.dart';
 import 'package:miru/services/shaders/shader_asset_service.dart';
+import 'package:miru/navigation.dart';
 
-final _tabTransition = CustomTransition(
-  duration: const Duration(milliseconds: 70),
-  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-    return FadeTransition(opacity: animation, child: child);
-  },
-);
+// tab 切换的过场统一引用 navigation.dart 的 tabTransition（B3）：
+// flutter_modular 只取叶子路由的转场配置，四个 tab 叶子模块各自
+// 引用同一份，这里的父路由配置对切 tab 无效但保持语义一致。
 
 final _imagePreviewTransition = CustomTransition(
   duration: const Duration(milliseconds: 220),
@@ -46,7 +44,7 @@ final tabModule = createModule(
       ..route(
         '/',
         child: (context, state) => const IndexPage(),
-        transition: _tabTransition,
+        transition: tabTransition,
         children: (sub) {
           sub
             ..route(

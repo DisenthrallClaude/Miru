@@ -10,6 +10,7 @@ import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 import 'package:miru/pages/player/controller/player_super_resolution.dart';
 import 'package:miru/bean/widget/embedded_native_control_area.dart';
 import 'package:miru/pages/player/player_panel_hold.dart';
+import 'package:miru/pages/player/player_pointer_interaction.dart';
 import 'package:miru/services/player/pip_utils.dart';
 import 'package:miru/pages/video/video_controller.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
@@ -52,6 +53,7 @@ class PlayerItemPanel extends StatefulWidget {
     required this.showSyncPlayPanel,
     required this.showDanmakuDestinationPickerAndSend,
     required this.pauseForTimedShutdown,
+    required this.restartAutoHideTimer,
     this.disableAnimations = false,
   });
 
@@ -80,6 +82,10 @@ class PlayerItemPanel extends StatefulWidget {
   final void Function() showSyncPlayPanel;
   final Future<bool> Function(String) showDanmakuDestinationPickerAndSend;
   final VoidCallback pauseForTimedShutdown;
+
+  /// 触屏点按控制栏时重启 4s 自动隐藏计时（桌面 hover 由租约保持，
+  /// 触屏没有 hover——不重启的话面板会在连续操作中突然滑走）。
+  final VoidCallback restartAutoHideTimer;
   final bool disableAnimations;
 
   @override
@@ -392,7 +398,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             : () {
                 widget.handleDanmaku();
               },
-        tooltip: danmakuLoading ? '弹幕加载中...' : (danmakuOn ? '关闭弹幕' : '打开弹幕'),
+        tooltip: danmakuLoading ? '弹幕加载中…' : (danmakuOn ? '关闭弹幕' : '打开弹幕'),
       );
     });
   }
@@ -421,8 +427,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        AnimatedPositioned(
-          duration: const Duration(seconds: 1),
+        // 位置恒定的层不该用 AnimatedPositioned（1s 动画是误用残留），
+        // 换 Positioned 省去每帧动画调度。
+        Positioned(
           top: 0,
           left: 0,
           right: 0,
@@ -441,8 +448,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             );
           }),
         ),
-        AnimatedPositioned(
-          duration: const Duration(seconds: 1),
+        Positioned(
           bottom: 0,
           left: 0,
           right: 0,
@@ -533,15 +539,21 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           left: 0,
           right: 0,
           child: Observer(builder: (context) {
-            return Visibility(
-              visible: !playerController.panel.lockPanel &&
-                  (widget.disableAnimations
-                      ? playerController.panel.showVideoController
-                      : true),
-              child: widget.disableAnimations
-                  ? topControlWidget
-                  : SlideTransition(
-                      position: topOffsetAnimation, child: topControlWidget),
+            // 触屏点按控制栏即重启 4s 自动隐藏计时：桌面 hover 由租约
+            // 保持面板，触屏没有 hover——不重启的话用户唤出面板后隔
+            // 3.8s 再点按钮时，第 4 秒面板当场滑走、手指落空。
+            return Listener(
+              onPointerDown: (_) => widget.restartAutoHideTimer(),
+              child: Visibility(
+                visible: !playerController.panel.lockPanel &&
+                    (widget.disableAnimations
+                        ? playerController.panel.showVideoController
+                        : true),
+                child: widget.disableAnimations
+                    ? topControlWidget
+                    : SlideTransition(
+                        position: topOffsetAnimation, child: topControlWidget),
+              ),
             );
           }),
         ),
@@ -550,16 +562,19 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           left: 0,
           right: 0,
           child: Observer(builder: (context) {
-            return Visibility(
-              visible: !playerController.panel.lockPanel &&
-                  (widget.disableAnimations
-                      ? playerController.panel.showVideoController
-                      : true),
-              child: widget.disableAnimations
-                  ? bottomControlWidget
-                  : SlideTransition(
-                      position: bottomOffsetAnimation,
-                      child: bottomControlWidget),
+            return Listener(
+              onPointerDown: (_) => widget.restartAutoHideTimer(),
+              child: Visibility(
+                visible: !playerController.panel.lockPanel &&
+                    (widget.disableAnimations
+                        ? playerController.panel.showVideoController
+                        : true),
+                child: widget.disableAnimations
+                    ? bottomControlWidget
+                    : SlideTransition(
+                        position: bottomOffsetAnimation,
+                        child: bottomControlWidget),
+              ),
             );
           }),
         ),
@@ -604,27 +619,40 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Observer(builder: (context) {
-                return ProgressBar(
-                  thumbRadius: 8,
-                  thumbGlowRadius: 18,
-                  timeLabelLocation: isTablet()
-                      ? TimeLabelLocation.sides
-                      : TimeLabelLocation.none,
-                  timeLabelTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.0,
-                    fontFeatures: [
-                      FontFeature.tabularFigures(),
-                    ],
-                  ),
-                  progress: playerController.playback.currentPosition,
-                  buffered: playerController.playback.buffer,
-                  total: playerController.playback.duration,
-                  onSeek: widget.handleProgressBarSeek,
-                  onDragStart: (_) => widget.handleProgressBarDragStart(),
-                  onDragUpdate: (details) => playerController.seeking
-                      .updateInteractiveSeek(details.timeStamp),
-                );
+                return Builder(builder: (barContext) {
+                  return ProgressBar(
+                    thumbRadius: 8,
+                    thumbGlowRadius: 18,
+                    timeLabelLocation: isTablet()
+                        ? TimeLabelLocation.sides
+                        : TimeLabelLocation.none,
+                    timeLabelTextStyle: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.0,
+                      fontFeatures: [
+                        FontFeature.tabularFigures(),
+                      ],
+                    ),
+                    progress: playerController.playback.currentPosition,
+                    buffered: playerController.playback.buffer,
+                    total: playerController.playback.duration,
+                    onSeek: widget.handleProgressBarSeek,
+                    onDragStart: (_) => widget.handleProgressBarDragStart(),
+                    // 拖动中的实时目标按拇指几何位置换算（见
+                    // thumbDragPositionToDuration 的说明），不再依赖
+                    // 语义易误读的 details.timeStamp。
+                    onDragUpdate: (details) {
+                      final target = thumbDragPositionToDuration(
+                        barContext,
+                        details.localPosition,
+                        playerController.playback.duration,
+                      );
+                      if (target != null) {
+                        playerController.seeking.updateInteractiveSeek(target);
+                      }
+                    },
+                  );
+                });
               }),
             ),
             Padding(
@@ -922,7 +950,15 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                   !playerController.panel.showVideoController)
               ? SystemMouseCursors.none
               : SystemMouseCursors.basic,
-          child: Row(
+          // 全屏挖孔避让：视频本体顶到边是对的，但交互件不该被挖孔
+          // 吞掉半边；非全屏时页面级 SafeArea 已吃掉顶部 inset（此处为 0）。
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: videoPageController.isFullscreen
+                  ? MediaQuery.paddingOf(context).top
+                  : 0.0,
+            ),
+            child: Row(
             children: [
               IconButton(
                 color: Colors.white,
@@ -935,7 +971,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               Expanded(
                 child: dtb.DragToMoveArea(
                   child: Text(
-                    ' ${videoPageController.title} [${videoPageController.roadList[videoPageController.selectedEpisode.road].identifier[videoPageController.selectedEpisode.episode - 1]}]',
+                    // v1.6.6 修复：identifier 越界防护——复用 controller 的
+                    // 安全读取（越界回落「第N集」），不再裸下标。
+                    ' ${videoPageController.title} [${videoPageController.topBarEpisodeTitle}]',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize:
@@ -1024,6 +1062,31 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: Text("弹幕切换"),
+                      ),
+                    ),
+                  ),
+                  // 弹幕关闭时也要保留设置入口：全面板把弹幕设置图标藏在
+                  // danmakuOn 条件里，弹幕关着的用户想调字号/透明度/屏蔽词
+                  // 只能先开弹幕再找图标。这里与 Smallest 面板行为对齐，
+                  // 在更多菜单里常驻「弹幕设置」。
+                  MenuItemButton(
+                    onPressed: () {
+                      showDanmakuSettingsSheet(
+                        context: context,
+                        danmakuController:
+                            playerController.danmaku.canvasController,
+                        onUpdateDanmakuSpeed:
+                            playerController.updateDanmakuSpeed,
+                        onTimelineOffsetChanged: playerController
+                            .danmaku.clearAndInvalidateScheduledDanmakus,
+                      );
+                    },
+                    child: Container(
+                      height: 48,
+                      constraints: BoxConstraints(minWidth: 112),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text("弹幕设置"),
                       ),
                     ),
                   ),
@@ -1174,6 +1237,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 ],
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -1186,7 +1250,16 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       bottom: false,
       left: videoPageController.isFullscreen,
       right: videoPageController.isFullscreen,
-      child: Column(
+      // 半透明胶囊衬底：截图/锁定是白色图标，直接浮在视频上时遇雪景
+      // 等亮画面会与画面融为一体——而锁定恰恰是全屏防误触的核心功能。
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
         children: [
           const Spacer(),
           (playerController.panel.lockPanel)
@@ -1216,6 +1289,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           ),
           const Spacer(),
         ],
+        ),
       ),
     );
   }

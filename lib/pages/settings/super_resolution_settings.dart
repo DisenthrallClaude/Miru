@@ -36,7 +36,9 @@ class _SuperResolutionSettingsState extends State<SuperResolutionSettings> {
       body: SettingsList(
         sections: [
           SettingsRadioSection<SuperResolutionMode>(
-            title: Text('超分辨率需要启用硬件解码, 若启用硬件解码后仍然不生效, 尝试切换视频渲染器为 gpu'),
+            // 规范标点：此前半角逗号串长句，观感与全应用文案不一致。
+            title: const Text(
+                '超分辨率需要启用硬件解码；若启用后仍不生效，尝试将视频渲染器切换为 gpu'),
             groupValue: superResolutionMode,
             onChanged: (SuperResolutionMode? value) {
               if (value == null) return;

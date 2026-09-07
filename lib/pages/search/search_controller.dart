@@ -99,7 +99,9 @@ abstract class _SearchPageController with Store {
       _searchOffset = 0;
       hasMoreSearchResults = true;
       bool privateMode = _collectRepository.getPrivateMode();
-      if (!privateMode) {
+      // 空词不落历史：页面侧提交前已拦截，这里对其他调用点兜底；
+      // 纯高级筛选串（如 tag:百合）非空，仍正常入历史。
+      if (!privateMode && input.trim().isNotEmpty) {
         // 检查是否已满，删除最旧的记录
         if (_searchHistoryRepository.isHistoryFull(10)) {
           await _searchHistoryRepository.deleteOldest();

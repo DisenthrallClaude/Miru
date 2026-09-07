@@ -255,7 +255,10 @@ Future<bool> showGithubLoginSheet(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: GithubLoginSheet(onSuccess: onSuccess),
+      // 面板固有高度约 500dp，第 2 步唤起键盘后小屏可用高度不足，
+      // 非滚动 Column 会 RenderFlex overflow（登录按钮被裁掉）。
+      // 包一层滚动视图让内容可滚动，键盘 padding 保留。
+      child: SingleChildScrollView(child: GithubLoginSheet(onSuccess: onSuccess)),
     ),
   );
   return result ?? false;

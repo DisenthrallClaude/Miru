@@ -9,6 +9,8 @@ import 'package:miru/plugins/anti_crawler_config.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
 import 'package:miru/bean/widget/glass_fab.dart';
+import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/pages/plugin_editor/editor_form_widgets.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/plugin/api_rule_engine.dart';
@@ -238,6 +240,82 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   int captchaType = CaptchaType.imageCaptcha;
   int captchaDetectType = CaptchaDetectType.xpath;
 
+  /// 未保存变更标记：规则编辑是本应用最重的输入任务（30+ 字段、
+  /// 无草稿机制），误触返回手势不应静默丢稿。
+  bool _dirty = false;
+
+  /// 字段级校验错误（保存失败时回显到出错字段，而不是只在底部提示；
+  /// 30+ 字段的表单里让用户自己找哪个「请求头」写错太不友好）。
+  final Map<TextEditingController, String> _fieldErrors = {};
+
+  /// 全部文本控制器：统一挂「未保存变更」监听，避免逐个手写。
+  List<TextEditingController> get _allControllers => [
+        nameController,
+        versionController,
+        userAgentController,
+        baseURLController,
+        searchURLController,
+        searchListController,
+        searchNameController,
+        searchResultController,
+        chapterRoadsController,
+        chapterResultController,
+        refererController,
+        searchApiURLController,
+        searchApiHeadersController,
+        searchApiQueryController,
+        searchApiBodyController,
+        searchApiListPathController,
+        searchApiNamePathController,
+        searchApiSourcePathController,
+        chapterApiURLController,
+        chapterApiHeadersController,
+        chapterApiQueryController,
+        chapterApiBodyController,
+        chapterApiRoadsPathController,
+        chapterApiRoadNamePathController,
+        chapterApiEpisodesPathController,
+        chapterApiEpisodeNamePathController,
+        chapterApiEpisodeURLPathController,
+        chapterApiRoadNamesPathController,
+        chapterApiRoadEpisodesPathController,
+        chapterApiRoadSeparatorController,
+        chapterApiEpisodeSeparatorController,
+        chapterApiFieldSeparatorController,
+        chapterApiVariablesController,
+        chapterApiPageURLController,
+        chapterApiPageQueryController,
+        captchaImageController,
+        captchaInputController,
+        captchaButtonController,
+        captchaDetectValueController,
+        captchaScriptController,
+      ];
+
+  /// 仅在首次变脏时 setState：让 PopScope.canPop 立即生效，
+  /// 后续按键不再整页重建。
+  void _markDirty() {
+    if (_dirty) return;
+    _dirty = true;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 返回手势被未保存拦截后弹确认：用户选择「放弃」才真正离开。
+  Future<void> _confirmDiscardChanges() async {
+    final leave = await showDestructiveConfirm(
+      context,
+      title: '放弃修改？',
+      message: '当前规则尚未保存，离开将丢失已填写的内容。',
+      confirmLabel: '放弃',
+    );
+    if (!leave) return;
+    _dirty = false;
+    if (!mounted) return;
+    context.pop();
+  }
+
   static const List<ButtonSegment<String>> _ruleModeSegments = [
     ButtonSegment(
       value: RuleMode.xpath,
@@ -347,10 +425,18 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
     captchaDetectValueController.text =
         plugin.antiCrawlerConfig.captchaDetectValue;
     captchaScriptController.text = plugin.antiCrawlerConfig.captchaScript;
+
+    // 文本同步完成后才挂监听：initState 里的赋值不是用户编辑。
+    for (final controller in _allControllers) {
+      controller.addListener(_markDirty);
+    }
   }
 
   @override
   void dispose() {
+    for (final controller in _allControllers) {
+      controller.removeListener(_markDirty);
+    }
     nameController.dispose();
     versionController.dispose();
     userAgentController.dispose();
@@ -402,7 +488,18 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // 有未保存变更时拦截返回手势（多选模式在规则管理页已有同款
+      // 拦截先例）；规则编写无草稿，静默丢稿代价太大。
+      canPop: !_dirty,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return;
+        // 逻辑抽到 State 方法里：闭包里捕获 build 的 context 会被
+        // use_build_context_synchronously 拦（State.context + mounted
+        // 才是标准守卫组合）。
+        _confirmDiscardChanges();
+      },
+      child: Scaffold(
       appBar: SysAppBar(
         title: const Text(_RuleEditorText.pageTitle),
         actions: [
@@ -457,7 +554,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
                       label: _RuleEditorText.searchRuleType,
                       value: searchMode,
                       segments: _ruleModeSegments,
-                      onChanged: (value) => setState(() => searchMode = value),
+                      onChanged: (value) => setState(() {
+                        searchMode = value;
+                        _dirty = true;
+                      }),
                     ),
                     EditorAnimatedSection(
                       activeKey: searchMode,
@@ -480,7 +580,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
                       label: _RuleEditorText.chapterRuleType,
                       value: chapterMode,
                       segments: _ruleModeSegments,
-                      onChanged: (value) => setState(() => chapterMode = value),
+                      onChanged: (value) => setState(() {
+                        chapterMode = value;
+                        _dirty = true;
+                      }),
                     ),
                     EditorAnimatedSection(
                       activeKey: chapterMode,
@@ -502,6 +605,8 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
       ),
       floatingActionButton: GlassFab.extended(
         onTap: () async {
+          // 每次保存前清空旧字段错误，重新按本次输入记录。
+          _fieldErrors.clear();
           // 保存前对激活模式的 XPath 字段做校验（P10/N：R2 挪位）：
           // 校验只挂保存动作——测试页入口（上方虫子图标）不校验空值，
           // 支持「先填搜索段、测试通过后再补选集」的分段迭代流；
@@ -521,11 +626,14 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
             _showEditorError(error);
             return;
           }
+          // 保存成功：清脏标记，返回不被「未保存拦截」挡住。
+          _dirty = false;
           if (!context.mounted) return;
           context.pop();
         },
         icon: Icons.save_rounded,
         label: _RuleEditorText.save,
+      ),
       ),
     );
   }
@@ -542,14 +650,20 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           title: const Text(_RuleEditorText.legacyParser),
           subtitle: const Text(_RuleEditorText.legacyParserDesc),
           value: useLegacyParser,
-          onChanged: (value) => setState(() => useLegacyParser = value),
+          onChanged: (value) => setState(() {
+            useLegacyParser = value;
+            _dirty = true;
+          }),
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text(_RuleEditorText.adBlocker),
           subtitle: const Text(_RuleEditorText.adBlockerDesc),
           value: adBlocker,
-          onChanged: (value) => setState(() => adBlocker = value),
+          onChanged: (value) => setState(() {
+            adBlocker = value;
+            _dirty = true;
+          }),
         ),
         const EditorSubheader(label: _RuleEditorText.groupNetwork),
         EditorTextField(
@@ -570,7 +684,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
             title: const Text(_RuleEditorText.antiCrawlerEnable),
             subtitle: const Text(_RuleEditorText.antiCrawlerEnableDesc),
             value: antiCrawlerEnabled,
-            onChanged: (value) => setState(() => antiCrawlerEnabled = value),
+            onChanged: (value) => setState(() {
+              antiCrawlerEnabled = value;
+              _dirty = true;
+            }),
           ),
           EditorAnimatedSection(
             activeKey: antiCrawlerEnabled,
@@ -608,7 +725,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
               label: Text(_RuleEditorText.captchaTypeScript),
             ),
           ],
-          onChanged: (value) => setState(() => captchaType = value),
+          onChanged: (value) => setState(() {
+            captchaType = value;
+            _dirty = true;
+          }),
           description: (value) => switch (value) {
             CaptchaType.imageCaptcha => _RuleEditorText.captchaTypeImageDesc,
             CaptchaType.autoClickButton =>
@@ -635,7 +755,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
               label: Text(_RuleEditorText.captchaDetectRegex),
             ),
           ],
-          onChanged: (value) => setState(() => captchaDetectType = value),
+          onChanged: (value) => setState(() {
+            captchaDetectType = value;
+            _dirty = true;
+          }),
           description: (_) => _RuleEditorText.captchaDetectTypeDesc,
         ),
         EditorTextField(
@@ -697,7 +820,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           label: _RuleEditorText.searchMethod,
           value: usePost ? 'POST' : 'GET',
           segments: _methodSegments,
-          onChanged: (value) => setState(() => usePost = value == 'POST'),
+          onChanged: (value) => setState(() {
+            usePost = value == 'POST';
+            _dirty = true;
+          }),
         ),
         EditorTextField(
           controller: searchURLController,
@@ -733,7 +859,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           label: _RuleEditorText.searchMethod,
           value: searchApiMethod,
           segments: _methodSegments,
-          onChanged: (value) => setState(() => searchApiMethod = value),
+          onChanged: (value) => setState(() {
+            searchApiMethod = value;
+            _dirty = true;
+          }),
         ),
         EditorTextField(
           controller: searchApiURLController,
@@ -742,23 +871,29 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
         EditorTextField(
           controller: searchApiHeadersController,
           label: _RuleEditorText.searchHeaders,
+          errorText: _fieldErrors[searchApiHeadersController],
           maxLines: 4,
         ),
         EditorTextField(
           controller: searchApiQueryController,
           label: _RuleEditorText.searchQuery,
+          errorText: _fieldErrors[searchApiQueryController],
           maxLines: 4,
         ),
         EditorSegmentedField<String>(
           label: _RuleEditorText.searchBodyType,
           value: searchApiBodyType,
           segments: _bodyTypeSegments,
-          onChanged: (value) => setState(() => searchApiBodyType = value),
+          onChanged: (value) => setState(() {
+            searchApiBodyType = value;
+            _dirty = true;
+          }),
         ),
         if (searchApiBodyType != ApiBodyType.none)
           EditorTextField(
             controller: searchApiBodyController,
             label: _RuleEditorText.searchBody,
+            errorText: _fieldErrors[searchApiBodyController],
             maxLines: 5,
           ),
         EditorTextField(
@@ -780,7 +915,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           label: _RuleEditorText.chapterMethod,
           value: chapterApiMethod,
           segments: _methodSegments,
-          onChanged: (value) => setState(() => chapterApiMethod = value),
+          onChanged: (value) => setState(() {
+            chapterApiMethod = value;
+            _dirty = true;
+          }),
         ),
         EditorTextField(
           controller: chapterApiURLController,
@@ -789,23 +927,29 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
         EditorTextField(
           controller: chapterApiHeadersController,
           label: _RuleEditorText.chapterHeaders,
+          errorText: _fieldErrors[chapterApiHeadersController],
           maxLines: 4,
         ),
         EditorTextField(
           controller: chapterApiQueryController,
           label: _RuleEditorText.chapterQuery,
+          errorText: _fieldErrors[chapterApiQueryController],
           maxLines: 4,
         ),
         EditorSegmentedField<String>(
           label: _RuleEditorText.chapterBodyType,
           value: chapterApiBodyType,
           segments: _bodyTypeSegments,
-          onChanged: (value) => setState(() => chapterApiBodyType = value),
+          onChanged: (value) => setState(() {
+            chapterApiBodyType = value;
+            _dirty = true;
+          }),
         ),
         if (chapterApiBodyType != ApiBodyType.none)
           EditorTextField(
             controller: chapterApiBodyController,
             label: _RuleEditorText.chapterBody,
+            errorText: _fieldErrors[chapterApiBodyController],
             maxLines: 5,
           ),
         EditorSegmentedField<String>(
@@ -821,7 +965,10 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
               label: Text(_RuleEditorText.formatDelimited),
             ),
           ],
-          onChanged: (value) => setState(() => chapterApiFormat = value),
+          onChanged: (value) => setState(() {
+            chapterApiFormat = value;
+            _dirty = true;
+          }),
         ),
         EditorAnimatedSection(
           activeKey: chapterApiFormat,
@@ -879,6 +1026,7 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
         EditorTextField(
           controller: chapterApiVariablesController,
           label: _RuleEditorText.responseVariables,
+          errorText: _fieldErrors[chapterApiVariablesController],
           maxLines: 5,
         ),
         EditorTextField(
@@ -890,6 +1038,7 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
           controller: chapterApiPageQueryController,
           label: _RuleEditorText.playPageQuery,
           helper: _RuleEditorText.playPageQueryHelper,
+          errorText: _fieldErrors[chapterApiPageQueryController],
           maxLines: 5,
         ),
       ];
@@ -899,6 +1048,9 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   /// （XPath 空值/语法校验不在这里——只挂保存动作，见
   /// [_validateActiveXPathFields]，测试页入口需放行分段迭代。）
   Plugin? _tryBuildEditedPlugin() {
+    // 每次构建前清空旧字段错误，重新按本次输入记录
+    // （测试页入口同样走这里，坏字段也能即时回显）。
+    _fieldErrors.clear();
     try {
       return _buildEditedPlugin();
     } catch (error) {
@@ -1070,8 +1222,19 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
   ) {
     final text = controller.text.trim();
     if (text.isEmpty) return <String, dynamic>{};
-    final value = jsonDecode(text);
-    if (value is! Map) throw FormatException('$label 必须是 JSON 对象');
+    final dynamic value;
+    try {
+      value = jsonDecode(text);
+    } on FormatException catch (error) {
+      // 记录到字段级错误表，保存失败时直接回显到出错的输入框；
+      // 异常继续向上抛由 toast 兜底（校验只挂保存动作，见 P10）。
+      _fieldErrors[controller] = '$label 不是有效 JSON：${error.message}';
+      throw FormatException('$label 不是有效 JSON：${error.message}');
+    }
+    if (value is! Map) {
+      _fieldErrors[controller] = '$label 必须是 JSON 对象';
+      throw FormatException('$label 必须是 JSON 对象');
+    }
     return value.map((key, value) => MapEntry(key.toString(), value));
   }
 
@@ -1087,9 +1250,11 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
     try {
       value = jsonDecode(text);
     } on FormatException catch (error) {
+      _fieldErrors[controller] = '$label 不是有效 JSON：${error.message}';
       throw FormatException('$label 不是有效 JSON：${error.message}');
     }
     if (bodyType == ApiBodyType.form && value is! Map) {
+      _fieldErrors[controller] = '$label 在表单模式下必须是 JSON 对象';
       throw FormatException('$label 在表单模式下必须是 JSON 对象');
     }
     return value;
@@ -1097,8 +1262,9 @@ class _PluginEditorPageState extends State<PluginEditorPage> {
 
   void _showEditorError(Object error) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error.toString())),
-    );
+    // 触发重绘让 _fieldErrors 里记录的字段错误显示到对应输入框；
+    // toast 作为总兜底（与全应用统一提示通道，不再用裸 SnackBar）。
+    setState(() {});
+    MiruDialog.showToast(message: error.toString());
   }
 }

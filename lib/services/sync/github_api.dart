@@ -97,11 +97,15 @@ class GithubApi {
     required String repo,
     required String path,
   }) async {
-    final response = await _get<String>(
+    // v1.6.6 修复（B3-A1/🔴1）：改走字节通道。原 plain + utf8 编解码
+    // 往返会把 Hive 盒字节中的非法 UTF-8 序列替换/解码抛错——收藏盒
+    // 文件（二进制）下载后必然损坏，GitHub 收藏同步第二轮起永久失败。
+    // 文本文件（snapshot.json / jsonl）按字节落盘再按行读，完全兼容。
+    final response = await _get<List<int>>(
       '/repos/$owner/$repo/contents/$path',
       options: Options(
         headers: {'Accept': 'application/vnd.github.raw'},
-        responseType: ResponseType.plain,
+        responseType: ResponseType.bytes,
       ),
     );
     if (response.statusCode == 404) {
@@ -109,7 +113,7 @@ class GithubApi {
     }
     _throwIfFailed(response, '读取文件 $path');
     return GithubRemoteFile(
-      content: utf8.encode(response.data ?? ''),
+      content: Uint8List.fromList(response.data ?? const <int>[]),
       // raw 响应不带 sha；需要 sha 的写路径会单独走 headFile()。
       sha: null,
     );
@@ -260,6 +264,12 @@ class GithubApi {
   /// 获取当前 Token 持有者信息。Token 无效抛 [GithubAuthException]。
   Future<GithubUser> getUser() async {
     final response = await _get<dynamic>('/user');
+    // v1.6.6 修复（B3-A2）：限流 403/429 优先于认证语义判定，
+    // 避免把限流误报成「Token 无效」误导用户重登录。
+    final rateLimit = _rateLimitIfAny(response);
+    if (rateLimit != null) {
+      throw rateLimit;
+    }
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw GithubAuthException('Token 无效或已过期');
     }
@@ -318,6 +328,11 @@ class GithubApi {
   void _throwIfFailed(Response response, String action) {
     if (response.statusCode == null || response.statusCode! >= 400) {
       final code = response.statusCode;
+      // v1.6.6 修复（B3-A2）：限流优先于 401/403 认证语义。
+      final rateLimit = _rateLimitIfAny(response);
+      if (rateLimit != null) {
+        throw rateLimit;
+      }
       if (code == 401) {
         throw GithubAuthException('Token 无效或已过期（$action）');
       }
@@ -334,9 +349,32 @@ class GithubApi {
     }
   }
 
+  /// v1.6.6 修复（B3-A2）：限流判定（getUser 与 _throwIfFailed 共用）。
+  /// GitHub 主限流回 403 + x-ratelimit-remaining=0；二级限流回
+  /// 429/403 + retry-after。此前 403 一律按 Token 无效处理。
+  static GithubRateLimitException? _rateLimitIfAny(Response response) {
+    final code = response.statusCode;
+    if (code != 429 && code != 403) return null;
+    final retryAfter = response.headers.value('retry-after');
+    final remaining = response.headers.value('x-ratelimit-remaining');
+    final isRateLimit = code == 429 ||
+        (code == 403 && (remaining == '0' || retryAfter != null));
+    if (!isRateLimit) return null;
+    return GithubRateLimitException(
+      '触发 GitHub 限流',
+      retryAfterSeconds: int.tryParse(retryAfter ?? '') ?? 30,
+    );
+  }
+
   String _extractMessage(Object? data) {
     if (data is Map && data['message'] is String) {
       return data['message'] as String;
+    }
+    // v1.6.6 修复（B3-A1）：readFile 走字节通道后错误体也是原始字节，
+    // 解码并截断，避免文案退化为字节列表 toString。
+    if (data is Uint8List) {
+      final text = utf8.decode(data, allowMalformed: true).trim();
+      return text.length > 200 ? text.substring(0, 200) : text;
     }
     return data?.toString() ?? '';
   }
@@ -394,6 +432,19 @@ class GithubAuthException implements Exception {
   String toString() => message;
 }
 
+/// 触发 GitHub 限流（429 或 403 + 限流响应头）。
+/// v1.6.6（B3-A2）：与认证失败区分，避免误导用户重新登录。
+class GithubRateLimitException implements Exception {
+  GithubRateLimitException(this.message, {this.retryAfterSeconds = 30});
+  final String message;
+
+  /// 服务端建议的重试等待秒数。
+  final int retryAfterSeconds;
+
+  @override
+  String toString() => message;
+}
+
 /// 乐观锁冲突（sha 过期）。
 class GithubConflictException implements Exception {
   GithubConflictException(this.message);
@@ -427,6 +478,11 @@ String describeGithubError(Object error) {
   }
   if (error is GithubAuthException) {
     return error.message;
+  }
+  // v1.6.6 修复（B3-A2）：限流给出可等待重试的文案，不再被归并为
+  // 认证/未知错误。
+  if (error is GithubRateLimitException) {
+    return '${error.message}，请在 ${error.retryAfterSeconds} 秒后重试';
   }
   if (error is GithubConflictException) {
     return '${error.message}，请稍后重试';

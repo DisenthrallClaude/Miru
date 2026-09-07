@@ -116,7 +116,13 @@ class HybridVideoSourceService implements IVideoSourceService {
       final verdict = !force &&
               await _cache.isFresh(episodeUrl, freshEntryAge)
           ? _ProbeVerdict.alive
-          : await _probe(cached.url, headers);
+          // v1.6.6 修复（B1-🔴2）：缓存命中探测带上解析层确认的
+          // referer（与 fast 层 _firstAliveCandidate 同款写法）——
+          // 否则防盗链 CDN 探测 403 判死，好缓存被误清。
+          : await _probe(cached.url, {
+              ...headers,
+              ...cached.playbackHeaders,
+            });
       if (verdict != _ProbeVerdict.dead) {
         MiruLogger().i(
             'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
@@ -151,6 +157,11 @@ class HybridVideoSourceService implements IVideoSourceService {
             ),
       },
       hardDeadline: hardDeadline,
+      // v1.6.6 修复（B1-🟡9）：硬上限/取消抛上层异常体系（而非裸
+      // TimeoutException），video_controller/download_controller 的
+      // 特判分支（超时文案/取消不计插件失败）得以命中。
+      timeoutError: () => VideoSourceTimeoutException(hardDeadline),
+      cancelledError: () => const VideoSourceCancelledException(),
       onTrace: (trace) {
         final lines = trace.export().trim().split('\n');
         if (lines.isNotEmpty) {
@@ -291,7 +302,15 @@ class HybridVideoSourceService implements IVideoSourceService {
     final needsConfirm =
         !FastVideoSourceResolverCandidateProbe.isLikelyMediaUrl(
             cloudResult.url);
-    final verdict = await _probe(cloudResult.url, headers,
+    // v1.6.6 修复（B1-🔴2）：云端结果探测须合入 Worker 确认的
+    // referer（cloudResult.playbackHeaders，fast 层同款写法）——否则
+    // 插件未声明 referer 的站点探测 403 判死，有效云端结果被丢弃
+    // 并误写 5min 负缓存。
+    final probeHeaders = <String, String>{
+      ...headers,
+      ...cloudResult.playbackHeaders,
+    };
+    final verdict = await _probe(cloudResult.url, probeHeaders,
         needsPositiveConfirm: needsConfirm);
     if (verdict == _ProbeVerdict.dead) {
       trace.record(ResolveStage.cloud, 'dead', 'probe rejected');
@@ -588,8 +607,12 @@ class HybridVideoSourceService implements IVideoSourceService {
       }
       final response = await request.close().timeout(
           probeTimeout,
-          onTimeout: () =>
-              throw TimeoutException('probe head: $url', probeTimeout));
+          onTimeout: () {
+        // v1.6.6 修复（B1-🟡4）：超时必须 abort 底层请求——
+        // 否则「连上但永不回响应头」的源站留下永久悬挂 socket。
+        request.abort();
+        throw TimeoutException('probe head: $url', probeTimeout);
+      });
       final status = response.statusCode;
 
       if (status >= 200 && status < 300) {
@@ -601,9 +624,13 @@ class HybridVideoSourceService implements IVideoSourceService {
             needsPositiveConfirm: needsPositiveConfirm);
       }
       if (status == 403 || status == 404 || status == 410 || status == 451) {
+        // v1.6.6 修复（B3-D13）：非 2xx 响应体不消费则连接不归还共享池
+        //（maxConnectionsPerHost=6 被死链探测打满后同 host 假死）。
+        unawaited(_discardResponse(response));
         return _ProbeVerdict.dead;
       }
-      // 401/429/5xx 等：不确定，按 §1.2 规则处理
+      // 401/429/5xx 等：不确定，按 §1.2 规则处理（同样归还连接）
+      unawaited(_discardResponse(response));
       return _uncertain(needsPositiveConfirm);
     } catch (_) {
       return _uncertain(needsPositiveConfirm);
@@ -614,6 +641,14 @@ class HybridVideoSourceService implements IVideoSourceService {
     // needsPositiveConfirm：unknown 视同 dead（无媒体信号的 URL 必须
     // 拿到正向确认才允许进缓存）；带扩展名候选保持 unknown 放行。
     return needsPositiveConfirm ? _ProbeVerdict.dead : _ProbeVerdict.unknown;
+  }
+
+  /// v1.6.6 修复（B3-D13）：非 2xx 探测响应统一 drain（带 3s 兜底）。
+  /// 归还共享池连接配额；drain 失败即销毁连接，同样释放配额。
+  Future<void> _discardResponse(HttpClientResponse response) async {
+    try {
+      await response.drain<void>().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   /// HLS 探测：读全量清单（封顶 64KB）→ 校验 #EXTM3U → seed 代理。

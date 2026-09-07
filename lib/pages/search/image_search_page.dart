@@ -76,9 +76,9 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
     final imageBytes = await imageFile.length();
     if (imageBytes > maxImageBytes) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('图片大小不能超过 25MB')),
-      );
+      // 统一走全局 toast 通道（同页其余提示都是 MiruDialog.showToast，
+      // 唯独这条裸 SnackBar，样式与时长表现不一致）。
+      MiruDialog.showToast(message: '图片大小不能超过 25MB，请压缩后重试');
       return;
     }
 
@@ -219,7 +219,7 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
                           : const Icon(Icons.image_search_rounded),
                       label: Text(
                         _searchPageController.isImageSearching
-                            ? '搜索中...'
+                            ? '搜索中…'
                             : '开始搜索',
                         style: const TextStyle(fontSize: 16),
                       ),
@@ -457,7 +457,7 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        '加载中...',
+                        '加载中…',
                         style: textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
@@ -681,12 +681,12 @@ class _ImageSearchPageState extends State<ImageSearchPage> {
                       _buildInfoLine(
                         textTheme,
                         colorScheme,
-                        '相似度: ${formatTraceSimilarity(result.similarity)}',
+                        '相似度：${formatTraceSimilarity(result.similarity)}',
                       ),
                       _buildInfoLine(
                         textTheme,
                         colorScheme,
-                        '时间: ${durationToString(Duration(seconds: (result.from ?? 0).floor()))} - ${durationToString(Duration(seconds: (result.to ?? 0).floor()))}',
+                        '时间：${durationToString(Duration(seconds: (result.from ?? 0).floor()))} - ${durationToString(Duration(seconds: (result.to ?? 0).floor()))}',
                       ),
                     ],
                   ),

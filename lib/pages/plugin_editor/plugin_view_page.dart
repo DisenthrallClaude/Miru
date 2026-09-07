@@ -6,6 +6,8 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/card/rule_card.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
+import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/plugins/plugins.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
@@ -210,43 +212,26 @@ class _PluginViewPageState extends State<PluginViewPage> {
             IconButton(
               onPressed: selectedNames.isEmpty
                   ? null
-                  : () {
-                      MiruDialog.show(
-                        builder: (context) => AlertDialog(
-                          title: const Text('删除规则'),
-                          content:
-                              Text('确定要删除选中的 ${selectedNames.length} 条规则吗？'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => MiruDialog.dismiss(),
-                              child: Text(
-                                '取消',
-                                style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.outline),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                try {
-                                  await pluginsController
-                                      .removePlugins(selectedNames);
-                                } catch (_) {
-                                  MiruDialog.showToast(message: '删除规则失败');
-                                  return;
-                                }
-                                if (!mounted) return;
-                                setState(() {
-                                  isMultiSelectMode = false;
-                                  selectedNames.clear();
-                                });
-                                MiruDialog.dismiss();
-                              },
-                              child: const Text('删除'),
-                            ),
-                          ],
-                        ),
+                  : () async {
+                      // 统一危险确认样式（批量删除确认键标 error 色）。
+                      final confirmed = await showDestructiveConfirm(
+                        context,
+                        title: '删除规则',
+                        message: '确定要删除选中的 ${selectedNames.length} 条规则吗？',
                       );
+                      if (!confirmed) return;
+                      try {
+                        await pluginsController
+                            .removePlugins(selectedNames);
+                      } catch (_) {
+                        MiruDialog.showToast(message: '删除规则失败');
+                        return;
+                      }
+                      if (!mounted) return;
+                      setState(() {
+                        isMultiSelectMode = false;
+                        selectedNames.clear();
+                      });
                     },
               icon: const Icon(Icons.delete),
             ),
@@ -269,8 +254,13 @@ class _PluginViewPageState extends State<PluginViewPage> {
         ],
         body: Observer(builder: (context) {
           return pluginsController.pluginList.isEmpty
+              // 空态归入全应用统一体系（图标 + 标题 + 居中），
+              // 首启新用户看到的第一个空列表不再是裸文本颜文字。
               ? const Center(
-                  child: Text('啊咧（⊙.⊙） 没有可用规则的说'),
+                  child: GeneralEmptyState(
+                    icon: Icons.extension_rounded,
+                    title: '还没有可用规则',
+                  ),
                 )
               : Builder(builder: (context) {
                   final colorScheme = Theme.of(context).colorScheme;
@@ -532,6 +522,14 @@ class _PluginViewPageState extends State<PluginViewPage> {
         MenuItemButton(
           requestFocusOnHover: false,
           onPressed: () async {
+            // 单删也走确认（批量删反而有确认）：规则无回收站，
+            // 菜单误触即删只能重装。
+            final confirmed = await showDestructiveConfirm(
+              context,
+              title: '删除规则',
+              message: '删除后需从规则仓库重新安装「${plugin.name}」。确定删除吗？',
+            );
+            if (!confirmed) return;
             try {
               await pluginsController.removePlugin(plugin);
             } catch (_) {

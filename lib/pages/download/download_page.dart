@@ -142,8 +142,18 @@ class _DownloadPageState extends State<DownloadPage> {
           episode.episodeNumber,
         );
         final speedText = speed > 0 ? ' · ${formatSpeed(speed)}' : '';
+        // 剩余时间：速度与总字节都已知时才展示，避免「剩余 --:--」。
+        // 模型只存 progressPercent，剩余字节由总量反推。
+        final remainingText = (speed > 0 && episode.totalBytes > 0)
+            ? ' · 剩余 ${durationToString(Duration(
+                seconds: (episode.totalBytes * (1 - episode.progressPercent) /
+                        speed)
+                    .ceil(),
+              ))}'
+            : '';
         return '${(episode.progressPercent * 100).toStringAsFixed(0)}% · '
-            '${episode.downloadedSegments}/${episode.totalSegments} 分片$speedText';
+            '${episode.downloadedSegments}/${episode.totalSegments} 分片'
+            '$speedText$remainingText';
       case DownloadStatus.failed:
         return episode.errorMessage.isNotEmpty ? episode.errorMessage : '下载失败';
       case DownloadStatus.paused:
@@ -169,7 +179,6 @@ class _DownloadPageState extends State<DownloadPage> {
               size: 20, color: colorScheme.primary),
           onPressed: () => _playEpisode(record, episode),
           tooltip: '播放',
-          visualDensity: VisualDensity.compact,
         ));
         break;
       case DownloadStatus.downloading:
@@ -181,7 +190,6 @@ class _DownloadPageState extends State<DownloadPage> {
             episode.episodeNumber,
           ),
           tooltip: '暂停',
-          visualDensity: VisualDensity.compact,
         ));
         break;
       case DownloadStatus.paused:
@@ -193,7 +201,6 @@ class _DownloadPageState extends State<DownloadPage> {
             episodeNumber: episode.episodeNumber,
           ),
           tooltip: '继续',
-          visualDensity: VisualDensity.compact,
         ));
         break;
       case DownloadStatus.failed:
@@ -205,7 +212,6 @@ class _DownloadPageState extends State<DownloadPage> {
             episodeNumber: episode.episodeNumber,
           ),
           tooltip: '重试',
-          visualDensity: VisualDensity.compact,
         ));
         break;
       case DownloadStatus.pending:
@@ -221,7 +227,6 @@ class _DownloadPageState extends State<DownloadPage> {
             MiruDialog.showToast(message: '已插队优先下载');
           },
           tooltip: '优先下载',
-          visualDensity: VisualDensity.compact,
         ));
         break;
       default:
@@ -229,11 +234,10 @@ class _DownloadPageState extends State<DownloadPage> {
     }
 
     buttons.add(IconButton(
-      icon: Icon(Icons.delete_outline,
+      icon: Icon(Icons.delete_outline_rounded,
           size: 20, color: colorScheme.onSurfaceVariant),
       onPressed: () => _confirmDeleteEpisode(record, episode),
       tooltip: '删除',
-      visualDensity: VisualDensity.compact,
     ));
 
     return buttons;

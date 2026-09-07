@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:miru/services/fonts/custom_font_service.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/settings/theme_provider.dart';
@@ -259,11 +260,18 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                     useSystemFont = value ?? !useSystemFont;
                     await GStorage.putSetting(
                         SettingsKeys.useSystemFont, useSystemFont);
+                    if (useSystemFont) {
+                      // v1.6.4 回归修复：此前 enabled 条件写成了
+                      // currentFontFamily == null，导致默认安装（内置思源宋体）
+                      // 下开关永久禁用、系统字体这一级不可达。现在开关始终
+                      // 可用，开启时主动取消自定义字体激活，避免三级仲裁
+                      // （自定义 > 系统 > 内置）让开关「看似无效」。
+                      await CustomFontService.instance.deactivate();
+                    }
                     _onFontChanged();
                   },
                   title: Text('使用系统字体'),
-                  description: Text('未自定义且开启时使用系统字体，关闭则使用内置思源宋体'),
-                  enabled: themeProvider.currentFontFamily == null,
+                  description: Text('开启后使用系统字体，关闭则使用内置思源宋体'),
                   initialValue: useSystemFont,
                 ),
               ],
@@ -271,7 +279,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   '字体优先级：自定义字体 > 系统字体 > 内置思源宋体。'
-                  '激活自定义字体后本开关暂不生效，取消自定义字体即恢复。',
+                  '开启系统字体会取消当前自定义字体，取消自定义字体即恢复。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.5,

@@ -7,6 +7,7 @@ import 'package:miru/pages/player/player_adjustment_hud.dart';
 import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 import 'package:miru/pages/player/controller/player_super_resolution.dart';
 import 'package:miru/pages/player/player_panel_hold.dart';
+import 'package:miru/pages/player/player_pointer_interaction.dart';
 import 'package:miru/services/player/pip_utils.dart';
 import 'package:miru/pages/video/video_controller.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
@@ -42,6 +43,7 @@ class SmallestPlayerItemPanel extends StatefulWidget {
     required this.showVideoInfo,
     required this.showSyncPlayPanel,
     required this.pauseForTimedShutdown,
+    required this.restartAutoHideTimer,
     this.disableAnimations = false,
   });
 
@@ -63,6 +65,9 @@ class SmallestPlayerItemPanel extends StatefulWidget {
   final void Function() showVideoInfo;
   final void Function() showSyncPlayPanel;
   final VoidCallback pauseForTimedShutdown;
+
+  /// 触屏点按控制栏时重启 4s 自动隐藏计时（面板会在连续操作中突然滑走）。
+  final VoidCallback restartAutoHideTimer;
   final bool disableAnimations;
 
   @override
@@ -200,7 +205,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
             : () {
                 widget.handleDanmaku();
               },
-        tooltip: danmakuLoading ? '弹幕加载中...' : (danmakuOn ? '关闭弹幕' : '打开弹幕'),
+        tooltip: danmakuLoading ? '弹幕加载中…' : (danmakuOn ? '关闭弹幕' : '打开弹幕'),
       );
     });
   }
@@ -229,8 +234,8 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        AnimatedPositioned(
-          duration: const Duration(seconds: 1),
+        // 位置恒定的层不用 AnimatedPositioned（1s 动画是误用残留）。
+        Positioned(
           top: 0,
           left: 0,
           right: 0,
@@ -273,8 +278,7 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
             );
           }),
         ),
-        AnimatedPositioned(
-          duration: const Duration(seconds: 1),
+        Positioned(
           bottom: 0,
           left: 0,
           right: 0,
@@ -370,15 +374,20 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
           left: 0,
           right: 0,
           child: Observer(builder: (context) {
-            return Visibility(
-              visible: !playerController.panel.lockPanel &&
-                  (widget.disableAnimations
-                      ? playerController.panel.showVideoController
-                      : true),
-              child: widget.disableAnimations
-                  ? topControlWidget
-                  : SlideTransition(
-                      position: topOffsetAnimation, child: topControlWidget),
+            // 触屏点按控制栏即重启 4s 自动隐藏计时，避免面板在连续
+            // 操作中滑走（桌面 hover 语义不受影响）。
+            return Listener(
+              onPointerDown: (_) => widget.restartAutoHideTimer(),
+              child: Visibility(
+                visible: !playerController.panel.lockPanel &&
+                    (widget.disableAnimations
+                        ? playerController.panel.showVideoController
+                        : true),
+                child: widget.disableAnimations
+                    ? topControlWidget
+                    : SlideTransition(
+                        position: topOffsetAnimation, child: topControlWidget),
+              ),
             );
           }),
         ),
@@ -387,16 +396,19 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
           left: 0,
           right: 0,
           child: Observer(builder: (context) {
-            return Visibility(
-              visible: !playerController.panel.lockPanel &&
-                  (widget.disableAnimations
-                      ? playerController.panel.showVideoController
-                      : true),
-              child: widget.disableAnimations
-                  ? bottomControlWidget
-                  : SlideTransition(
-                      position: bottomOffsetAnimation,
-                      child: bottomControlWidget),
+            return Listener(
+              onPointerDown: (_) => widget.restartAutoHideTimer(),
+              child: Visibility(
+                visible: !playerController.panel.lockPanel &&
+                    (widget.disableAnimations
+                        ? playerController.panel.showVideoController
+                        : true),
+                child: widget.disableAnimations
+                    ? bottomControlWidget
+                    : SlideTransition(
+                        position: bottomOffsetAnimation,
+                        child: bottomControlWidget),
+              ),
             );
           }),
         ),
@@ -421,29 +433,47 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
         // tick rebuilds only the bar and time text, not the whole bottom bar.
         Expanded(
           child: Observer(builder: (context) {
-            return ProgressBar(
-              thumbRadius: 8,
-              thumbGlowRadius: 18,
-              timeLabelLocation: TimeLabelLocation.none,
-              progress: playerController.playback.currentPosition,
-              buffered: playerController.playback.buffer,
-              total: playerController.playback.duration,
-              onSeek: widget.handleProgressBarSeek,
-              onDragStart: (_) => widget.handleProgressBarDragStart(),
-              onDragUpdate: (details) => playerController.seeking
-                  .updateInteractiveSeek(details.timeStamp),
-            );
+            return Builder(builder: (barContext) {
+              return ProgressBar(
+                thumbRadius: 8,
+                thumbGlowRadius: 18,
+                timeLabelLocation: TimeLabelLocation.none,
+                progress: playerController.playback.currentPosition,
+                buffered: playerController.playback.buffer,
+                total: playerController.playback.duration,
+                onSeek: widget.handleProgressBarSeek,
+                onDragStart: (_) => widget.handleProgressBarDragStart(),
+                // 拖动中的实时目标按拇指几何位置换算（见
+                // thumbDragPositionToDuration 的说明），不再依赖语义
+                // 易误读的 details.timeStamp。
+                onDragUpdate: (details) {
+                  final target = thumbDragPositionToDuration(
+                    barContext,
+                    details.localPosition,
+                    playerController.playback.duration,
+                  );
+                  if (target != null) {
+                    playerController.seeking.updateInteractiveSeek(target);
+                  }
+                },
+              );
+            });
           }),
         ),
         Observer(builder: (context) {
-          return Text(
-            "    ${durationToString(playerController.playback.currentPosition)} / ${durationToString(playerController.playback.duration)}",
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12.0,
-              fontFeatures: [
-                FontFeature.tabularFigures(),
-              ],
+          return Padding(
+            // 原先用 "    " 全角空格伪 padding——空格宽度随字号缩放，
+            // 放大字体下间距失真，换真实 EdgeInsets。
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              "${durationToString(playerController.playback.currentPosition)} / ${durationToString(playerController.playback.duration)}",
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12.0,
+                fontFeatures: [
+                  FontFeature.tabularFigures(),
+                ],
+              ),
             ),
           );
         }),
@@ -458,7 +488,9 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
                   widget.handleFullscreen();
                 },
               )
-            : const Text('    '),
+            // PiP 占位：与右侧 IconButton 同宽，保持底栏行平衡（原先
+            // 用 Text('    ') 空格伪宽度，同样随字号失真）。
+            : const SizedBox(width: 48),
       ],
     );
   }

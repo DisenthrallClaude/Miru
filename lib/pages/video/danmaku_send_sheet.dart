@@ -7,6 +7,9 @@ Future<String?> showMobileDanmakuInputSheet(BuildContext context) {
   return showModalBottomSheet<String>(
     context: context,
     elevation: 0,
+    // 统一补拖拽把手：全 app 的自适应 sheet 都没有把手，这个入口又
+    // 绕开了统一入口直接用原生 sheet，至少带上 Material 自带把手。
+    showDragHandle: true,
     backgroundColor: scheme.surface.withValues(alpha: 0.94),
     shape: BeveledRectangleBorder(
       side: BorderSide(color: scheme.outlineVariant, width: 0.5),
@@ -43,12 +46,17 @@ class _MobileDanmakuInputSheetState extends State<_MobileDanmakuInputSheet> {
         children: [
           Expanded(
             child: Container(
-              constraints: const BoxConstraints(maxHeight: 34),
+              // 34→64：兼容系统大字号与下方字数计数器（counter 属于
+              // InputDecoration，会占额外 ~16dp 高度）。
+              constraints: const BoxConstraints(maxHeight: 64),
               child: TextField(
                 style: const TextStyle(fontSize: 15),
                 autofocus: true,
                 textInputAction: TextInputAction.send,
                 textAlignVertical: TextAlignVertical.center,
+                // 发送侧在 video_page 里对 >100 才事后报「弹幕内容过长」，
+                // 输入时就让用户看到边界，超限事后才 toast 的体验太晚。
+                maxLength: 100,
                 onChanged: (value) => _danmakuText = value,
                 onSubmitted: _submit,
                 decoration: const InputDecoration(

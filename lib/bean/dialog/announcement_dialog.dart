@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/widget/frosted_surface.dart';
+import 'package:miru/bean/widget/glass.dart';
 import 'package:miru/modules/announcement/announcement.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -126,18 +127,22 @@ class AnnouncementDialog extends StatelessWidget {
                       const SizedBox(height: 20),
                     ],
                   ),
-                  // 关闭按钮：贴右上角，玻璃小圆片，不压封面图主体。
+                  // 关闭按钮：贴右上角，轻玻璃小圆片衬底（E2）——
+                  // 封面图顶到卡片上缘时深色封面上裸图标不可见，
+                  // 玻璃圆片给深色图标一个稳定的底。
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: IconButton(
-                      tooltip: '关闭',
-                      onPressed: () => Navigator.of(context, rootNavigator: true)
-                          .pop(),
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        size: 20,
+                    child: GlassSurface(
+                      level: GlassLevel.light,
+                      borderRadius: BorderRadius.circular(22),
+                      child: IconButton(
+                        tooltip: '关闭',
+                        iconSize: 18,
                         color: _inkSoft,
+                        onPressed: () =>
+                            Navigator.of(context, rootNavigator: true).pop(),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ),
                   ),

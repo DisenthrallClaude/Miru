@@ -276,7 +276,24 @@ class DownloadManager implements IDownloadManager {
     // 对齐），设置页「修改后对新开始的下载生效」的说明自此为真。
     _loadSettings();
     final key = _taskKey(request.recordKey, request.episodeNumber);
-    if (_activeTasks.containsKey(key)) return;
+    final existing = _activeTasks[key];
+    if (existing != null) {
+      if (!existing.isPaused && !existing.cancelToken.isCancelled) {
+        // 真在跑：幂等去重。
+        return;
+      }
+      // v1.6.6 修复：暂停后立刻「继续」会撞上旧任务收尾窗口（分片重试
+      // 退避最长 9s，任务要等在途 await 收尾后才从 _activeTasks 摘除），
+      // 此前 enqueue 静默 no-op，集数永久卡在 downloading 直到重启。
+      // 与 enqueuePriority 同语义：取消收尾中的旧任务并替换。
+      existing.cancelToken.cancel('superseded by re-enqueue');
+      _activeTasks.remove(key);
+      _queue.removeWhere(
+        (r) =>
+            r.recordKey == request.recordKey &&
+            r.episodeNumber == request.episodeNumber,
+      );
+    }
 
     final task = DownloadTask(
       recordKey: request.recordKey,
@@ -299,6 +316,10 @@ class DownloadManager implements IDownloadManager {
       request.episode.status = DownloadStatus.pending;
       _queue.add(request);
       _activeTasks[key] = task;
+      // v1.6.6 修复：满载降级 pending 也要通知——仓库/UI/通知栏
+      // 与内存对象三处口径一致（此前静默，UI 一直显示 downloading）。
+      _notifyProgress(
+          request.recordKey, request.episodeNumber, request.episode);
     }
   }
 
@@ -353,7 +374,9 @@ class DownloadManager implements IDownloadManager {
   Future<void> resume(DownloadRequest request) async {
     _loadSettings();
     final key = _taskKey(request.recordKey, request.episodeNumber);
-    _activeTasks.remove(key);
+    // v1.6.6 修复：先取消旧任务再重建——此前只 remove 不取消，
+    // 旧下载循环会继续跑并与新循环并发写同一集的分片。
+    _activeTasks.remove(key)?.cancelToken.cancel('superseded by resume');
 
     final task = DownloadTask(
       recordKey: request.recordKey,
@@ -460,10 +483,15 @@ class DownloadManager implements IDownloadManager {
 
       if (type == M3u8Type.master) {
         final master = M3u8Parser.parseMasterPlaylist(m3u8Content, m3u8Url);
-        final bestVariant = master.bestVariant;
-        mediaM3u8Url = bestVariant.uri;
-        mediaM3u8Content =
-            await _fetchM3u8(mediaM3u8Url, httpHeaders, task.cancelToken);
+        // v1.6.6 修复：master 无有效变体（STREAM-INF 后缺 URI 行、或
+        // 媒体清单被误判为 master）时 bestVariant 抛不可读的
+        // StateError——判空后把原清单当媒体清单回落解析。
+        final bestVariant = master.bestVariantOrDefault;
+        if (bestVariant != null) {
+          mediaM3u8Url = bestVariant.uri;
+          mediaM3u8Content =
+              await _fetchM3u8(mediaM3u8Url, httpHeaders, task.cancelToken);
+        }
       }
 
       final playlist =
@@ -498,6 +526,28 @@ class DownloadManager implements IDownloadManager {
       if (adBlockerEnabled) {
         segments = M3u8AdFilter.filterAds(segments);
       }
+
+      // v1.6.6 修复：清单指纹校验。resume 此前「按文件名信任磁盘分片」：
+      // 换线路/源站重切片/广告过滤开关变化都会让分片索引整体错位，
+      // 新旧两套分片按同名文件错位拼接产出损坏视频（旧分片数≥新数时
+      // 甚至「秒完成」产出旧内容）。指纹不一致（含旧记录的空指纹）
+      // 时丢弃整个集目录重建，代价是一次重下，正确性优先。
+      final fingerprint =
+          'm3u8|$mediaM3u8Url|ad:$adBlockerEnabled|n:${segments.length}'
+          '|f:${segments.first.uri}|l:${segments.last.uri}';
+      if (episode.playlistFingerprint != fingerprint) {
+        MiruLogger().w(
+            'DownloadManager: playlist fingerprint changed for episode ${task.episodeNumber}, rebuilding episode directory');
+        final staleDir = Directory(episodeDir);
+        if (await staleDir.exists()) {
+          await staleDir.delete(recursive: true);
+        }
+        await ensureDirectoryWritable(episodeDir);
+        episode.downloadedSegments = 0;
+        episode.progressPercent = 0.0;
+        episode.totalBytes = 0;
+      }
+      episode.playlistFingerprint = fingerprint;
 
       final keys = M3u8Parser.extractUniqueKeys(
         M3u8MediaPlaylist(
@@ -546,6 +596,11 @@ class DownloadManager implements IDownloadManager {
       episode.progressPercent = episode.totalSegments > 0
           ? episode.downloadedSegments / episode.totalSegments
           : 0.0;
+      // v1.6.6：downloadedBytes 单独记录已落盘字节；m3u8 完整大小
+      // 完成前不可知，下载中 totalBytes 为按进度估算的完整大小
+      // （完成后回写实际值），供下载页「剩余时间」计算。
+      episode.downloadedBytes = existingBytes;
+      episode.totalBytes = _estimatedTotalBytes(episode);
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
 
       final pendingIndices = <int>[];
@@ -582,9 +637,10 @@ class DownloadManager implements IDownloadManager {
           ).then((bytes) {
             sessionBytes += bytes;
             episode.downloadedSegments++;
-            episode.totalBytes = existingBytes + sessionBytes;
             episode.progressPercent =
                 episode.downloadedSegments / episode.totalSegments;
+            episode.downloadedBytes = existingBytes + sessionBytes;
+            episode.totalBytes = _estimatedTotalBytes(episode);
             _speedTrackers[key]?.update(sessionBytes);
             _notifyProgress(task.recordKey, task.episodeNumber, episode);
             completedCount++;
@@ -641,6 +697,7 @@ class DownloadManager implements IDownloadManager {
       episode.completedAt = DateTime.now();
       episode.totalBytes =
           finalVideoBytes > 0 ? finalVideoBytes : existingBytes + sessionBytes;
+      episode.downloadedBytes = episode.totalBytes;
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
 
       MiruLogger().i(
@@ -700,6 +757,20 @@ class DownloadManager implements IDownloadManager {
         existingBytes = await tmpFile.length();
       }
 
+      // v1.6.6 修复：直链同样做来源指纹校验——同集号换线路/直链变化后
+      // 重下时，旧 tmp 的字节属于另一个文件，续传拼接必然损坏；
+      // 指纹不一致（含旧记录的空指纹）时作废旧 tmp 从 0 重下。
+      final directFingerprint = 'direct|$videoUrl';
+      if (episode.playlistFingerprint != directFingerprint) {
+        episode.playlistFingerprint = directFingerprint;
+        if (existingBytes > 0) {
+          try {
+            await tmpFile.delete();
+          } catch (_) {}
+          existingBytes = 0;
+        }
+      }
+
       episode.totalSegments = 1;
       episode.downloadedSegments = 0;
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
@@ -738,15 +809,33 @@ class DownloadManager implements IDownloadManager {
       }
 
       final contentRange = response.headers.value('content-range');
+      // v1.6.6 修复：直链续传校验 206（代理层 B12 同款）。服务器忽略
+      // Range 回 200 全量时，旧 tmp 前缀作废从 0 重写——否则全量体被
+      // append 到半截文件后必然损坏；回 206 但 Content-Range 起始不
+      // 匹配 existingBytes（字节错位）同样作废续传。
+      final isPartial = response.statusCode == HttpStatus.partialContent;
+      var resumeValid = false;
+      if (useRange && isPartial) {
+        final rangeStart = _contentRangeStart(contentRange);
+        resumeValid = rangeStart != null && rangeStart == existingBytes;
+      }
+      if (useRange && !resumeValid) {
+        MiruLogger().w(
+          'DownloadManager: server rejected Range resume (status ${response.statusCode}), restarting direct download from scratch',
+        );
+        existingBytes = 0;
+        useRange = false;
+      }
       final contentLength = int.tryParse(
               response.headers.value(Headers.contentLengthHeader) ?? '') ??
           0;
       int totalSize;
-      if (contentRange != null) {
+      if (isPartial && contentRange != null) {
         final totalMatch = RegExp(r'/(\d+)').firstMatch(contentRange);
         totalSize = totalMatch != null ? int.parse(totalMatch.group(1)!) : 0;
       } else {
-        totalSize = existingBytes + contentLength;
+        // 200 全量：总长即响应体长度，不与旧字节双计。
+        totalSize = contentLength;
       }
 
       final raf = await tmpFile.open(
@@ -760,7 +849,11 @@ class DownloadManager implements IDownloadManager {
           if (task.isPaused || task.cancelToken.isCancelled) break;
           await raf.writeFrom(chunk);
           received += chunk.length;
-          episode.totalBytes = received;
+          // v1.6.6：downloadedBytes 记录已落盘字节，totalBytes 在直链
+          // 场景为已知完整大小（Content-Length/Content-Range），供下载
+          // 页「剩余时间」计算；未知时退化为已落盘字节数。
+          episode.downloadedBytes = received;
+          episode.totalBytes = totalSize > 0 ? totalSize : received;
           episode.progressPercent = totalSize > 0 ? received / totalSize : 0;
           // Update speed tracker
           _speedTrackers[key]?.update(received);
@@ -786,6 +879,7 @@ class DownloadManager implements IDownloadManager {
       episode.progressPercent = 1.0;
       episode.completedAt = DateTime.now();
       episode.totalBytes = await File(filePath).length();
+      episode.downloadedBytes = episode.totalBytes;
       _notifyProgress(task.recordKey, task.episodeNumber, episode);
 
       MiruLogger().i(
@@ -838,6 +932,27 @@ class DownloadManager implements IDownloadManager {
     final key = _taskKey(recordKey, episodeNumber);
     final speed = _speedTrackers[key]?.currentSpeed ?? 0.0;
     onProgress?.call(recordKey, episodeNumber, episode, speed);
+  }
+
+  /// 解析 Content-Range 的起始字节（"bytes N-M/T" 里的 N），
+  /// 续传前校验上游确实从请求的偏移开始（与代理层 B12 同款）。
+  int? _contentRangeStart(String? contentRange) {
+    if (contentRange == null) return null;
+    final match = RegExp(r'^bytes\s+(\d+)-').firstMatch(contentRange.trim());
+    return match == null ? null : int.parse(match.group(1)!);
+  }
+
+  /// m3u8 下载中的完整大小估算：已落盘字节 / 进度。进度为 0 或
+  /// 已完成时退化为已落盘字节数，保证 totalBytes ≥ downloadedBytes，
+  /// 「剩余时间」不会算出负数。
+  int _estimatedTotalBytes(DownloadEpisode episode) {
+    final downloaded = episode.downloadedBytes;
+    if (downloaded <= 0) return 0;
+    final progress = episode.progressPercent;
+    if (progress > 0.0 && progress < 1.0) {
+      return (downloaded / progress).round();
+    }
+    return downloaded;
   }
 
   Future<String> _fetchM3u8(

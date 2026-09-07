@@ -162,7 +162,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
                   children: [
                     Text(
                       _effectiveDownloadDirectory.isEmpty
-                          ? '正在读取默认位置...'
+                          ? '正在读取默认位置…'
                           : _effectiveDownloadDirectory,
                     ),
                     const SizedBox(height: 8),

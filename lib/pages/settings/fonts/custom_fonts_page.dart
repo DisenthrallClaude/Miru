@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/bean/settings/settings_list.dart';
 import 'package:miru/bean/settings/theme_provider.dart';
@@ -233,13 +234,16 @@ class _CustomFontsPageState extends State<CustomFontsPage> {
         children: [
           Text('已下载'),
           const SizedBox(width: 4),
-          GestureDetector(
-            onTap: () => _confirmDelete(entry),
-            child: Icon(
-              Icons.delete_outline_rounded,
-              size: 18,
-              color: scheme.outline,
-            ),
+          // 18px 图标热区仅 ~22dp，误触率高——撞到 40×40 标准
+          //（与键盘 keycap 删除同一套微操作热区）。
+          IconButton(
+            tooltip: '删除本地字体',
+            onPressed: () => _confirmDelete(entry),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            iconSize: 18,
+            color: scheme.outline,
+            icon: const Icon(Icons.delete_outline_rounded),
           ),
         ],
       );
@@ -267,27 +271,13 @@ class _CustomFontsPageState extends State<CustomFontsPage> {
   }
 
   Future<void> _confirmDelete(CustomFontEntry entry) async {
-    final confirmed = await MiruDialog.show<bool>(
-      builder: (context) => AlertDialog(
-        title: Text('删除字体'),
-        content: Text('确定删除「${entry.name}」的本地字体文件？'
-            '删除后可重新下载。'),
-        actions: [
-          TextButton(
-            onPressed: () => MiruDialog.dismiss(popWith: false),
-            child: Text(
-              '取消',
-              style: TextStyle(color: Theme.of(context).colorScheme.outline),
-            ),
-          ),
-          TextButton(
-            onPressed: () => MiruDialog.dismiss(popWith: true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+    // 统一危险确认样式（确认键 error 色，与其他删除弹窗一致）。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '删除字体',
+      message: '确定删除「${entry.name}」的本地字体文件？删除后可重新下载。',
     );
-    if (confirmed ?? false) {
+    if (confirmed) {
       await _onDelete(entry);
     }
   }

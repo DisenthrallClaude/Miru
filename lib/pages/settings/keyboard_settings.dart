@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
+import 'package:miru/bean/settings/settings_list.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
+import 'package:miru/bean/dialog/destructive_confirm.dart';
 
 /// Display group for the shortcut list. Functions missing from every group
 /// fall back to a trailing "其他" group so new shortcuts never disappear.
@@ -181,7 +183,16 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
     });
   }
 
-  void restoreDefaults() {
+  Future<void> restoreDefaults() async {
+    // 快捷键是用户长期定制的数据，一键无确认全灭不可接受
+    // （对照播放/弹幕设置的恢复默认均有确认）。
+    final confirmed = await showDestructiveConfirm(
+      context,
+      title: '恢复默认快捷键',
+      message: '将把所有按键映射重置为默认值，当前的自定义绑定不可恢复。',
+      confirmLabel: '恢复默认',
+    );
+    if (!confirmed) return;
     setState(() {
       listeningFunction = null;
       listeningIndex = null;
@@ -245,30 +256,25 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
             final handled = handleShortcutInput(rawKey);
             return handled ? KeyEventResult.handled : KeyEventResult.ignored;
           },
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1000),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      '点按按键标签，再按下新按键完成修改',
-                      style: textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+          child: SettingsList(
+            maxWidth: 1000,
+            sections: [
+              Padding(
+                // SettingsList 每个section 自带 16 水平 margin，提示行
+                // 手动对齐同一内边距。
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Center(
+                  child: Text(
+                    '点按按键标签，再按下新按键完成修改',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
               ),
-              for (final group in displayGroups)
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1000),
-                    child: _buildGroupCard(group),
-                  ),
-                ),
+              // 与设置中心其余页面同一套玻璃分组列表
+              // （此前是独立 Card，同一设置中心两种列表语言）。
+              for (final group in displayGroups) _buildGroupSection(group),
             ],
           ),
         ),
@@ -276,49 +282,19 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
     );
   }
 
-  Widget _buildGroupCard(_ShortcutGroup group) {
+  Widget _buildGroupSection(_ShortcutGroup group) {
     final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 12),
-      color: colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: colorScheme.secondaryContainer,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    group.icon,
-                    size: 18,
-                    color: colorScheme.onSecondaryContainer,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  group.title,
-                  style: textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            for (final func in group.functions) _buildShortcutRow(func),
-          ],
-        ),
+    return SettingsSection(
+      title: Row(
+        children: [
+          Icon(group.icon, size: 16, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(group.title),
+        ],
       ),
+      tiles: [
+        for (final func in group.functions) _buildShortcutRow(func),
+      ],
     );
   }
 
@@ -327,6 +303,7 @@ class _KeyboardSettingsPageState extends State<KeyboardSettingsPage> {
     final keys = shortcuts[func]!;
 
     return Padding(
+      // 行内容进玻璃分组后由外层提供水平间距，这里只留垂直呼吸。
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
@@ -409,14 +386,16 @@ class _KeyCap extends StatelessWidget {
               ),
               if (onDelete != null) ...[
                 const SizedBox(width: 4),
-                GestureDetector(
-                  onTap: onDelete,
-                  behavior: HitTestBehavior.opaque,
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 14,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                // 删除是高频微操作，此前 14px 图标热区仅 ~18dp，
+                // 手机上易误触相邻 keycap——用 IconButton 撴到 40×40。
+                IconButton(
+                  onPressed: onDelete,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                      minWidth: 40, minHeight: 40),
+                  iconSize: 14,
+                  color: colorScheme.onSurfaceVariant,
+                  icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ],
@@ -450,8 +429,9 @@ class _AddKeyButton extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           customBorder: shape,
+          // 触区撑到 ~40dp：与 keycap 删除按钮同一套微操作热区标准。
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
             child: Icon(
               Icons.add_rounded,
               size: 16,
