@@ -158,6 +158,9 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 自动换源熔断阈值。
   static const int _maxAutoFallback = 2;
 
+  /// v1.6.7（P-12 精简版）：换源 toast 的全局冷却时间戳。
+  DateTime? _lastFallbackToastAt;
+
   late Plugin currentPlugin;
 
   String _offlinePluginName = '';
@@ -496,10 +499,19 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       _autoFallbackCount++;
       final candidate = _playbackFallbacks.removeAt(0);
-      MiruDialog.showToast(
-        message:
-            '「${currentPlugin.name}」解析失败，正在尝试「${candidate.plugin.name}」',
-      );
+      // v1.6.7（P-12 精简版）：换源 toast 全局冷却 5s——换源风暴期
+      //（多源连环失败）每轮一条 toast 连发刷屏，「死循环」观感的直接
+      // 来源；动作照旧执行，只是提示节流。
+      final now = DateTime.now();
+      if (_lastFallbackToastAt == null ||
+          now.difference(_lastFallbackToastAt!) >
+              const Duration(seconds: 5)) {
+        _lastFallbackToastAt = now;
+        MiruDialog.showToast(
+          message:
+              '「${currentPlugin.name}」解析失败，正在尝试「${candidate.plugin.name}」',
+        );
+      }
       final List<Road> roads;
       try {
         roads = await candidate.plugin.queryChapterRoads(candidate.src);
@@ -813,11 +825,14 @@ abstract class _VideoPageController with Store implements Disposable {
           GStorage.getSetting(SettingsKeys.forceAdBlocker);
 
       // 解析层确认的源站头（防盗链 referer，云端/本地快速解析带回）
-      // 合并进 mpv 播放头：插件声明的头优先，解析层补齐缺失项。
-      // 之前这组头会丢——「探测可达但播放 403」的经典原因（v1.5.2）。
+      // 合并进 mpv 播放头。v1.6.7（P-8）修正优先级：插件声明头作为
+      // 基底，解析层带回的 referer/cookie 覆盖其上——与 hybrid 层
+      // _materialize 的合并方向一致（此前两层方向相反：插件硬编码的
+      // referer（常是站点首页）覆盖 webview 嗅探捕获的 CDN 真实
+      // referer，防盗链 CDN 403 →「解析成功却播不出来」→ 换源循环）。
       final mergedPlaybackHeaders = <String, String>{
-        ...source.playbackHeaders,
         ...playbackHeaders,
+        ...source.playbackHeaders,
       };
 
       final params = PlaybackInitParams(

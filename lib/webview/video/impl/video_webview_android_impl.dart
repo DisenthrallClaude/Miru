@@ -32,6 +32,11 @@ class VideoWebviewAndroidImpl
   /// 定时器是否处于暂停态（pauseTimers 后置 true）。
   bool _timersPaused = false;
 
+  /// v1.6.7（P-20）：单调递增的加载序号——用于识别「冻结任务 await
+  /// 间隙里进入了新一轮 loadUrl」的竞态，防止迟到的 pauseTimers
+  /// 冻死新页面的 JS 定时器。
+  int _loadSeq = 0;
+
   // ---------------------------------------------------------------------------
   // 初始化
   // ---------------------------------------------------------------------------
@@ -153,6 +158,9 @@ class VideoWebviewAndroidImpl
   @override
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
+    // v1.6.7（P-20）：新的一轮加载从入口即生效——在途的旧冻结任务
+    // 看到 seq 不一致会自行放弃，不会把新页面冻死。
+    _loadSeq++;
     await unloadPage();
     // 两套脚本一次性全量注入（§1.5）——不再按 useLegacyParser 翻换注入。
     // 首次注入后常驻；useLegacyParser 仅影响 JSBridgeDebug(iframe) 结果
@@ -294,6 +302,32 @@ class VideoWebviewAndroidImpl
         }
       } catch {}
 
+      // v1.6.7（P-4）：muted/volume setter 劫持。原实现只在 video 元素出现
+      // 瞬间赋一次 muted=true——播放器 JS 随后 video.muted=false /
+      // video.volume=1 即可外放（嗅探期间唯一的漏音通道）。现在 setter 一律
+      // 钉死 muted=true / volume=0：页面无论怎么复位都保持静音。嗅探成功后
+      // 页面整体 freeze（about:blank + pauseTimers），无需恢复语义。
+      try {
+        const _origMutedDesc =
+            Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+        if (_origMutedDesc && _origMutedDesc.set) {
+          Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+            set(v) { return _origMutedDesc.set.call(this, true); },
+            get() { return _origMutedDesc.get.call(this); },
+            configurable: true,
+          });
+        }
+        const _origVolDesc =
+            Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume');
+        if (_origVolDesc && _origVolDesc.set) {
+          Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+            set(v) { return _origVolDesc.set.call(this, 0); },
+            get() { return 0; },
+            configurable: true,
+          });
+        }
+      } catch {}
+
       // §1.5：createObjectURL 只记录 MSE 使用，不报 blob（blob 无 referer
       // 且无法直接播放），让网络层嗅探去抓真正的分片请求。
       try {
@@ -308,16 +342,18 @@ class VideoWebviewAndroidImpl
 
       const _observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
-          if (mutation.type === "attributes" && mutation.target.nodeName === "VIDEO") {
+          if (mutation.type === "attributes" &&
+              (mutation.target.nodeName === "VIDEO" ||
+               mutation.target.nodeName === "AUDIO")) {
             if (processVideoElement(mutation.target)) return;
             continue;
           }
           for (const node of mutation.addedNodes) {
-            if (node.nodeName === "VIDEO") {
+            if (node.nodeName === "VIDEO" || node.nodeName === "AUDIO") {
               if (processVideoElement(node)) return;
             }
             if (node.querySelectorAll) {
-              for (const video of node.querySelectorAll("video")) {
+              for (const video of node.querySelectorAll("video,audio")) {
                 if (processVideoElement(video)) return;
               }
             }
@@ -330,7 +366,7 @@ class VideoWebviewAndroidImpl
       }
       function processVideoElement(video) {
         window.flutter_inappwebview.callHandler('LogBridge', 'Scanning video element for source URL');
-        // §1.5：新出现的 video 自动静音起播——mediaPlaybackRequiresUserGesture
+        // §1.5：新出现的 video/audio 自动静音起播——mediaPlaybackRequiresUserGesture
         // 已放开，但部分播放器仍等手势；静音 play 触发其内部网络请求，
         // 嗅探成功立刻冻结页面，不会外放。
         try {
@@ -338,6 +374,11 @@ class VideoWebviewAndroidImpl
           const p = video.play();
           if (p && p.catch) p.catch(() => {});
         } catch {}
+        // v1.6.7（P-4）：<audio> 只静音起播触发网络请求，不参与上报——
+        // 站点 BGM 的 <audio> src 直接上报会污染嗅探结果（误当视频源）。
+        // 音频元素的真实媒体请求由网络层嗅探（shouldInterceptRequest）
+        // 按 URL 形态过滤捕获。
+        if (video.nodeName === 'AUDIO') return false;
         let src = video.getAttribute('src');
         if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
           _observer.disconnect();
@@ -361,7 +402,7 @@ class VideoWebviewAndroidImpl
       }
 
       function setupVideoProcessing() {
-        for (const video of document.querySelectorAll("video")) {
+        for (const video of document.querySelectorAll("video,audio")) {
           if (processVideoElement(video)) return;
         }
         _observer.observe(document.body, {
@@ -383,23 +424,65 @@ class VideoWebviewAndroidImpl
       forMainFrameOnly: false,
     ));
 
-    // ---- 4) 播放防外放 + 播放大按钮代点（§1.5）----
+    // ---- 4) 播放防外放（v1.6.7 P-4：提前到 AT_DOCUMENT_START + 补全桩）----
+    // 原实现在 AT_DOCUMENT_END 才注入：页面播放器在 document start~end
+    // 之间创建的 AudioContext 用的是原生构造器——声音从这里漏出（嗅探
+    // 最长可持续整轮解析，用户听到「明明已经加载出来了」的假象）。且原
+    // 桩不完整，ArtPlayer 等播放器探测缺失属性直接抛错，嗅探反被弄死。
+    // 新桩：①覆盖 webkitAudioContext ②补齐常用表面，播放器「以为初始化
+    // 成功」而真实发声通道全被截断，且不会炸播放器。
     const String antiNoiseScript = """
       window.flutter_inappwebview.callHandler('LogBridge', 'AntiNoise script loaded: ' + window.location.href);
-      // 防外放：某些第三方播放器初始化 AudioContext 试音。
       try {
-        const _AC = window.AudioContext;
-        if (_AC) {
-          window.AudioContext = function() {
-            return { resume(){}, close(){}, createGain(){ return { connect(){} }; },
-                     createBufferSource(){ return { connect(){}, start(){} }; },
-                     destination: {} };
+        const _stubNode = () => ({
+          connect() {}, disconnect() {}, start() {}, stop() {},
+          gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {} },
+        });
+        const _stubCtx = function () {
+          return {
+            state: 'suspended', sampleRate: 48000, currentTime: 0,
+            destination: {},
+            resume() { return Promise.resolve(); },
+            close() { return Promise.resolve(); },
+            suspend() { return Promise.resolve(); },
+            createGain() { return _stubNode(); },
+            createBufferSource() { const n = _stubNode(); n.buffer = null; return n; },
+            createMediaElementSource() { return _stubNode(); },
+            createMediaStreamSource() { return _stubNode(); },
+            createOscillator() {
+              const n = _stubNode(); n.frequency = { value: 0 }; n.type = 'sine'; return n;
+            },
+            createDynamicsCompressor() {
+              return _stubNode();
+            },
+            createAnalyser() {
+              const n = _stubNode(); n.frequencyBinCount = 0;
+              n.getByteFrequencyData = () => {};
+              n.getByteTimeDomainData = () => {};
+              return n;
+            },
+            decodeAudioData() {
+              return Promise.resolve({
+                duration: 0, numberOfChannels: 0, sampleRate: 48000,
+              });
+            },
           };
-          window.AudioContext.prototype = _AC.prototype;
-        }
+        };
+        window.AudioContext = _stubCtx;
+        if (window.webkitAudioContext) window.webkitAudioContext = _stubCtx;
       } catch {}
-      // 延迟 800ms 点一次播放大按钮：大量 JS 站的播放器把真实网络请求
-      // 藏在「用户点播放」之后，代点后请求才发出。
+    """;
+    scripts.add(UserScript(
+      source: antiNoiseScript,
+      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      forMainFrameOnly: false,
+    ));
+
+    // ---- 4b) 播放大按钮代点（§1.5，保留原时序：DOM 就绪后 800ms）----
+    // 大量 JS 站的播放器把真实网络请求藏在「用户点播放」之后，代点后
+    // 请求才发出。注：代点可能触发播放器取消静音——已被 muted/volume
+    // setter 劫持（脚本 3）钉死，不会外放。
+    const String playButtonProxyScript = """
       setTimeout(() => {
         try {
           document.querySelectorAll(
@@ -409,7 +492,7 @@ class VideoWebviewAndroidImpl
       }, 800);
     """;
     scripts.add(UserScript(
-      source: antiNoiseScript,
+      source: playButtonProxyScript,
       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
       forMainFrameOnly: false,
     ));
@@ -545,13 +628,21 @@ class VideoWebviewAndroidImpl
   /// 嗅探成功后冻结页面（§1.5）：转空白页 + 暂停 JS 定时器，
   /// 页面不再继续烧流量/CPU。下次 [loadUrl] 会 [resumeTimers]。
   void _freezeAfterSniffSuccess() {
-    unawaited(_freezeAfterSniffSuccessAsync());
+    // v1.6.7（P-20）：记录发起时的加载序号——若冻结任务的 await 间隙里
+    // 有新一轮 loadUrl 进来，放弃本轮冻结（迟到的 pauseTimers 会把新
+    // 页面的 JS 定时器全部冻死，毒化整轮嗅探）。
+    final seq = _loadSeq;
+    unawaited(_freezeAfterSniffSuccessAsync(seq));
   }
 
-  Future<void> _freezeAfterSniffSuccessAsync() async {
+  Future<void> _freezeAfterSniffSuccessAsync(int seq) async {
     try {
       await unloadPage();
     } catch (_) {}
+    if (seq != _loadSeq) {
+      // 有更新一轮 loadUrl 在途：本页面即将被替换，冻结无意义且有害。
+      return;
+    }
     try {
       await webviewController?.pauseTimers();
       _timersPaused = true;

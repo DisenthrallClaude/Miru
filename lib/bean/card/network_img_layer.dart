@@ -193,10 +193,12 @@ class _NetworkImgLayerState extends State<NetworkImgLayer> {
       height: widget.height,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
+        // v1.6.7（F-5）：onInverseSurface 是深色块上的前景色，用在这里
+        // 语义反了且浅色下近白→占位块完全不可见。改 onSurface 低透明度。
         color: Theme.of(context)
             .colorScheme
-            .onInverseSurface
-            .withValues(alpha: 0.4),
+            .onSurface
+            .withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(widget.type == 'avatar'
             ? 50
             : widget.type == 'emote'
@@ -230,7 +232,8 @@ class _NetworkImgLayerState extends State<NetworkImgLayer> {
       height: widget.height,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: theme.colorScheme.onInverseSurface.withValues(alpha: 0.4),
+        // v1.6.7（F-5）：同上，语义修正 + 浅色可见。
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(widget.type == 'avatar'
             ? 50
             : widget.type == 'emote'
@@ -253,13 +256,15 @@ class _NetworkImgLayerState extends State<NetworkImgLayer> {
                     Icon(
                       Icons.image_not_supported_outlined,
                       size: 22,
-                      color: theme.colorScheme.outline,
+                      // v1.6.7（F-5）：outline 色在浅色底上对比 ≈1.6:1，
+                      // 弱网用户几乎读不到重试提示；onSurfaceVariant ≥ 4.5:1。
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '加载失败 点击重试',
                       style: theme.textTheme.labelSmall
-                          ?.copyWith(color: theme.colorScheme.outline),
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),

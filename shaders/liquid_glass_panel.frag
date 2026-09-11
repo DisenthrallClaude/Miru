@@ -1,13 +1,15 @@
 // Liquid Glass — rounded-rect glass panel as a REAL backdrop filter
-// (Impeller path). v1.6.4; v1.6.6 dual-pass frosted architecture.
+// (Impeller path). v1.6.4; v1.6.6 dual-pass; v1.6.7 self-contained RGB frost.
 //
-// v1.6.6: the Dart side now stacks TWO BackdropFilters (liquid_glass_easy
-// architecture): pass 1 = engine ImageFilter.blur(frostSigma) which blurs
-// ALL channels of the backdrop; pass 2 = THIS shader, whose `image` sampler
-// receives the ALREADY-BLURRED backdrop. Background is frosted BEFORE it
-// is refracted. The in-shader 13-tap kernel below is therefore a secondary
-// tuning knob (blur uniform, default 0 = off) — the primary frost comes
-// from the engine pass.
+// v1.6.7: the dual-BackpropFilter chain (engine blur pass + this shader)
+// is REPLACED by a single BackdropFilter(ImageFilter.shader) — the
+// v1.6.4/v1.6.5-proven structure that reliably receives the backdrop on
+// real devices. Full-channel frost now happens INSIDE this shader:
+// R/G/B all go through the 13-tap gaussian kernel (at their dispersion
+// offsets), plus a per-pixel grain jitter that breaks up gaussian banding
+// and gives the sandblasted "frosted" texture. No dependency on engine-
+// level filter chaining semantics (which produced a sharp un-frosted
+// strip along the top edge of the dock on real devices).
 //
 // Brings the same physics as the welcome-screen orb lens to app chrome
 // (floating dock, nav bar): real refraction of the content scrolling
@@ -51,16 +53,20 @@ vec2 toUV(vec2 pos) {
   return uv;
 }
 
-// v1.6.5: optional in-shader gaussian blur of the backdrop, sampled at
-// `pos` (v1.6.6: SECONDARY — the engine-level ImageFilter.blur pass on
-// the Dart side already frosts ALL channels; this kernel only runs when
-// the blur uniform is > 0, for extra rim-zone softening if ever needed).
-//
+// v1.6.7: cheap 2D hash for the frost grain (dithered blur).
+vec2 hash2(vec2 px) {
+  vec3 p3 = fract(vec3(px.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+// v1.6.7: full-channel gaussian blur of the backdrop, sampled at `pos`.
 // 13-tap dual-ring poisson kernel: centre + 6 taps at sigma + 6 taps
 // at 2*sigma (rotated 30 degrees). Weights come from the unit gaussian
 // (e^-0.5 = 0.6065, e^-2 = 0.1353), normalised to sum to 1.
 //
-// Cost: 13 texture fetches, only on the dock's small region.
+// Cost: 13 texture fetches per call; R/G/B each call it at their own
+// dispersion offset (39 fetches total) — only on the dock's small region.
 vec4 blurSample(vec2 pos) {
   if (blur < 0.5) {
     return texture(image, toUV(pos));
@@ -110,13 +116,23 @@ void main() {
   vec2 back = n * k * bevelW * 1.6;
 
   // Chromatic dispersion: R/G/B land slightly apart — strongest at rim.
-  // The green (base) channel goes through the gaussian kernel; R/B take
-  // cheap single taps at their tiny dispersion offsets (1-2 px at the rim)
-  // where the blur difference is imperceptible — 15 fetches total.
+  // v1.6.7: ALL channels go through the gaussian kernel (each at its own
+  // dispersion offset) — the v1.6.5 kernel was green-only, leaving R/B
+  // sharp: anime cover edges stayed legible through the glass (the
+  // "can still see the anime through the frosted glass" complaint).
+  // Plus the frost grain: a per-pixel jitter of the whole kernel centre
+  // breaks up gaussian banding — the sandblasted texture of real
+  // frosted glass (monochrome jitter, same offset for RGB, no chroma
+  // noise).
   float disp = dispersion * (0.25 + 0.75 * bev);
-  vec4 cr = texture(image, toUV(p - back * (1.0 + disp)));
-  vec4 cg = blurSample(p - back);
-  vec4 cb = texture(image, toUV(p - back * (1.0 - disp)));
+  // Frost grain: subtle kernel-centre dither (±0.09*blur) — enough to
+  // break gaussian banding into a sandblasted texture, small enough to
+  // read as material grain rather than noise.
+  vec2 grain = (hash2(p) - vec2(0.5)) * blur * 0.18;
+  vec2 base = p - back + grain;
+  vec4 cr = blurSample(base - back * disp);
+  vec4 cg = blurSample(base);
+  vec4 cb = blurSample(base + back * disp);
   vec4 refracted = vec4(cr.r, cg.g, cb.b, max(cg.a, max(cr.a, cb.a)));
 
   // Glass body: milky tint mixed in, stronger near the rim (the plate is

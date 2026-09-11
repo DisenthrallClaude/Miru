@@ -109,6 +109,15 @@ class DownloadRepository implements IDownloadRepository {
     try {
       await _downloadsBox.put(record.key, record);
       await _downloadsBox.flush();
+      // v1.6.7（B-🔴1）：整记录覆写后必须失效该记录的内存进度缓存——
+      // 否则 getRecord/getAllRecords 会把旧 episode 对象 merge 回来，
+      // v1.6.6 的「同集号换 URL 覆盖重下」被缓存影子打穿：新任务
+      // （status=resolving）永远不被 _resolveAndEnqueue 看到，解析
+      // 从不发起，UI 永久挂旧状态。与 deleteRecord 的清理对称。
+      // 代价：putRecord 后首次进度 tick 会重写一次 Hive，可忽略。
+      _progressCache.remove(record.key);
+      _lastPersistedStatus.removeWhere((k, v) => k.startsWith('${record.key}_'));
+      _lastPersistedDir.removeWhere((k, v) => k.startsWith('${record.key}_'));
     } catch (e, stackTrace) {
       MiruLogger().e(
         'DownloadRepository: put record failed. key=${record.key}',

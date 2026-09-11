@@ -32,8 +32,11 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '  评分透视:',
+          // v1.6.7（F-6）：去掉双空格缩进（字体缩放后不随动），改用
+          // 固定小边距。
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text('评分透视:'),
           ),
           SizedBox(height: 16),
           AspectRatio(
@@ -231,8 +234,9 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                                 ],
                               ),
                             SizedBox(height: 8),
+                            // v1.6.7（F-6）：全中文界面统一，英文标签改中文。
                             Text(
-                              'Bangumi Ranked:',
+                              '排名:',
                             ),
                             Text(
                               widget.showRating

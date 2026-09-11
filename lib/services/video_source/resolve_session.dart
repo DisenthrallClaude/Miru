@@ -99,8 +99,8 @@ typedef ResolveLevelTask<T> = Future<T?> Function(ResolveTrace trace);
 /// - t=0 启动 fast；
 /// - t=[cloudDelay]（600ms）仍无 verified → 启动 cloud；
 /// - t=[webviewDelay]（1500ms）仍无 verified → 启动 webview；
-/// - t=[hardDeadline]（12s）仍无 → 抛 [TimeoutException]，交上层
-///   兜底换源（绝不无界等待）。
+/// - t=[hardDeadline]（v1.6.7 起 = 调用方传入的 timeout，不再内部
+///   钉死 12s）仍无 → 超时异常，交上层兜底换源（绝不无界等待）。
 ///
 /// 「产出」的语义由调用方定义：层级任务返回的对象即视为已验证
 /// （hybrid 层把探测放在各层级任务内部，首个通过探测的候选即产出）。
@@ -109,6 +109,10 @@ class ResolveSession<T> {
     required this.waves,
     required this.hardDeadline,
     this.onTrace,
+    // v1.6.7（P-7）：胜出回调——首个产出者产生时同步调用。调用方在此
+    // 回收「竞速已结束但仍在烧资源」的波次（如 WebView 嗅探页继续
+    // 自动播放烧流量/漏音），而不只是不再等待其结果。
+    this.onWin,
     // v1.6.6 修复（B1-🟡9）：硬上限/取消异常工厂可注入。默认仍抛
     // TimeoutException（既有调用与单测兼容）；hybrid 层注入
     // VideoSourceTimeoutException / VideoSourceCancelledException，
@@ -132,6 +136,9 @@ class ResolveSession<T> {
 
   /// 每个层级启动/完成/产出/取消时回调（日志面板用）。
   final void Function(ResolveTrace trace)? onTrace;
+
+  /// v1.6.7（P-7）：首个产出者胜出时回调（资源回收钩子）。
+  final void Function()? onWin;
 
   /// 阶段名（日志用），取波次任务无法直接携带，由调用方在 onTrace
   /// 中自行区分。
@@ -223,6 +230,9 @@ class ResolveSession<T> {
     _won = true;
     _cancelTimers();
     _cancelInflight();
+    // v1.6.7（P-7）：胜出即回收——竞速已结束，仍在途的层级任务
+    // （如 WebView 嗅探页）应立即停止烧资源。
+    onWin?.call();
     trace.record(ResolveStage.fast, 'winner', '$runtimeType produced');
     onTrace?.call(trace);
     if (!_completer!.isCompleted) {

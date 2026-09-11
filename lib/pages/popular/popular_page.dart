@@ -530,6 +530,9 @@ class _PopularPageState extends State<PopularPage> {
             offset: offset,
             buttonSize: size,
             animation: animation,
+            // v1.6.7（F-8）：minWidth 默认 140 会静默吞掉 maxWidth: 80——
+            // 显式传 minWidth 让窄菜单真正生效（菜单不再比锚点宽一截）。
+            minWidth: 80,
             maxWidth: 80,
             items: [
               '',

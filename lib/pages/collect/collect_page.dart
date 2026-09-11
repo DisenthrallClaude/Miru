@@ -13,6 +13,7 @@ import 'package:miru/bean/widget/collect_button.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/modules/collect/collect_sync_plan.dart';
 import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/theme.dart';
 
 class CollectPage extends StatefulWidget {
   const CollectPage({
@@ -291,17 +292,22 @@ class _CollectPageState extends State<CollectPage>
                   StyleString.cardSpace * 2 /*SliverPadding 水平*/ -
                   StyleString.cardSpace * (crossCount - 1)) /
               crossCount;
-          final double mainAxisExtent =
-              tileWidth / 0.65 + MediaQuery.textScalerOf(context).scale(32.0);
+          final double mainAxisExtent = tileWidth / 0.65 +
+              // v1.6.7（F-1）：32 → 46，与推荐页同公式——标题块实际需要
+              // ≈43dp（上内边距 8 + 2 行 × 13px × 1.35），32 时第二行文字
+              // 渗出卡片压到下一行封面。
+              MediaQuery.textScalerOf(context).scale(46.0);
           return CustomScrollView(
             slivers: [
               SliverPadding(
-                // 底部让出毛玻璃导航条高度
+                // 底部让出毛玻璃导航条高度 + 悬浮边距（v1.6.7 F-2：与推荐页/
+                // 时间表对齐补 Space.lg——悬浮 Dock 上缘在 inset+82，
+                // 只让到 inset+70 会把最后一行卡压住 12dp）
                 padding: EdgeInsets.fromLTRB(
                   StyleString.cardSpace,
                   StyleString.cardSpace,
                   StyleString.cardSpace,
-                  MediaQuery.paddingOf(context).bottom,
+                  MediaQuery.paddingOf(context).bottom + Space.lg,
                 ),
                 sliver: SliverGrid(
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -322,12 +328,15 @@ class _CollectPageState extends State<CollectPage>
                                   canTap: !showDelete,
                                 ),
                                 Positioned(
-                                  right: 5,
-                                  bottom: 5,
+                                  // v1.6.7（F-9）：40×40 → 48×48 且贴角
+                                  //（right/bottom 5→4）——低于 Material
+                                  // 48dp 最小触达标准。
+                                  right: 4,
+                                  bottom: 4,
                                   child: showDelete
                                       ? Container(
-                                          width: 40,
-                                          height: 40,
+                                          width: 48,
+                                          height: 48,
                                           decoration: BoxDecoration(
                                             color: Theme.of(context)
                                                 .colorScheme

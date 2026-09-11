@@ -369,6 +369,18 @@ abstract class _PlayerPlaybackController with Store {
   @observable
   double playerSpeed = 1.0;
 
+  /// v1.6.7（P-1）：视频参数是否已就绪（mpv 解码出首帧、有了宽高）。
+  ///
+  /// media_kit 在 `loadlist` 命令【提交瞬间】即强制 playing=true（fork
+  /// real.dart:221-225），与画面无关；而 Video 组件要等 stream 宽高
+  /// >0 才渲染 Texture。旧遮罩条件以 playing 为准 → 遮罩撤得过早，
+  /// 把「解析完成→首帧渲染」的黑窗口（期间音频包小先出声）完全暴露
+  /// 给用户：有声 + 纯黑 + 无转圈。此标志钉在真实的首帧信号上；
+  /// 纯音频流拿不到 videoParams，由 duration>0 兑底置位。
+  /// 复位点：resetForInit / softStop（换集重新等首帧）。
+  @observable
+  bool hasVideoParams = false;
+
   bool isCurrentPlayer(Player player) {
     return identical(mediaPlayer, player);
   }
@@ -431,6 +443,7 @@ abstract class _PlayerPlaybackController with Store {
     buffer = Duration.zero;
     duration = Duration.zero;
     completed = false;
+    hasVideoParams = false;
     startOffset = 0;
     _directVideoUrl = null;
     _effectiveUrl = null;
@@ -811,6 +824,29 @@ abstract class _PlayerPlaybackController with Store {
           }
           _maybePromoteBuffering(player, value);
         }),
+        // v1.6.7（P-1）：首帧信号——mpv 解码出首帧后 video-params 事件才
+        // 带上真实宽高。这是「真正开始播」的最早可靠信号（playing 在
+        // loadlist 提交瞬间就被 fork 强制置 true，不可信）。
+        player.stream.videoParams.listen((event) {
+          if (!isCurrentPlayer(player)) return;
+          final w = event.dw ?? event.w;
+          final h = event.dh ?? event.h;
+          if ((w ?? 0) > 0 && (h ?? 0) > 0 && !hasVideoParams) {
+            hasVideoParams = true;
+          }
+        }),
+        // v1.6.7（P-1）：时长直订（此前只有 1Hz 轮询同步，遮罩条件里
+        // duration>0 的分支最多慢一拍）+ 纯音频流兑底：拿不到
+        // videoParams 的源拿到时长即视为已开始，不被遮罩卡死。
+        player.stream.duration.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (duration != value) {
+            duration = value;
+          }
+          if (value > Duration.zero && !hasVideoParams) {
+            hasVideoParams = true;
+          }
+        }),
       ]);
 
       return player;
@@ -852,6 +888,7 @@ abstract class _PlayerPlaybackController with Store {
     currentPosition = Duration.zero;
     buffer = Duration.zero;
     duration = Duration.zero;
+    hasVideoParams = false;
   }
 
   /// 每集打开（§2.1）：只做随集变化的装配——恢复计数/播放头、超分、
@@ -929,7 +966,12 @@ abstract class _PlayerPlaybackController with Store {
         pp.setProperty('demuxer-lavf-probesize', '1048576'),
         pp.setProperty('network-timeout', '8'),
         pp.setProperty('cache-pause-initial', 'no'),
-        pp.setProperty('cache-pause-wait', '0.5'),
+        // v1.6.7（P-5）：0.5 → 1（mpv 默认）。0.5 让 demuxer underrun
+        // 后只攒 0.5s 数据就恢复播放——起播期音频轨先有数据（音频分段
+        // 小、先到达），mpv 以音频为主时钟开播出声、视频轨数据未到
+        // 画面维持黑，声画起点差被制度化。1s 是上游久经验证的默认，
+        // 起播更稳；配合 P-1 的首帧遮罩，用户看不到这个窗口。
+        pp.setProperty('cache-pause-wait', '1'),
         pp.setProperty('cache-secs', _cacheSecsStartup),
         pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
         pp.setProperty('video-sync', 'audio'),

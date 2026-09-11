@@ -16,19 +16,29 @@ class PlayerItemSurface extends StatefulWidget {
 }
 
 class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
+  /// v1.6.7（P-2）：本 State 存活期内是否渲染过 Video。粘性标志：
+  /// 置位后换集/换源的 loading 不再卸载 Video（Texture 销毁重建会
+  /// 触发 widListener 的 vo=null→vo 拆挂 + seek(position) 竞态，吞帧
+  /// 且可能把续播起点拽回 0）。
+  bool _everRendered = false;
+
   @override
   Widget build(BuildContext context) {
     final playerController = widget.playerController;
     return Observer(builder: (context) {
-      // v1.6.4：mpv 已实际开始（playing/有时长）时必须挂载 Video——
-      // 此前 loading=true 期间整个 Video widget 被黑色转圈容器顶替，
-      // mpv 侧已在解码出帧却无处渲染，用户「有声音没画面」。
-      // loading 只在视频尚未开始时挡画面（实例仍在装配）。
+      // v1.6.7（P-1）：「真正开始」以 mpv 的真实首帧信号为准
+      //（videoParams 宽高就绪 / 时长已知），不再信任 playing——
+      // media_kit 在 loadlist 命令提交瞬间即强制 playing=true（fork
+      // real.dart:221-225），与画面无关。loading 只在视频尚未开始时
+      // 挡画面（实例仍在装配）；一旦渲染过即常驻（P-2）。
       final playback = playerController.playback;
       final bool actuallyStarted =
-          playback.playing || playback.duration > Duration.zero;
+          playback.hasVideoParams || playback.duration > Duration.zero;
+      if (actuallyStarted) {
+        _everRendered = true;
+      }
       final bool notReady = playback.videoController == null ||
-          (playback.loading && !actuallyStarted);
+          (playback.loading && !_everRendered && !actuallyStarted);
       if (notReady) {
         return Container(
           color: Colors.black,

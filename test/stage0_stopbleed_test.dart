@@ -265,9 +265,10 @@ void main() {
       await cache.invalidate(key);
     });
 
-    test('probeDead（5min）与 extractFailed（10min）常量分级', () {
+    // v1.6.7（P-6）：extractFailed host 级 TTL 10min → 3min（误伤半径收窄）。
+    test('probeDead（5min）与 extractFailed（3min）常量分级', () {
       expect(ResolutionResultCache.probeDeadTtl.inMinutes, 5);
-      expect(ResolutionResultCache.extractFailedTtl.inMinutes, 10);
+      expect(ResolutionResultCache.extractFailedTtl.inMinutes, 3);
       expect(ResolutionResultCache.negativeTtl.inSeconds, 60);
     });
 

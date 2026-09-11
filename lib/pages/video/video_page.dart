@@ -56,6 +56,11 @@ class _VideoPageState extends State<VideoPage>
   VideoPageController get videoPageController => widget.videoPageController;
   bool _didInitializePlayback = false;
   bool _isClosing = false;
+
+  /// v1.6.7（P-2）：本页会话内是否真正开播过（首帧已出）。粘性标志：
+  /// 置位后换集/换源不再整体卸载 PlayerItem，避免 Video/Texture 销毁
+  /// 重建带来的 vo 拆挂与 seek 竞态；仅在页面重建（initState）时归零。
+  bool _playerEverStarted = false;
   HistoryController get historyController => widget.historyController;
   DownloadController get downloadController => widget.downloadController;
   late bool playResume;
@@ -826,17 +831,24 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget get playerBody {
-    // v1.6.4：遮罩只在「视频尚未真正开始」时显示。
+    // v1.6.7（P-1）：遮罩只在「视频尚未真正开始」时显示。
     //
-    // 此前条件是 `playback.loading`——它在 init 全流程完成后才翻转，
-    // 而 mpv 的 open 早已开始出声出画。若 init 尾段（音量等平台通道）
-    // 卡住/失败，黑遮罩会一直盖在已出画的视频上：用户听到声音、
-    // 看不到画面、屏幕显示「解析中」——三重矛盾。现在以 mpv 的
-    // 真实状态为准：只要 playing 或拿到了时长，遮罩立即撤下，
-    // loading 标志的翻转与否不再能挡住画面。
+    // v1.6.4 曾以 playing 为准，但 media_kit 在 `loadlist` 命令【提交
+    // 瞬间】即强制 playing=true（fork real.dart:221-225），与画面无关——
+    // 遮罩撤得过早，把「解析完成→首帧渲染」的黑窗口（期间 mpv 音频
+    // 包小先出声）完全暴露：用户听到声音、看到纯黑、且无转圈。
+    // 现在以 mpv 的真实首帧信号为准：videoParams 宽高就绪（首帧解码
+    // 后才有）或已知时长（纯音频源兑底），遮罩立即撤下。
     final playback = playerController.playback;
-    final bool playerActuallyStarted =
-        playback.playing || playback.duration > Duration.zero;
+    final bool playerActuallyStarted = playback.hasVideoParams ||
+        playback.duration > Duration.zero;
+    if (playerActuallyStarted) {
+      // v1.6.7（P-2）：页面会话粘性标志——一旦真正播过，换集/换源的
+      // loading 期间不再整体卸载 PlayerItem（Video 卸载会销毁 Texture →
+      // widListener 重放 vo=null→vo + seek(position)，吞帧且可能把续播
+      // 起点拽回 0）；黑屏观感由上层遮罩负责。
+      _playerEverStarted = true;
+    }
     final bool playerLoading = playback.loading && !playerActuallyStarted;
     return Stack(
       children: [
@@ -999,9 +1011,12 @@ class _VideoPageState extends State<VideoPage>
           ),
         ),
         Positioned.fill(
-          // v1.6.4：同遮罩条件——mpv 已实际开始（playing/有时长）即挂载
-          // PlayerItem（手势/弹幕/控制面板），loading 标志不再阻塞挂载。
-          child: (playerController.playback.loading && !playerActuallyStarted)
+          // v1.6.7（P-2）：同遮罩条件的首帧语义 + 页面会话粘性标志——
+          // 首次真正开播前挂 Container()（实例装配期），开播后【本页
+          // 会话内常驻】：换集/换源 loading 期间不再卸载（Texture 销毁
+          // 重建会触发 widListener 的 vo 拆挂 + seek 竞态），黑屏由
+          // 上层遮罩覆盖。
+          child: (playerController.playback.loading && !_playerEverStarted)
               ? Container()
               : PlayerItem(
                   playerController: playerController,

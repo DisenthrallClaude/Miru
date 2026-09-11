@@ -261,6 +261,15 @@ class SettingsKeys {
     false,
     group: SettingGroup.interface,
   );
+  /// v1.6.7：开屏动效最后一次播放时的应用版本号。
+  /// 版本变更（应用更新）后的首次进入会以重播模式再放一遍高级开屏
+  /// 动效，随后把本键更新为当前版本——「每一次更新，重新进入界面
+  /// 之后，都会播放一遍那个高级的开屏动效」。
+  static const splashLastPlayedVersion = SettingKey<String>(
+    'splashLastPlayedVersion',
+    '',
+    group: SettingGroup.interface,
+  );
   /// v1.6.3：首启动引导是否已完成（完成进入主界面时置 true）。
   /// 首启动判定 = !onboardingDone && 本地无已装规则（双条件防
   /// v1.6.2 老用户升级后被重新引导一遍）。

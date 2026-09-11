@@ -223,11 +223,15 @@ class PlayerController implements Disposable {
       return false;
     }
 
-    // v1.6.4：open 已完成、画面纹理已就绪——此刻即翻转 loading。
+    // v1.6.7（P-1 勘误）：open 返回 ≠ 画面已就绪——media_kit 的 open()
+    // 只是刚把 loadlist 命令提交给 mpv（并立刻强制 playing=true，fork
+    // real.dart:221-225），纹理/首帧远未就绪。「画面是否已出」由
+    // playback.hasVideoParams（video-params 事件宽高就绪）判定，播放页
+    // 遮罩据此撤除。loading 在装配完成时翻转，仅表示「装配结束」，
+    // 不再承担「画面已出」语义。
     // 后续音量/速度装配是非致命增强：任何平台通道失败只记日志，
     // 绝不能 (a) 向上抛异常（调用方会把 init 异常误判为「解析失败」
-    // 触发换源循环）；(b) 阻塞 loading 翻转（黑遮罩盖着已出声的
-    // 画面 = 「有声音没画面、一直显示解析中」）。
+    // 触发换源循环）；(b) 阻塞 loading 翻转。
     MiruLogger().i('PlayerController: video initialized');
     playback.loading = false;
     try {

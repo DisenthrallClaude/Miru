@@ -149,6 +149,24 @@ abstract class _DownloadController with Store {
 
   void _onDownloadProgress(String recordKey, int episodeNumber,
       DownloadEpisode episode, double speed) {
+    // v1.6.7（B-🟡2）：进度回调是高频热路径（每个 tick 都跑），任何
+    // 一次 updateEpisode 抛错都会逃逸成 unhandled async exception——
+    // v1.6.6 只给 _failEpisode 加了同款防护，这里补齐。失败只记日志，
+    // 下一次 tick 自然重试。
+    try {
+      _onDownloadProgressInner(recordKey, episodeNumber, episode, speed);
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'DownloadController: progress tick failed for '
+        '$recordKey#$episodeNumber',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  void _onDownloadProgressInner(String recordKey, int episodeNumber,
+      DownloadEpisode episode, double speed) {
     final record = _repository.getRecord(recordKey);
     if (record == null || !record.episodes.containsKey(episodeNumber)) {
       return;

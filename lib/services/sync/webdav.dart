@@ -273,7 +273,22 @@ class WebDav {
       MiruLogger().e('WebDav: get collectibles failed', error: e);
       throw Exception('WebDav: get collectibles from file failed');
     }
-    if (remoteChanges.isNotEmpty || remoteCollectibles.isNotEmpty) {
+    // v1.6.7（B-🔴2）：远端快照缺失 + 日志存在 + 本地非空 = 远端状态
+    // 损坏（提交器 rename 失败窗口会把已删 destination 的好 temp 一并
+    // 清掉）。此时若继续 patchCollectibles：mergeWebDav 以空基底 +
+    // 按 id 过滤会把本地收藏整盒清空并扩散到全设备（变更日志重放救
+    // 不回——本地变更 id 都在远端日志里）。红线处置：跳过 patch，
+    // 直接走下方的 _updateBox 把本地全量推上去修复远端。
+    final bool remoteCorrupt = !collectiblesExists &&
+        remoteChanges.isNotEmpty &&
+        GStorage.collectibles.isNotEmpty;
+    if (remoteCorrupt) {
+      MiruLogger().w(
+        'WebDav: remote collectibles snapshot missing while change log has '
+        '${remoteChanges.length} entries and local box has '
+        '${GStorage.collectibles.length} items — treating remote as '
+        'corrupt, skipping merge and pushing local snapshot to repair');
+    } else if (remoteChanges.isNotEmpty || remoteCollectibles.isNotEmpty) {
       await GStorage.patchCollectibles(remoteCollectibles, remoteChanges);
     }
     await _updateBox('collectibles');

@@ -10,24 +10,21 @@ Future<void> preloadLiquidGlassPanel() =>
 /// 顶尖液态玻璃面板（v1.6.4）——把开屏页那套「真实折射玻璃」带进
 /// 应用内主界面。
 ///
-/// 渲染管线（v1.6.6 双 pass 磨砂架构，参考 liquid_glass_easy 组件的
-/// 组合方式）：
+/// 渲染管线（v1.6.7 自包含磨砂架构）：
 /// ```
-/// ClipRRect > RepaintBoundary > Stack (
-///   pass 1: BackdropFilter(ImageFilter.blur(frostSigma))   // 全通道磨砂基底
-///   pass 2: BackdropFilter(ImageFilter.shader) > child      // 折射/rim/色散
-/// )
+/// ClipRRect > BackdropFilter(ImageFilter.shader) > child
 /// ```
-/// 两个 BackdropFilter 叠放会链式采样：pass 2 的着色器读到的是
-/// **已被 pass 1 模糊过的背景**——背景先磨砂、再折射，而不是
-/// 「折射清晰图像后再模糊」。
+/// 单一 BackdropFilter，着色器（`liquid_glass_panel.frag`）内部完成
+/// 全部渲染：R/G/B 三通道各过 13-tap 高斯内核（折射+色散之后叠加）
+/// + 逐像素磨砂颗粒抖动 + 折射/rim 色散/顶部高光。
 ///
-/// v1.6.6 可读性根因修复：v1.6.5 的 shader 只有绿通道走 13-tap
-/// 高斯，R/B 通道仍是清晰单采样——动漫封面的边缘结构透过红蓝
-/// 通道依然纤毫毕现，这就是「隔着玻璃还能看清动漫」的根因。
-/// 现在由引擎级 `ImageFilter.blur` 对**全部通道**做真实高斯
-///（与 FrostedSurface 同源），色散/rim/高光叠加在磨砂基底之上，
-/// 既是液态玻璃，也是真正的磨砂质感。
+/// v1.6.7 根因修复：v1.6.6 曾采用双 BackdropFilter 链式架构（pass 1
+/// 引擎级 blur 打磨砂基底，pass 2 着色器读已模糊背景）——真机上顶部
+/// 出现一条不通磨砂的透明带（引擎链式采样在该结构下不可靠），且
+/// v1.6.5 的内核只模糊绿通道，红蓝通道仍能看清动漫封面轮廓。现在
+/// 回到 v1.6.4/v1.6.5 已验证可靠接收 backdrop 的单 pass 结构（与开屏
+/// 透镜同构），磨砂在着色器内自包含完成——R/G/B 全部化开、颗粒
+/// 质感、乳白底色，不依赖任何引擎级 filter 链式语义。
 ///
 /// 回退路径（Skia / shader 编译失败 / `ImageFilter.shader` 不可用）：
 /// 朴素 `BackdropFilter.blur` + tint + rim 高光渐变——观感降级为
@@ -51,8 +48,7 @@ class LiquidGlassPanel extends StatefulWidget {
     this.highlight = 0.16,
     this.tint,
     this.tintAmt,
-    this.frostSigma = 28,
-    this.glassBlur = 0,
+    this.glassBlur = 16,
     this.blurSigma = 28,
   });
 
@@ -77,16 +73,11 @@ class LiquidGlassPanel extends StatefulWidget {
   /// 消除与全局 Frost 体系的层级倒挂）。
   final double? tintAmt;
 
-  /// v1.6.6：引擎级全通道高斯模糊 sigma（逻辑 dp）——磨砂基底。
-  /// 这是可读性的第一道防线：R/G/B **全部**化开，背景只剩色彩
-  /// 呼吸，任何封面的边缘结构都无法透过玻璃辨认。着色器叠加其
-  /// 上做折射/色散，形成「磨砂液态玻璃」。参考 liquid_glass_easy
-  /// 的双 BackdropFilter 链式组合（blur 先、shader 后）。
-  final double frostSigma;
-
-  /// v1.6.6：着色器内附加模糊（物理 px = dp × dpr）。默认 0——
-  /// 磨砂由 [frostSigma] 的引擎模糊全权负责；此参数仅供微调
-  ///（若需要 rim 附近额外柔化可给小值）。
+  /// v1.6.7：着色器内全通道高斯模糊 sigma（逻辑 dp，内部乘 dpr）。
+  /// 这是磨砂的第一道也是唯一一道防线：R/G/B **全部**化开 + 逐像素
+  /// 颗粒抖动，背景只剩色彩呼吸，任何封面的边缘结构都无法透过玻璃
+  /// 辨认。默认 16（与指示球 Frost.blur*0.5=18 同量级）。0 = 关闭
+  /// 模糊（回到 v1.6.4 的纯折射观感）。
   final double glassBlur;
 
   /// 回退路径的高斯模糊 sigma。
@@ -145,9 +136,7 @@ class _LiquidGlassPanelState extends State<LiquidGlassPanel> {
             : const Color(0xFFF4F8FC));
     // v1.6.6：乳白度 亮 0.38→0.45 / 暗 0.50→0.55——消除与全局
     // Frost 体系的层级倒挂（Dock 不再是全应用最「清」的玻璃）；
-    // 纯折射无模糊时会被背景冲刷（FrostedSurface 注释里记录过
-    // 同一教训），配合引擎级全通道高斯双保险，页签文字在任何
-    // 封面下都读得清。
+    // 配合 v1.6.7 全通道磨砂双保险，页签文字在任何封面下都读得清。
     final double tintAmt = widget.tintAmt ??
         (brightness == Brightness.dark ? 0.55 : 0.45);
 
@@ -166,56 +155,21 @@ class _LiquidGlassPanelState extends State<LiquidGlassPanel> {
       shader.setFloat(9, tintAmt);
       shader.setFloat(10, widget.glassBlur * dpr);
 
-      // v1.6.6 双 pass（liquid_glass_easy 架构）：
-      // pass 1 = 引擎级全通道高斯（磨砂基底，R/G/B 全化开）；
-      // pass 2 = 折射着色器，读到的是已磨砂的背景——背景先磨砂
-      // 再折射，rim 色散与顶部高光叠在柔基底上。
-      //
-      // ⚠️ 结构约束（勿破坏）：
-      // ① RepaintBoundary 包住【整个 Stack】——两个 filter 之间
-      //   不得再插入任何 Boundary/裁剪层，否则 pass 2 的 readback
-      //   读不到 pass 1 的输出，链式断裂；
-      // ② pass 2 必须是非定位 child 撑起 Stack 尺寸（面板高度 =
-      //   child 高度）；pass 1 用 Positioned.fill 铺满即可——若
-      //   全部子节点都是 positioned，RenderStack 会取
-      //   constraints.biggest，Dock 尺寸语义回归；
-      // ③ pass 1 用 TileMode.clamp（非 decal）——decal 在边缘带
-      //   alpha 衰减，未磨砂内容会从玻璃边缘漏出。
+      // v1.6.7：单 BackdropFilter——与开屏透镜同构（v1.6.4/v1.6.5
+      // 在真机上可靠接收 backdrop 的结构）。磨砂（全通道高斯 + 颗粒）
+      // 全部在着色器内完成，不再依赖引擎级双 BackdropFilter 链式
+      // 采样（v1.6.6 的双 pass 在真机上出现顶部不通磨砂的透明带）。
       return ClipRRect(
         borderRadius: BorderRadius.circular(widget.radius),
-        child: RepaintBoundary(
-          child: Stack(
-            children: [
-              // pass 1：磨砂基底（Positioned.fill 铺满 Stack，Stack 尺寸
-              // 由 pass 2 的 child 决定）。IgnorePointer 保证不抢手势。
-              // clamp 复制边缘像素、alpha 恒 1，不留漏缝。
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(
-                      sigmaX: widget.frostSigma,
-                      sigmaY: widget.frostSigma,
-                      tileMode: TileMode.clamp,
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-              ),
-              // pass 2：液态玻璃折射着色器（读取已磨砂背景）。
-              // 非定位 child——决定 Stack 尺寸，恢复「面板高度 =
-              // child 高度」的 v1.6.5 语义。
-              BackdropFilter(
-                filter: ui.ImageFilter.shader(shader),
-                child: widget.child,
-              ),
-            ],
-          ),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.shader(shader),
+          child: widget.child,
         ),
       );
     }
 
     // 回退：毛玻璃 + rim 渐变（观感降级但不破相）。
-    // 模糊强度与主路径同源（frostSigma），保证回退观感不漂移。
+    // 模糊强度与主路径同源（blurSigma），保证回退观感不漂移。
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.radius),
       child: BackdropFilter(
@@ -258,8 +212,8 @@ class _LiquidGlassPanelState extends State<LiquidGlassPanel> {
 ///
 /// 与旧 FrostedBar 的贴边毛玻璃条不同，Dock 是一块悬浮的圆角玻璃
 /// 板（左右留边、底部安全区之上浮起）——内容从其下滚过时被真实
-/// 折射 + 高斯模糊（v1.6.5），rim 色散随内容亮度变化，顶部内侧
-/// 高光始终读得出「一块厚玻璃」。
+/// 折射 + 全通道高斯磨砂（v1.6.7 自包含），rim 色散随内容亮度变化，
+/// 顶部内侧高光始终读得出「一块厚玻璃」。
 class LiquidGlassDock extends StatelessWidget {
   const LiquidGlassDock({
     super.key,
@@ -290,10 +244,10 @@ class LiquidGlassDock extends StatelessWidget {
         radius: radius,
         thickness: 0.9,
         highlight: 0.18,
-        // v1.6.6：磨砂基底交给引擎级全通道高斯（frostSigma 默认 22），
-        // 着色器内模糊归零——这是文字与图标常驻的关键件，任何封面
-        // 滚过都必须化开到只剩色彩呼吸。
-        glassBlur: 0,
+        // v1.6.7：磨砂由着色器全通道高斯内核负责（glassBlur=16dp，
+        // 与指示球 Frost.blur*0.5=18 同量级）——这是文字与图标常驻的
+        // 关键件，任何封面滚过都必须化开到只剩色彩呼吸。
+        glassBlur: 16,
         child: SizedBox(height: height, child: child),
       ),
     );

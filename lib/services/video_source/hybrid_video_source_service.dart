@@ -29,7 +29,7 @@ import 'package:miru/utils/http_headers.dart';
 /// - **探测改「正向确认」**（§1.2）：alive 必须拿到内容证据
 ///   （#EXTM3U / ftyp / 0x47 同步字节），不再裸信 2xx；
 ///   `needsPositiveConfirm` 候选（无扩展名直链）的 unknown 视同 dead；
-/// - **负缓存分级**（§1.3）：extractFailed → host 级 10min；
+/// - **负缓存分级**（§1.3）：extractFailed → host 级 3min（v1.6.7 P-6）；
 ///   network → 不写；probeDead → URL 级 5min；
 /// - **force**（用户显式重试）：忽略负缓存与短窗失败记忆；
 /// - **连接复用**（§1.6）：探测/快解共用 SharedHttpClient；
@@ -139,8 +139,14 @@ class HybridVideoSourceService implements IVideoSourceService {
     // ---- 第 2/3/4 级：对冲竞速（阶段 2 / §2.2）----
     // 串行漏斗→波次竞速：t=0 fast（层内候选并发 3 探测）、
     // t=600ms cloud、t=1500ms webview；首个通过探测的产出者胜出，
-    // 其余波次不再启动；硬上限 12s（用户 timeout 更小则尊重用户）。
-    final hardDeadline = timeout < _raceHardDeadline ? timeout : _raceHardDeadline;
+    // 其余波次不再启动。
+    //
+    // v1.6.7（P-3）：硬上限 = 调用方 timeout（默认 20s，用户可调
+    // 5~120s），不再内部钉死 12s。旧实现 min(timeout, 12s) 把慢 JS 站
+    // （嗅探自需 5~30s，见 webview 层文档注释）系统性砍掉，且设置页
+    // 「解析超时」>12s 的区段全是 placebo；竞速的快站路径零变化
+    // （胜出即取消 deadline timer）。
+    final hardDeadline = timeout;
     final session = ResolveSession<VideoSource>(
       waves: {
         Duration.zero: (trace) =>
@@ -157,6 +163,11 @@ class HybridVideoSourceService implements IVideoSourceService {
             ),
       },
       hardDeadline: hardDeadline,
+      // v1.6.7（P-7）：竞速胜出即回收 WebView 波——胜出后隐藏嗅探页
+      // 继续加载/自动播放只会白烧流量并拉长漏音窗口（P-4 已消音，
+      // 这里止损流量与 CPU），其结果也不再有机会覆盖已写入的缓存。
+      // cancel() 本身是同步 fire-and-forget，直接调用即可。
+      onWin: _webviewService.cancel,
       // v1.6.6 修复（B1-🟡9）：硬上限/取消抛上层异常体系（而非裸
       // TimeoutException），video_controller/download_controller 的
       // 特判分支（超时文案/取消不计插件失败）得以命中。
@@ -179,8 +190,9 @@ class HybridVideoSourceService implements IVideoSourceService {
     }
   }
 
-  /// 竞速硬上限（§2.2）：任何路径 12s，绝不无界等待。
-  static const Duration _raceHardDeadline = Duration(seconds: 12);
+  /// v1.6.7（P-3）：旧竞速硬上限 12s 已删除——硬上限改为调用方传入的
+  /// [timeout]（见 resolveWithHeaders 内注释）。「快站别拖太久」的
+  /// 语义由波次延迟（0ms/600ms/1500ms）天然保证。
 
   /// 进行中的竞速会话（cancel 用）。
   final Set<ResolveSession<VideoSource>> _activeSessions = {};
@@ -505,6 +517,12 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   /// 该层级是否应在本次重试中跳过：内存短窗记忆命中，或负缓存
   /// （URL 级 / host 级）命中。
+  ///
+  /// v1.6.7（P-6）：host 级负缓存命中时若【本 URL】没有近期失败记忆
+  /// （即换了一条线路/新的一集），放行一次探测——旧实现同站任何一集
+  /// 快解失败（改版/风控/瞬时 5xx 误分类）会让整站 10 分钟内全部跳过
+  /// fast 层，用户「换线路」也救不回来（同 host）。放行后若再失败，
+  /// 本 URL 进入短窗记忆 + host 负缓存继续生效，误分类不再殃及全站。
   Future<bool> _shouldSkipLevel(String episodeUrl, String levelSuffix) async {
     final fails = _levelFailures[episodeUrl];
     final at = fails?[levelSuffix];
@@ -515,16 +533,17 @@ class HybridVideoSourceService implements IVideoSourceService {
       return true;
     }
     // host 级负缓存（extractFailed）：同站任何一集的失败都会让
-    // 整站跳过该层。
+    // 整站跳过该层。v1.6.7（P-6）：本 URL 自身从未失败过（at == null，
+    // 即换线路/新的一集）时放行一次探测——误分类（改版/风控/瞬时 5xx）
+    // 不再殃及全站；放行后失败会重新写入记忆，代价只是一轮探测。
     final host = _hostOf(episodeUrl);
-    if (host != null) {
-      return _cache.isNegative(host + levelSuffix);
-    }
-    return false;
+    if (host == null) return false;
+    if (at == null) return false;
+    return _cache.isNegative(host + levelSuffix);
   }
 
   /// 记一次层级失败（内存短窗 + 按分级写 Hive 负缓存）：
-  /// - [LevelFailureKind.extractFailed] → host 级，TTL 10min；
+  /// - [LevelFailureKind.extractFailed] → host 级，TTL 3min；
   /// - [LevelFailureKind.probeDead] → URL 级，TTL 5min；
   /// - [LevelFailureKind.network] → 只记内存短窗，不写负缓存。
   Future<void> _markLevelFailed(

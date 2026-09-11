@@ -512,7 +512,14 @@ class _InfoTabViewState extends State<InfoTabView>
                     );
                   },
                 );
-              })
+              }),
+              // v1.6.7（F-3）：末条内容让出「发表吐槽」玻璃 FAB +
+              // 底部手势区，不再被盖住。
+              SliverPadding(
+                padding: EdgeInsets.only(
+                    bottom: 96 + MediaQuery.paddingOf(context).bottom),
+                sliver: const SliverToBoxAdapter(child: SizedBox.shrink()),
+              ),
             ],
           ),
         );
@@ -596,6 +603,12 @@ class _InfoTabViewState extends State<InfoTabView>
                 },
               );
             }),
+            // v1.6.7（F-3）：末条内容让出「开始观看」玻璃 FAB + 手势区。
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: 96 + MediaQuery.paddingOf(context).bottom),
+              sliver: const SliverToBoxAdapter(child: SizedBox.shrink()),
+            ),
           ],
         );
       },
@@ -678,6 +691,12 @@ class _InfoTabViewState extends State<InfoTabView>
                 },
               );
             }),
+            // v1.6.7（F-3）：末条内容让出「开始观看」玻璃 FAB + 手势区。
+            SliverPadding(
+              padding: EdgeInsets.only(
+                  bottom: 96 + MediaQuery.paddingOf(context).bottom),
+              sliver: const SliverToBoxAdapter(child: SizedBox.shrink()),
+            ),
           ],
         );
       },

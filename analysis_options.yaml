@@ -42,3 +42,6 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # 工作区脚本（工具链重建/发版辅助），非应用源码。
+    - scripts/**
+    - upload/**

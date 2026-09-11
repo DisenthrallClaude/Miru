@@ -24,6 +24,7 @@ import 'package:miru/services/platform/windows_shortcut.dart';
 import 'package:miru/services/platform/platform_environment_service.dart';
 import 'package:miru/services/update/startup_update_check.dart';
 import 'package:miru/navigation.dart';
+import 'package:miru/request/config/api_endpoints.dart';
 
 class InitPage extends StatefulWidget {
   const InitPage({
@@ -96,6 +97,10 @@ class _InitPageState extends State<InitPage> {
       if (!GStorage.getSetting(SettingsKeys.onboardingDone)) {
         unawaited(GStorage.putSetting(SettingsKeys.onboardingDone, true));
       }
+      // v1.6.7：本分支每次启动都播开屏，顺带刷新版本标记——用户日后
+      // 关掉「每次启动显示开屏」时不会因旧标记再补播一遍。
+      unawaited(GStorage.putSetting(
+          SettingsKeys.splashLastPlayedVersion, ApiEndpoints.version));
       context.navigate('/onboarding');
       await initFutures;
       // 云同步错峰启动：计时从 init 完成后起算（4s 后触发），
@@ -130,6 +135,9 @@ class _InitPageState extends State<InitPage> {
       // flow. OnboardingPage takes care of navigating to the default page
       // and triggering the auto update check afterwards.
       // 初始化已在上面 await 完成——玻璃页里点「直接进入」即可进入主界面。
+      // v1.6.7：首装引导播放后视为「本版本已播」。
+      unawaited(GStorage.putSetting(
+          SettingsKeys.splashLastPlayedVersion, ApiEndpoints.version));
       context.navigate('/onboarding');
       return;
     }
@@ -140,6 +148,21 @@ class _InitPageState extends State<InitPage> {
     // 用户已改过的自动更新/镜像等设置、返回键弹退出确认）。
     if (!GStorage.getSetting(SettingsKeys.onboardingDone)) {
       unawaited(GStorage.putSetting(SettingsKeys.onboardingDone, true));
+    }
+
+    // v1.6.7：版本变更重播——应用更新后的首次进入，以重播模式播放
+    // 一遍高级开屏动效（不重跑安装流程），随后记录当前版本。老用户
+    // 首次升到本版本时键为空 ≠ 当前版本，也会重播一次（他们刚刚完成
+    // 了一次更新，正是这个功能的语义）。此后同版本内不再重播。
+    if (GStorage.getSetting(SettingsKeys.splashLastPlayedVersion) !=
+        ApiEndpoints.version) {
+      await GStorage.putSetting(
+          SettingsKeys.splashLastPlayedVersion, ApiEndpoints.version);
+      if (!mounted) {
+        return;
+      }
+      context.navigate('/onboarding');
+      return;
     }
 
     if (!mounted) {

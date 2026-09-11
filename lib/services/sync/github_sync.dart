@@ -450,7 +450,20 @@ class GithubSync {
       throw Exception('GithubSync: 远端收藏数据解析失败');
     }
 
-    if (remoteChanges.isNotEmpty || remoteCollectibles.isNotEmpty) {
+    // v1.6.7（B-🔴2）：与 WebDav._syncCollectibles 同款红线守卫——
+    // 远端快照缺失 + 日志存在 + 本地非空 = 远端状态损坏（rename/commit
+    // 失败窗口），跳过 merge 直接推本地全量修复远端，防止空基底把
+    // 本地收藏整盒清空并扩散。
+    final bool remoteCorrupt = !collectiblesExists &&
+        remoteChanges.isNotEmpty &&
+        GStorage.collectibles.isNotEmpty;
+    if (remoteCorrupt) {
+      MiruLogger().w(
+        'GithubSync: remote collectibles snapshot missing while change log '
+        'has ${remoteChanges.length} entries and local box has '
+        '${GStorage.collectibles.length} items — treating remote as '
+        'corrupt, skipping merge and pushing local snapshot to repair');
+    } else if (remoteChanges.isNotEmpty || remoteCollectibles.isNotEmpty) {
       await GStorage.patchCollectibles(remoteCollectibles, remoteChanges);
     }
     await _updateBox('collectibles');

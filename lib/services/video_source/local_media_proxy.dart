@@ -1087,6 +1087,22 @@ class LocalMediaProxy {
       String url, Map<String, String> headers) async {
     final raw = await _fetchPlaylistText(url, headers);
     if (raw == null) return null;
+    // v1.6.7（P-10）：master 声明了独立音轨组（EXT-X-MEDIA:TYPE=AUDIO
+    // 且带 URI）时改写【master 本身】，而不是替换成第一条视频子清单
+    //——旧实现把音频 rendition 整组丢掉（mpv 收到的是无声视频清单）；
+    // 也避免「视频子清单走代理、音频子清单另走直连」的双通道速度差
+    //（画面冻结声音走）。视频/音频子清单各自指向 /m3u8/ 代理 URL，
+    // mpv 请求时由 _serveManifest 递归构建+改写（对任意清单 URL 都
+    // 会走 build+rewrite，机制现成）。普通单轨源行为不变。
+    if (_hasAudioRenditions(raw)) {
+      final rewritten = rewriteManifest(
+        raw,
+        url,
+        _manifestProxyUrlFor,
+        attributeUrlFor: _attributeProxyUrlFor,
+      );
+      return _BuiltManifest(manifest: rewritten, segmentUrls: const []);
+    }
     final resolved = await _resolveToPlayableManifest(url, raw, headers);
     if (resolved == null) return null;
     final segmentUrls = extractSegmentUrls(resolved.manifest, resolved.baseUrl);
@@ -1098,6 +1114,29 @@ class LocalMediaProxy {
       attributeUrlFor: _attributeProxyUrlFor,
     );
     return _BuiltManifest(manifest: rewritten, segmentUrls: segmentUrls);
+  }
+
+  /// v1.6.7（P-10）：master 是否声明了带 URI 的独立音轨组。
+  bool _hasAudioRenditions(String manifest) {
+    for (final rawLine in manifest.split('\n')) {
+      final line = rawLine.trim();
+      if (line.startsWith('#EXT-X-MEDIA') &&
+          line.contains('TYPE=AUDIO') &&
+          line.contains('URI="')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// v1.6.7（P-10）：子清单（variant / 音频 rendition）→ 代理
+  /// `/m3u8/<token>`——mpv 请求时由 _serveManifest 递归拉取并改写，
+  /// 视频/音频两条 rendition 都经过同一本地代理通道，不再有
+  /// 双通道速度差。
+  String _manifestProxyUrlFor(String absUri) {
+    final token = _tokenFor(absUri);
+    return 'http://127.0.0.1:$port/$_secret/m3u8/$token'
+        '?u=${Uri.encodeComponent(absUri)}';
   }
 
   String _segmentProxyUrlFor(String absSegmentUrl) {
@@ -1121,10 +1160,15 @@ class LocalMediaProxy {
   }
 
   /// KEY/MAP 属性 URI 的统一改写入口（§2.2(d)）：按行分流——
-  /// EXT-X-KEY → /key/，EXT-X-MAP → /map/，其余 URI 属性绝对化直连。
+  /// EXT-X-KEY → /key/，EXT-X-MAP → /map/，
+  /// EXT-X-MEDIA（v1.6.7 P-10，带 URI 的音频 rendition）→ /m3u8/
+  /// 递归改写，其余 URI 属性绝对化直连。
   String _attributeProxyUrlFor(String line, String absUri) {
     if (line.startsWith('#EXT-X-KEY')) return _keyProxyUrlFor(absUri);
     if (line.startsWith('#EXT-X-MAP')) return _mapProxyUrlFor(absUri);
+    if (line.startsWith('#EXT-X-MEDIA') && line.contains('URI=')) {
+      return _manifestProxyUrlFor(absUri);
+    }
     return absUri;
   }
 

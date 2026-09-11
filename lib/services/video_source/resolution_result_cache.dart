@@ -30,8 +30,10 @@ class ResolutionResultCache {
   static const Duration negativeTtl = Duration(seconds: 60);
 
   /// host 级「提取失败」负缓存 TTL（阶段 0 / §1.3）：该站静态结构
-  /// 解不了，同站所有集都跳过快解层，10 分钟后重试（站点可能换结构）。
-  static const Duration extractFailedTtl = Duration(minutes: 10);
+  /// 解不了，同站所有集都跳过快解层。v1.6.7（P-6）：10 分钟 → 3 分钟
+  /// ——一次误分类（改版/风控/瞬时 5xx）让整站 10 分钟进不了 fast 层，
+  /// 配合 _shouldSkipLevel 的「换 URL 首查放行」，把误伤半径收到最小。
+  static const Duration extractFailedTtl = Duration(minutes: 3);
 
   /// URL 级「探测判死」负缓存 TTL（阶段 0 / §1.3）：仅影响本集。
   static const Duration probeDeadTtl = Duration(minutes: 5);

@@ -580,7 +580,10 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   leading: Icons.timer_outlined,
                   title: Text('解析超时'),
                   description: Text(
-                      '解析视频源的等待上限，超时后自动换解析器重试一次；播放与下载共用'),
+                      // v1.6.7（P-3）：文案对齐真实语义——超时预算覆盖全部
+                      // 解析层级（含 WebView 嗅探），到点自动切换备选源；
+                      // 慢站点建议 30 秒以上。
+                      '解析视频源的等待上限（含网页嗅探兜底），超时后自动切换备选源；播放与下载共用。慢站点建议 30 秒以上'),
                   value: parseTimeout.toDouble(),
                   min: 5,
                   max: 120,

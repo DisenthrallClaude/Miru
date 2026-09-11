@@ -251,7 +251,11 @@ class _SearchPageState extends State<SearchPage> {
         child: FrostedSurface(
           borderRadius: BorderRadius.circular(28),
           border: Border.all(
-            color: Colors.white.withValues(alpha: 0.18),
+            // v1.6.7（F-7）：与 GlassFab 同款主题感知描边——亮色下纯白
+            // 0.18 在白底上等于没有，玻璃药丸边界消失。
+            color: Theme.of(context).brightness == Brightness.light
+                ? Colors.white.withValues(alpha: 0.55)
+                : Colors.white.withValues(alpha: 0.18),
             width: 0.8,
           ),
           child: const Padding(
@@ -423,14 +427,19 @@ class _SearchPageState extends State<SearchPage> {
                         16 /*网格水平内边距*/ -
                         StyleString.cardSpace * (crossCount - 1)) /
                     crossCount;
-                final double mainAxisExtent =
-                    tileWidth / 0.65 + MediaQuery.textScalerOf(context).scale(32.0);
+                final double mainAxisExtent = tileWidth / 0.65 +
+                    // v1.6.7（F-1）：32 → 46，与推荐页同公式——两行标题
+                    // 不再渗出卡片压到下一行封面。
+                    MediaQuery.textScalerOf(context).scale(46.0);
                 return Column(
                   children: [
                     Expanded(
                       child: GridView.builder(
                         controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+                        // v1.6.7（F-4）：底部让出悬浮「筛选」FAB（高 ~46
+                        // + 边距 16 + 余量）+ 手势区，末行卡不再被盖住。
+                        padding: EdgeInsets.fromLTRB(
+                            8, 0, 8, 72 + MediaQuery.paddingOf(context).bottom),
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           mainAxisSpacing: StyleString.cardSpace - 2,
                           crossAxisSpacing: StyleString.cardSpace,
