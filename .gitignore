@@ -7,3 +7,10 @@ tool-results/
 worklog.md
 node_modules/
 test/failures/
+.dart_tool/
+.flutter-plugins-dependencies
+.flutter-plugins
+build/
+*.iml
+.gradle/
+local.properties
