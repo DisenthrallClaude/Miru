@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:miru/pages/player/playback_mask_logic.dart';
 import 'package:miru/pages/player/player_controller.dart';
 
 class PlayerItemSurface extends StatefulWidget {
@@ -26,19 +27,22 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
   Widget build(BuildContext context) {
     final playerController = widget.playerController;
     return Observer(builder: (context) {
-      // v1.6.7（P-1）：「真正开始」以 mpv 的真实首帧信号为准
-      //（videoParams 宽高就绪 / 时长已知），不再信任 playing——
-      // media_kit 在 loadlist 命令提交瞬间即强制 playing=true（fork
-      // real.dart:221-225），与画面无关。loading 只在视频尚未开始时
-      // 挡画面（实例仍在装配）；一旦渲染过即常驻（P-2）。
+      // v1.6.8（F2/R-2）：与 video_page 遮罩同款信号——首帧（videoParams
+      // 宽高就绪）或纯音频延迟兑底，duration 不再即时背书（HLS VOD
+      // 时长远早于首帧，v1.6.7 拿它置位会把黑窗提前放出）。loading
+      // 因子移除后，「装配完成→首帧」窗口这里保持黑底，指示交给
+      // PlayerItem 的 spinner 与页面遮罩；_everRendered 继续承担 P-2
+      // 粘性语义（换集/换源不卸载 Video）。
       final playback = playerController.playback;
-      final bool actuallyStarted =
-          playback.hasVideoParams || playback.duration > Duration.zero;
+      final bool actuallyStarted = playbackActuallyStarted(
+        hasVideoParams: playback.hasVideoParams,
+        hasAudioOnlyFallback: playback.hasAudioOnlyFallback,
+      );
       if (actuallyStarted) {
         _everRendered = true;
       }
       final bool notReady = playback.videoController == null ||
-          (playback.loading && !_everRendered && !actuallyStarted);
+          (!_everRendered && !actuallyStarted);
       if (notReady) {
         return Container(
           color: Colors.black,

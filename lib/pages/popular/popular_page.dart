@@ -224,10 +224,16 @@ class _PopularPageState extends State<PopularPage> {
                           // 防双击（N4）：重试进行中直接挡掉，避免并发
                           // 两次请求把 offset 双推进而静默跳页。
                           if (popularController.isLoadingMore) return;
-                          if (popularController.trendList.isEmpty) {
-                            popularController.queryBangumiByTrend();
-                          } else {
+                          // v1.6.8（W-🔵1）：重试分支必须与 contentGrid/
+                          // scrollListener 同口径按 currentTag 取数——
+                          // 此前用 trendList.isEmpty 判定，冷启动热门加载
+                          // 失败（trendList 空）后切标签又失败的场景会错
+                          // 误重拉热门，成功后按标签视图渲染空的
+                          // bangumiList，页面变成无状态空白。
+                          if (popularController.currentTag != '') {
                             popularController.queryBangumiByTag();
+                          } else {
+                            popularController.queryBangumiByTrend();
                           }
                         },
                         onSettingsReturned: () {

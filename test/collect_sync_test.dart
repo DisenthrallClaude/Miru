@@ -17,6 +17,8 @@ void main() {
         webDavEnabled: true,
         webDavCollectiblesEnabled: false,
         bangumiEnabled: false,
+        githubEnabled: false,
+        githubCollectiblesEnabled: false,
       );
 
       expect(plan.shouldSyncWebDavCollectibles, isFalse);
@@ -29,6 +31,8 @@ void main() {
         webDavEnabled: true,
         webDavCollectiblesEnabled: false,
         bangumiEnabled: true,
+        githubEnabled: false,
+        githubCollectiblesEnabled: false,
       );
 
       expect(plan.shouldSyncWebDavCollectibles, isFalse);
@@ -41,6 +45,8 @@ void main() {
         webDavEnabled: true,
         webDavCollectiblesEnabled: true,
         bangumiEnabled: false,
+        githubEnabled: false,
+        githubCollectiblesEnabled: false,
       );
 
       expect(plan.shouldSyncWebDavCollectibles, isTrue);
@@ -53,6 +59,8 @@ void main() {
         webDavEnabled: true,
         webDavCollectiblesEnabled: true,
         bangumiEnabled: true,
+        githubEnabled: false,
+        githubCollectiblesEnabled: false,
       );
 
       expect(
@@ -69,6 +77,49 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    // v1.6.8（W-🟡2）：GitHub 通道纳入 CollectSyncPlan。
+    test('allows GitHub-only collectible sync', () {
+      const plan = CollectSyncPlan(
+        webDavEnabled: false,
+        webDavCollectiblesEnabled: false,
+        bangumiEnabled: false,
+        githubEnabled: true,
+        githubCollectiblesEnabled: true,
+      );
+
+      expect(plan.shouldSyncGithubCollectibles, isTrue);
+      expect(plan.shouldSyncWebDavCollectibles, isFalse);
+      expect(plan.shouldSyncBangumi, isFalse);
+      expect(plan.canSync, isTrue);
+    });
+
+    test('GitHub collectible flag alone (master switch off) cannot sync', () {
+      const plan = CollectSyncPlan(
+        webDavEnabled: false,
+        webDavCollectiblesEnabled: false,
+        bangumiEnabled: false,
+        githubEnabled: false,
+        githubCollectiblesEnabled: true,
+      );
+
+      expect(plan.shouldSyncGithubCollectibles, isFalse);
+      expect(plan.canSync, isFalse);
+    });
+
+    test('GitHub collectibles combine with WebDAV history-only config', () {
+      const plan = CollectSyncPlan(
+        webDavEnabled: true,
+        webDavCollectiblesEnabled: false,
+        bangumiEnabled: false,
+        githubEnabled: true,
+        githubCollectiblesEnabled: true,
+      );
+
+      expect(plan.shouldSyncWebDavCollectibles, isFalse);
+      expect(plan.shouldSyncGithubCollectibles, isTrue);
+      expect(plan.canSync, isTrue);
     });
   });
 

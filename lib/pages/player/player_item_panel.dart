@@ -40,6 +40,7 @@ class PlayerItemPanel extends StatefulWidget {
     required this.handlePreNextEpisode,
     required this.handleProgressBarDragStart,
     required this.handleProgressBarSeek,
+    required this.handleProgressBarDragCancel,
     required this.handleSuperResolutionChange,
     required this.panelVisibilityController,
     required this.toggleMenu,
@@ -68,6 +69,12 @@ class PlayerItemPanel extends StatefulWidget {
   final void Function() handleScreenShot;
   final VoidCallback handleProgressBarDragStart;
   final Future<void> Function(Duration duration) handleProgressBarSeek;
+
+  /// v1.6.8（F4）：进度条拖动被系统手势取消（PointerCancelEvent）时
+  /// 的收尾——audio_video_progress_bar 2.0.3 的 eager recognizer 在
+  /// cancel 路径只做内部复位、不回调 app 层的 onSeek/onDragEnd，拖动
+  /// 会话（暂停 + timer 已停 + 面板 hold）就此泄漏。
+  final Future<void> Function() handleProgressBarDragCancel;
   final Future<void> Function(SuperResolutionMode mode)
       handleSuperResolutionChange;
   final AnimationController panelVisibilityController;
@@ -620,37 +627,49 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Observer(builder: (context) {
                 return Builder(builder: (barContext) {
-                  return ProgressBar(
-                    thumbRadius: 8,
-                    thumbGlowRadius: 18,
-                    timeLabelLocation: isTablet()
-                        ? TimeLabelLocation.sides
-                        : TimeLabelLocation.none,
-                    timeLabelTextStyle: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12.0,
-                      fontFeatures: [
-                        FontFeature.tabularFigures(),
-                      ],
-                    ),
-                    progress: playerController.playback.currentPosition,
-                    buffered: playerController.playback.buffer,
-                    total: playerController.playback.duration,
-                    onSeek: widget.handleProgressBarSeek,
-                    onDragStart: (_) => widget.handleProgressBarDragStart(),
-                    // 拖动中的实时目标按拇指几何位置换算（见
-                    // thumbDragPositionToDuration 的说明），不再依赖
-                    // 语义易误读的 details.timeStamp。
-                    onDragUpdate: (details) {
-                      final target = thumbDragPositionToDuration(
-                        barContext,
-                        details.localPosition,
-                        playerController.playback.duration,
-                      );
-                      if (target != null) {
-                        playerController.seeking.updateInteractiveSeek(target);
-                      }
+                  // v1.6.8（F4）：系统手势（边缘返回/通知下拉）取消进度条
+                  // 拖动时，包内 recognizer 只复位自己的拖动标记、不回调
+                  // app 层——包一层 Listener 捕获 PointerCancelEvent，按
+                  // 当前目标提交收尾（commit 会释放 hold、复活 timer、
+                  // 恢复播放；无拖动会话时是幂等 no-op）。
+                  return Listener(
+                    onPointerCancel: (_) {
+                      widget.handleProgressBarDragCancel();
                     },
+                    child: ProgressBar(
+                      thumbRadius: 8,
+                      thumbGlowRadius: 18,
+                      timeLabelLocation: isTablet()
+                          ? TimeLabelLocation.sides
+                          : TimeLabelLocation.none,
+                      timeLabelTextStyle: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12.0,
+                        fontFeatures: [
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                      progress: playerController.playback.currentPosition,
+                      buffered: playerController.playback.buffer,
+                      total: playerController.playback.duration,
+                      onSeek: widget.handleProgressBarSeek,
+                      onDragStart: (_) =>
+                          widget.handleProgressBarDragStart(),
+                      // 拖动中的实时目标按拇指几何位置换算（见
+                      // thumbDragPositionToDuration 的说明），不再依赖
+                      // 语义易误读的 details.timeStamp。
+                      onDragUpdate: (details) {
+                        final target = thumbDragPositionToDuration(
+                          barContext,
+                          details.localPosition,
+                          playerController.playback.duration,
+                        );
+                        if (target != null) {
+                          playerController.seeking
+                              .updateInteractiveSeek(target);
+                        }
+                      },
+                    ),
                   );
                 });
               }),

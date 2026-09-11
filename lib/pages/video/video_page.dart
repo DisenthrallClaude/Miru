@@ -3,6 +3,7 @@ import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/pages/player/playback_mask_logic.dart';
 import 'package:miru/pages/video/video_controller.dart';
 import 'package:miru/pages/video/danmaku_send_sheet.dart';
 import 'package:miru/pages/video/video_playback_args.dart';
@@ -370,10 +371,10 @@ class _VideoPageState extends State<VideoPage>
       // 跳到 index 1（第二格），固定 4 列同行看不出来，列数自适应后会
       // 真实跳偏。
       final selection = videoPageController.selectedEpisode;
-      final maxIndex =
-          selection.road >= 0 && selection.road < videoPageController.roadList.length
-              ? videoPageController.roadList[selection.road].data.length - 1
-              : 0;
+      final maxIndex = selection.road >= 0 &&
+              selection.road < videoPageController.roadList.length
+          ? videoPageController.roadList[selection.road].data.length - 1
+          : 0;
       await observerController.jumpTo(
         index: (selection.episode - 1).clamp(0, maxIndex < 0 ? 0 : maxIndex),
       );
@@ -737,9 +738,8 @@ class _VideoPageState extends State<VideoPage>
         color: Theme.of(context).canvasColor,
         child: GridViewObserver(
           controller: observerController,
-          child: (isDesktop() || isTablet())
-              ? tabBody
-              : _mobileLandscapeSidePanel,
+          child:
+              (isDesktop() || isTablet()) ? tabBody : _mobileLandscapeSidePanel,
         ),
       ),
     );
@@ -761,8 +761,7 @@ class _VideoPageState extends State<VideoPage>
             dividerHeight: 0,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            labelPadding:
-                const EdgeInsetsDirectional.only(start: 16, end: 16),
+            labelPadding: const EdgeInsetsDirectional.only(start: 16, end: 16),
             onTap: (index) {
               if (index == 0) {
                 menuJumpToCurrentEpisode();
@@ -785,8 +784,7 @@ class _VideoPageState extends State<VideoPage>
                         menuBody,
                       ],
                     ),
-                    if (!videoPageController.isOfflineMode)
-                      _buildDownloadFab(),
+                    if (!videoPageController.isOfflineMode) _buildDownloadFab(),
                   ],
                 ),
                 EpisodeCommentsSheet(
@@ -831,17 +829,24 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Widget get playerBody {
-    // v1.6.7（P-1）：遮罩只在「视频尚未真正开始」时显示。
+    // v1.6.8（F2/R-2）：遮罩只在「视频尚未真正开始」时显示，且
+    // 「真正开始」= 首帧信号（videoParams 宽高就绪）或纯音频延迟兑底
+    //（hasAudioOnlyFallback：duration 已知 3s 后仍无首帧才置位）。
     //
-    // v1.6.4 曾以 playing 为准，但 media_kit 在 `loadlist` 命令【提交
-    // 瞬间】即强制 playing=true（fork real.dart:221-225），与画面无关——
-    // 遮罩撤得过早，把「解析完成→首帧渲染」的黑窗口（期间 mpv 音频
-    // 包小先出声）完全暴露：用户听到声音、看到纯黑、且无转圈。
-    // 现在以 mpv 的真实首帧信号为准：videoParams 宽高就绪（首帧解码
-    // 后才有）或已知时长（纯音频源兑底），遮罩立即撤下。
+    // v1.6.7 曾拿 duration>0 即时兑底，但 HLS VOD 的 duration 在清单
+    // 解析即知、远早于首帧——遮罩提前撤下，「出声→首帧」的黑窗（mpv
+    // 音频包小先出声、视频首帧要等解码+mediacodec+GPU 上载）整个暴露
+    // 给用户：有声 + 纯黑 + 无转圈。另：playerLoading 不再乘
+    // playback.loading 因子——装配结束（loading=false）到首帧之间
+    // 遮罩保持覆盖（转圈 + 「已解析完成，正在缓冲视频…」文案），
+    // 首帧/纯音频判定到达才撤。两信号均为每集 sticky、softStop 复位，
+    // 播放中暂停不会误亮遮罩。谓词收敛在 playback_mask_logic.dart
+    //（可单测锁定五场景状态机）。
     final playback = playerController.playback;
-    final bool playerActuallyStarted = playback.hasVideoParams ||
-        playback.duration > Duration.zero;
+    final bool playerActuallyStarted = playbackActuallyStarted(
+      hasVideoParams: playback.hasVideoParams,
+      hasAudioOnlyFallback: playback.hasAudioOnlyFallback,
+    );
     if (playerActuallyStarted) {
       // v1.6.7（P-2）：页面会话粘性标志——一旦真正播过，换集/换源的
       // loading 期间不再整体卸载 PlayerItem（Video 卸载会销毁 Texture →
@@ -849,15 +854,18 @@ class _VideoPageState extends State<VideoPage>
       // 起点拽回 0）；黑屏观感由上层遮罩负责。
       _playerEverStarted = true;
     }
-    final bool playerLoading = playback.loading && !playerActuallyStarted;
+    // R-2：去掉 playback.loading 因子——装配结束→首帧之间遮罩保持覆盖。
+    final bool playerLoading = !playerActuallyStarted;
     return Stack(
       children: [
         Positioned.fill(
           child: Stack(
             children: [
-              if (videoPageController.loading ||
-                  playerLoading ||
-                  videoPageController.errorMessage != null)
+              if (playbackMaskVisible(
+                pageLoading: videoPageController.loading,
+                actuallyStarted: playerActuallyStarted,
+                errorMessage: videoPageController.errorMessage,
+              ))
                 Container(
                   color: Colors.black,
                   child: Observer(builder: (context) {
@@ -1011,14 +1019,22 @@ class _VideoPageState extends State<VideoPage>
           ),
         ),
         Positioned.fill(
-          // v1.6.7（P-2）：同遮罩条件的首帧语义 + 页面会话粘性标志——
-          // 首次真正开播前挂 Container()（实例装配期），开播后【本页
-          // 会话内常驻】：换集/换源 loading 期间不再卸载（Texture 销毁
-          // 重建会触发 widListener 的 vo 拆挂 + seek 竞态），黑屏由
-          // 上层遮罩覆盖。
-          child: (playerController.playback.loading && !_playerEverStarted)
-              ? Container()
-              : PlayerItem(
+          // v1.6.7（P-2）+ v1.6.8（F3/R-12）：同遮罩条件的首帧语义 +
+          // 页面会话粘性标志——首次真正开播前挂 Container()（实例装配
+          // 期），开播后【本页会话内常驻】：换集/换源 loading 期间不再
+          // 卸载（Texture 销毁重建会触发 widListener 的 vo 拆挂 + seek
+          // 竞态）。唯一豁免：errorMessage 非空——错误是本集终态（mpv
+          // 已停/未起、video-params 已清、position=0），卸载 Video 无
+          // vo 竞态风险；而 PlayerItem 是本 Stack 最上层的不透明黑底，
+          // 不卸载会把错误页/重试按钮/顶栏全部遮死（v1.6.7 回归：
+          // 换集失败后黑屏永转圈零入口）。重试（changeEpisode →
+          // _beginEpisodeSwitch 清 errorMessage）与正常链路完全一致。
+          child: playerItemMounted(
+            assemblyLoading: playerController.playback.loading,
+            everStarted: _playerEverStarted,
+            errorMessage: videoPageController.errorMessage,
+          )
+              ? PlayerItem(
                   playerController: playerController,
                   videoPageController: videoPageController,
                   toggleMenu: _toggleTabBodyAnimated,
@@ -1032,7 +1048,8 @@ class _VideoPageState extends State<VideoPage>
                   showDanmakuDestinationPickerAndSend:
                       showDanmakuDestinationPickerAndSend,
                   pauseForTimedShutdown: pauseForTimedShutdown,
-                ),
+                )
+              : Container(),
         ),
       ],
     );
@@ -1220,9 +1237,15 @@ class _VideoPageState extends State<VideoPage>
                 clipBehavior: Clip.hardEdge,
                 child: InkWell(
                   onTap: () async {
-                    if (count0 == videoPageController.selectedEpisode.episode &&
-                        videoPageController.selectedEpisode.road ==
-                            visibleRoad) {
+                    final bool isCurrentSelection = count0 ==
+                            videoPageController.selectedEpisode.episode &&
+                        videoPageController.selectedEpisode.road == visibleRoad;
+                    if (isCurrentSelection &&
+                        // v1.6.8（F3）：失败终态下当前集卡片 = 重试入口。
+                        // 去重只挡「正在播/正在解析的当前集」；解析失败的
+                        // 错误页被 PlayerItem 黑底遮住的年代里，这张被去重
+                        // 吞掉的卡片曾是唯一无反馈的死入口——显式放行。
+                        videoPageController.errorMessage == null) {
                       return;
                     }
                     MiruLogger()
@@ -1247,21 +1270,21 @@ class _VideoPageState extends State<VideoPage>
                               const SizedBox(width: 6)
                             ],
                             Expanded(
-                                child: Text(
-                                  episodeName,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight:
-                                        isCurrent ? FontWeight.w600 : null,
-                                    color: isCurrent
-                                        ? scheme.onPrimaryContainer
-                                        : (isWatched
-                                            ? scheme.onSurfaceVariant
-                                            : scheme.onSurface),
-                                  ),
+                              child: Text(
+                                episodeName,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight:
+                                      isCurrent ? FontWeight.w600 : null,
+                                  color: isCurrent
+                                      ? scheme.onPrimaryContainer
+                                      : (isWatched
+                                          ? scheme.onSurfaceVariant
+                                          : scheme.onSurface),
                                 ),
+                              ),
                             ),
                             // 已看角标：100+ 集长番选集面板最大的信息缺口。
                             if (isWatched)

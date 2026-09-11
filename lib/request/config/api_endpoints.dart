@@ -176,8 +176,10 @@ class ApiEndpoints {
   /// 获取弹幕
   static const String dandanAPIComment = "/api/v2/comment/";
 
-  /// 检索弹弹番剧元数据
-  static const String dandanAPISearch = "/api/v2/search/anime";
+  /// 检索弹弹番剧元数据（手动弹幕检索用 episodes 端点，不封顶；
+  /// 旧 /search/anime 端点 25 条封顶且旧引擎会折叠关键词——上游
+  /// Kazumi c32db78 的教训）
+  static const String dandanAPISearchEpisodes = "/api/v2/search/episodes";
 
   /// 获取弹弹番剧元数据
   static const String dandanAPIInfo = "/api/v2/bangumi/";

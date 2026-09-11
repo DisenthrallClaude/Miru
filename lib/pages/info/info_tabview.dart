@@ -292,7 +292,9 @@ class _InfoTabViewState extends State<InfoTabView>
                     horizontalPadding,
                     16,
                     horizontalPadding,
-                    16,
+                    // F-3 修复漏了关联 Tab：末行卡被「开始观看」FAB 盖住，
+                    // 对齐吐槽/制作人员/角色三个 Tab 已修的让位量（96+bottom）。
+                    96 + MediaQuery.paddingOf(context).bottom,
                   ),
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -778,17 +780,14 @@ class _RelatedBangumiCardV extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Hero(
-                transitionOnUserGestures: true,
-                flightShuttleBuilder:
-                    NetworkImgLayer.heroFlightShuttleBuilder,
-                tag: bangumiItem.id,
-                child: NetworkImgLayer(
-                  src: bangumiItem.images['large'] ?? '',
-                  width: constraints.maxWidth,
-                  height: imageHeight,
-                  origAspectRatio: posterAspectRatio,
-                ),
+              // 不包 Hero（同步自上游 Kazumi 49c1935 / #2501）：横滑小卡与
+              // 父页大封面同 tag 的飞行动画起终点尺寸悬殊，视觉破碎；
+              // 父页主封面的 Hero 转场不受影响。
+              NetworkImgLayer(
+                src: bangumiItem.images['large'] ?? '',
+                width: constraints.maxWidth,
+                height: imageHeight,
+                origAspectRatio: posterAspectRatio,
               ),
               const SizedBox(height: 6),
               Text(

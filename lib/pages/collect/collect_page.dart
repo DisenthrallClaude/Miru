@@ -65,11 +65,16 @@ class _CollectPageState extends State<CollectPage>
     required CollectSyncPlan plan,
     required bool webDavSynced,
     required bool bangumiSynced,
+    required bool githubSynced,
     required bool webDavUploaded,
   }) {
     final List<String> states = [];
     if (plan.shouldSyncWebDavCollectibles) {
       states.add(webDavSynced ? 'WebDav 已同步' : 'WebDav 未完成');
+    }
+    // v1.6.8（W-🟡2）：GitHub 通道单独汇报。
+    if (plan.shouldSyncGithubCollectibles) {
+      states.add(githubSynced ? 'GitHub 已同步' : 'GitHub 未完成');
     }
     if (plan.shouldSyncBangumi) {
       states.add(bangumiSynced ? 'Bangumi 已同步' : 'Bangumi 未完成');
@@ -96,13 +101,31 @@ class _CollectPageState extends State<CollectPage>
 
     bool webDavSynced = false;
     bool bangumiSynced = false;
+    bool githubSynced = false;
     bool webDavUploaded = false;
+    // v1.6.8（W-🟡2）：云端通道（WebDAV / GitHub）各自独立排程，混合
+    // 配置下两通道先后各同步一次，顺序与原 syncCollectibles 内部的
+    // 分发顺序一致（WebDAV → GitHub）；GitHub-only 用户此前根本进
+    // 不了这个方法（canSync 误判）。
+    final bool syncedCloudCollectibles = plan.shouldSyncWebDavCollectibles ||
+        plan.shouldSyncGithubCollectibles;
 
     try {
       if (plan.shouldSyncWebDavCollectibles) {
         progressDialogKey.currentState?.update('正在同步 WebDav 收藏…', null);
-        webDavSynced =
-            await collectController.syncCollectibles(showSuccessToast: false);
+        webDavSynced = await collectController.syncCollectiblesViaWebDav(
+            showSuccessToast: false);
+      }
+
+      if (plan.shouldSyncGithubCollectibles) {
+        progressDialogKey.currentState?.update('正在同步 GitHub 收藏…', null);
+        githubSynced = await collectController.syncCollectiblesViaGithub(
+            showSuccessToast: false);
+      }
+
+      if (syncedCloudCollectibles) {
+        // 与原 syncCollectibles 收尾对齐：云端合并完成后重载收藏列表。
+        collectController.loadCollectibles();
       }
 
       if (plan.shouldSyncBangumi) {
@@ -131,6 +154,7 @@ class _CollectPageState extends State<CollectPage>
         plan: plan,
         webDavSynced: webDavSynced,
         bangumiSynced: bangumiSynced,
+        githubSynced: githubSynced,
         webDavUploaded: webDavUploaded,
       ),
     );
@@ -183,10 +207,19 @@ class _CollectPageState extends State<CollectPage>
                   GStorage.getSetting(SettingsKeys.webDavEnableCollect);
               bool bgmSyncEnable =
                   GStorage.getSetting(SettingsKeys.bangumiSyncEnable);
+              // v1.6.8（W-🟡2）：补 GitHub 通道判定——GitHub-only 用户
+              // 此前被误报「同步功能不可用」，而同一能力在 GitHub 设置页
+              // 与启动自动同步里都可用。
+              bool githubEnable =
+                  GStorage.getSetting(SettingsKeys.githubEnable);
+              bool githubCollectEnable =
+                  GStorage.getSetting(SettingsKeys.githubEnableCollect);
               final syncPlan = CollectSyncPlan(
                 webDavEnabled: webDavenable,
                 webDavCollectiblesEnabled: webDavCollectEnable,
                 bangumiEnabled: bgmSyncEnable,
+                githubEnabled: githubEnable,
+                githubCollectiblesEnabled: githubCollectEnable,
               );
               if (!syncPlan.canSync) {
                 MiruDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');

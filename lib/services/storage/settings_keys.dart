@@ -244,11 +244,8 @@ class SettingsKeys {
     true,
     group: SettingGroup.proxy,
   );
-  static const enableSystemProxy = SettingKey<bool>(
-    _SettingBoxKey.enableSystemProxy,
-    false,
-    group: SettingGroup.proxy,
-  );
+  // v1.6.8（W-🔵4）：删除死设置键 enableSystemProxy——116 键全仓消费者
+  // 扫描零读写方（UI 开关与逻辑消费均已不存在），随 E9 死键清理同批移除。
   static const defaultStartupPage = SettingKey<String>(
     _SettingBoxKey.defaultStartupPage,
     '/tab/popular/',
@@ -393,11 +390,9 @@ class SettingsKeys {
     false,
     group: SettingGroup.theme,
   );
-  static const useDynamicColor = SettingKey<bool>(
-    _SettingBoxKey.useDynamicColor,
-    false,
-    group: SettingGroup.theme,
-  );
+  // v1.6.8（W-🔵4）：删除死设置键 useDynamicColor——动态配色功能已在
+  // v1.6.4 移除（app_widget.dart 注释已声明），开关与 setDynamic 调用链
+  // 均不存在，键零读写方。
   static const exitBehavior = SettingKey<int>(
     _SettingBoxKey.exitBehavior,
     2,
@@ -715,7 +710,6 @@ class SettingsKeys {
     displayMode,
     enableGitProxy,
     enableBangumiProxy,
-    enableSystemProxy,
     defaultStartupPage,
     showSplashOnEveryLaunch,
     onboardingDone,
@@ -740,7 +734,6 @@ class SettingsKeys {
     githubLastSyncTime,
     lowMemoryMode,
     showWindowButton,
-    useDynamicColor,
     exitBehavior,
     playerDebugMode,
     syncPlayEndPoint,
@@ -845,7 +838,6 @@ class _SettingBoxKey {
       displayMode = 'displayMode',
       enableGitProxy = 'enableGitProxy',
       enableBangumiProxy = 'enableBangumiProxy',
-      enableSystemProxy = 'enableSystemProxy',
       defaultStartupPage = 'defaultStartupPage',
       webDavEnable = 'webDavEnable',
       webDavEnableHistory = 'webDavEnableHistory',
@@ -863,7 +855,6 @@ class _SettingBoxKey {
       githubLastSyncTime = 'githubLastSyncTime',
       lowMemoryMode = 'lowMemoryMode',
       showWindowButton = 'showWindowButton',
-      useDynamicColor = 'useDynamicColor',
       exitBehavior = 'exitBehavior',
       playerDebugMode = 'playerDebugMode',
       syncPlayEndPoint = 'syncPlayEndPoint',

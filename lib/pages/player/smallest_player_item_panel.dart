@@ -34,6 +34,7 @@ class SmallestPlayerItemPanel extends StatefulWidget {
     required this.handleFullscreen,
     required this.handleProgressBarDragStart,
     required this.handleProgressBarSeek,
+    required this.handleProgressBarDragCancel,
     required this.handleSuperResolutionChange,
     required this.panelVisibilityController,
     required this.acquirePlayerPanelHold,
@@ -57,6 +58,11 @@ class SmallestPlayerItemPanel extends StatefulWidget {
   final void Function() handleFullscreen;
   final VoidCallback handleProgressBarDragStart;
   final Future<void> Function(Duration duration) handleProgressBarSeek;
+
+  /// v1.6.8（F4）：进度条拖动被系统手势取消（PointerCancelEvent）时
+  /// 的收尾——与全量面板同款（包内 recognizer 的 cancel 路径不回调
+  /// app 层，拖动会话会泄漏：暂停 + timer 已停 + 面板 hold）。
+  final Future<void> Function() handleProgressBarDragCancel;
   final Future<void> Function(SuperResolutionMode mode)
       handleSuperResolutionChange;
   final AnimationController panelVisibilityController;
@@ -434,28 +440,36 @@ class _SmallestPlayerItemPanelState extends State<SmallestPlayerItemPanel> {
         Expanded(
           child: Observer(builder: (context) {
             return Builder(builder: (barContext) {
-              return ProgressBar(
-                thumbRadius: 8,
-                thumbGlowRadius: 18,
-                timeLabelLocation: TimeLabelLocation.none,
-                progress: playerController.playback.currentPosition,
-                buffered: playerController.playback.buffer,
-                total: playerController.playback.duration,
-                onSeek: widget.handleProgressBarSeek,
-                onDragStart: (_) => widget.handleProgressBarDragStart(),
-                // 拖动中的实时目标按拇指几何位置换算（见
-                // thumbDragPositionToDuration 的说明），不再依赖语义
-                // 易误读的 details.timeStamp。
-                onDragUpdate: (details) {
-                  final target = thumbDragPositionToDuration(
-                    barContext,
-                    details.localPosition,
-                    playerController.playback.duration,
-                  );
-                  if (target != null) {
-                    playerController.seeking.updateInteractiveSeek(target);
-                  }
+              // v1.6.8（F4）：同全量面板——Listener 捕获进度条拖动的
+              // PointerCancelEvent，按当前目标提交收尾（无拖动会话时
+              // 是幂等 no-op）。
+              return Listener(
+                onPointerCancel: (_) {
+                  widget.handleProgressBarDragCancel();
                 },
+                child: ProgressBar(
+                  thumbRadius: 8,
+                  thumbGlowRadius: 18,
+                  timeLabelLocation: TimeLabelLocation.none,
+                  progress: playerController.playback.currentPosition,
+                  buffered: playerController.playback.buffer,
+                  total: playerController.playback.duration,
+                  onSeek: widget.handleProgressBarSeek,
+                  onDragStart: (_) => widget.handleProgressBarDragStart(),
+                  // 拖动中的实时目标按拇指几何位置换算（见
+                  // thumbDragPositionToDuration 的说明），不再依赖语义
+                  // 易误读的 details.timeStamp。
+                  onDragUpdate: (details) {
+                    final target = thumbDragPositionToDuration(
+                      barContext,
+                      details.localPosition,
+                      playerController.playback.duration,
+                    );
+                    if (target != null) {
+                      playerController.seeking.updateInteractiveSeek(target);
+                    }
+                  },
+                ),
               );
             });
           }),

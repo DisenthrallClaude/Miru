@@ -32,6 +32,7 @@ import 'package:miru/modules/danmaku/danmaku_search_response.dart';
 import 'package:miru/modules/danmaku/danmaku_episode_response.dart';
 import 'package:miru/modules/danmaku/danmaku_module.dart';
 import 'package:miru/pages/player/controller/player_danmaku_controller.dart';
+import 'package:miru/pages/player/playback_mask_logic.dart';
 import 'package:miru/pages/player/player_item_surface.dart';
 import 'package:mobx/mobx.dart' as mobx;
 import 'package:miru/pages/my/my_controller.dart';
@@ -430,7 +431,7 @@ class _PlayerItemState extends State<PlayerItem>
       return;
     }
     _seekWithPlayerTimer(() => playerController.seekBy(
-          Duration(seconds: zone * playerController.playback.buttonSkipTime)));
+        Duration(seconds: zone * playerController.playback.buttonSkipTime)));
     playerController.panel.seekDirection = zone;
     playerController.panel.showSeekTime = true;
     _doubleTapSeekHudTimer?.cancel();
@@ -1534,8 +1535,18 @@ class _PlayerItemState extends State<PlayerItem>
                         playerController: playerController,
                       ),
                     ),
-                    (playerController.playback.isBuffering ||
-                            videoPageController.loading)
+                    // v1.6.8（F2）：首帧前一律有「缓冲中」指示——
+                    // isBuffering 在 fork stop→START_FILE 的间隙会短暂
+                    // 翻 false，而 videoParams/纯音频兑底未到时画面还是
+                    // 黑的，转圈不能跟着熄灭（有声黑屏的残留形态正是
+                    // 「spinner 熄灭 + 画面仍黑数秒」）。
+                    playerItemSpinnerVisible(
+                      isBuffering: playerController.playback.isBuffering,
+                      pageLoading: videoPageController.loading,
+                      hasVideoParams: playerController.playback.hasVideoParams,
+                      hasAudioOnlyFallback:
+                          playerController.playback.hasAudioOnlyFallback,
+                    )
                         ? const Positioned.fill(
                             child: Center(
                               child: CircularProgressIndicator(),
@@ -1593,38 +1604,43 @@ class _PlayerItemState extends State<PlayerItem>
                         top: danmakuTopInset,
                         left: 0,
                         right: 0,
-                        height:
-                            (videoPageController.isFullscreen ||
+                        height: (videoPageController.isFullscreen ||
                                     videoPageController.isPip
                                 ? MediaQuery.sizeOf(context).height
                                 : (MediaQuery.sizeOf(context).width * 9 / 16)) -
-                                danmakuTopInset,
+                            danmakuTopInset,
                         child: DanmakuScreen(
-                        key: _danmuKey,
-                        createdController: (DanmakuController e) {
-                          playerController.danmaku.canvasController = e;
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            playerController.updateDanmakuSpeed();
-                          });
-                        },
-                        option: DanmakuOption(
-                          hideTop: _hideTop,
-                          hideScroll: _hideScroll,
-                          hideBottom: _hideBottom,
-                          area: _danmakuArea,
-                          opacity: _opacity,
-                          fontSize: _fontSize,
-                          duration: _danmakuDuration /
-                              playerController.playback.playerSpeed,
-                          lineHeight: _danmakuLineHeight,
-                          strokeWidth: _border ? _danmakuBorderSize : 0.0,
-                          fontWeight: _danmakuFontWeight,
-                          massiveMode: _massiveMode,
-                          fontFamily: _danmakuUseSystemFont
-                              ? null
-                              : customAppFontFamily,
+                          key: _danmuKey,
+                          createdController: (DanmakuController e) {
+                            playerController.danmaku.canvasController = e;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              playerController.updateDanmakuSpeed();
+                            });
+                          },
+                          option: DanmakuOption(
+                            hideTop: _hideTop,
+                            hideScroll: _hideScroll,
+                            hideBottom: _hideBottom,
+                            area: _danmakuArea,
+                            opacity: _opacity,
+                            fontSize: _fontSize,
+                            // v1.6.8（K-1，Kazumi bd66ce5）：种子值用未缩放的
+                            // 存储秒数——倍速缩放交给 createdController 的
+                            // postFrame updateDanmakuSpeed()（按「跟随倍速」
+                            // 设置决定是否除以 playerSpeed）。此前无条件
+                            // /playerSpeed：跟随倍速关闭时种子值错、开启时
+                            // 面板滑条背书的是缩放运行值（2x 下显示/存储
+                            // 减半值）。
+                            duration: _danmakuDuration,
+                            lineHeight: _danmakuLineHeight,
+                            strokeWidth: _border ? _danmakuBorderSize : 0.0,
+                            fontWeight: _danmakuFontWeight,
+                            massiveMode: _massiveMode,
+                            fontFamily: _danmakuUseSystemFont
+                                ? null
+                                : customAppFontFamily,
+                          ),
                         ),
-                      ),
                       );
                     }),
                     Positioned.fill(
@@ -1645,6 +1661,10 @@ class _PlayerItemState extends State<PlayerItem>
                             handleProgressBarDragStart:
                                 handleProgressBarDragStart,
                             handleProgressBarSeek: handleProgressBarSeek,
+                            // v1.6.8（F4）：进度条拖动被系统手势取消时
+                            // 的收尾钩子（提交当前 seek 目标、释放面板
+                            // hold、复活 1Hz timer）。
+                            handleProgressBarDragCancel: _commitInteractiveSeek,
                             handleSuperResolutionChange:
                                 handleSuperResolutionChange,
                             handlePreNextEpisode: handlePreNextEpisode,
@@ -1676,6 +1696,9 @@ class _PlayerItemState extends State<PlayerItem>
                             handleProgressBarDragStart:
                                 handleProgressBarDragStart,
                             handleProgressBarSeek: handleProgressBarSeek,
+                            // v1.6.8（F4）：同全量面板——进度条拖动被
+                            // 系统手势取消时的收尾钩子。
+                            handleProgressBarDragCancel: _commitInteractiveSeek,
                             handleSuperResolutionChange:
                                 handleSuperResolutionChange,
                             panelVisibilityController:
@@ -1728,6 +1751,25 @@ class _PlayerItemState extends State<PlayerItem>
                                   unawaited(
                                     _commitInteractiveSeek(),
                                   );
+                                }
+                              },
+                              // v1.6.8（F4）：系统手势（边缘返回/通知下拉/
+                              // 来电）接管横滑时 onHorizontalDragEnd 不会
+                              // 触发——拖动开始即 pause + 杀掉 1Hz timer
+                              // + 租下面板，没有收尾就卡死在「暂停 + 进度
+                              // 冻结 + 面板永不自动隐藏」。与 End 同款
+                              // 收尾：提交或放弃当前 seek 并复活 timer
+                              //（纵手势的 Cancel 同层早已注册）。
+                              onHorizontalDragCancel: () {
+                                playerController.panel.showSeekTime = false;
+                                playerController.panel.seekDirection = 0;
+                                if (playerController
+                                    .seeking.hasActiveInteractiveSeek) {
+                                  unawaited(
+                                    _commitInteractiveSeek(),
+                                  );
+                                } else {
+                                  _restartPlayerTimer();
                                 }
                               },
                               onVerticalDragUpdate:

@@ -60,6 +60,21 @@ class _DanmakuSettingsSheet extends StatefulWidget {
 class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
   DanmakuOption get _option => widget.danmakuController.option;
 
+  /// v1.6.8（K-1，Kazumi bd66ce5）：滑条背书存储值而非运行值。
+  ///
+  /// 「跟随视频倍速」开启时 _option.duration 是 baseDuration/playerSpeed
+  /// 的【运行值】：2x 倍速下打开面板显示减半值、拖动写库的是缩放值
+  /// ——存储偏好被污染、滑条读数漂移。显示与存储统一用未缩放秒数；
+  /// 预览渲染交给 onUpdateDanmakuSpeed → updateDanmakuSpeed 按存储值
+  /// + 倍速设置重算（关闭「跟随倍速」时即原值，开启时按倍速缩放）。
+  late double _duration;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = GStorage.getSetting<double>(SettingsKeys.danmakuDuration);
+  }
+
   void _applyOption(DanmakuOption option) {
     setState(() => widget.danmakuController.updateOption(option));
   }
@@ -167,16 +182,24 @@ class _DanmakuSettingsSheetState extends State<_DanmakuSettingsSheet> {
                       SettingsSliderTile(
                         leading: Icons.timer_rounded,
                         title: Text('持续时间'),
-                        value: _option.duration.toDouble(),
+                        // v1.6.8（K-1）：value/label 用未缩放存储值
+                        //（见 _duration 字段注释），不用 _option.duration。
+                        value: _duration,
                         min: 2,
                         max: 16,
                         divisions: 14,
-                        valueLabel: '${_option.duration.round()} 秒',
+                        valueLabel: '${_duration.round()} 秒',
                         onChanged: (value) {
-                          _applyOption(_option.copyWith(duration: value));
+                          // v1.6.8（K-1）：显示/存储统一用未缩放秒数；
+                          // 运行值不再经 copyWith(duration:) 双写——
+                          // 由 onUpdateDanmakuSpeed 从存储推导（按「跟随
+                          // 倍速」设置决定是否缩放），口径唯一。
+                          setState(() {
+                            _duration = value.roundToDouble();
+                          });
                           GStorage.putSetting<double>(
-                              SettingsKeys.danmakuDuration,
-                              value.roundToDouble());
+                              SettingsKeys.danmakuDuration, _duration);
+                          widget.onUpdateDanmakuSpeed?.call();
                         },
                       ),
                       SettingsSliderTile(

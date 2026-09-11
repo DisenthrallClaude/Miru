@@ -4,7 +4,6 @@ import 'package:miru/services/logging/logger.dart';
 import 'package:miru/modules/danmaku/danmaku_module.dart';
 import 'package:miru/modules/danmaku/danmaku_search_response.dart';
 import 'package:miru/modules/danmaku/danmaku_episode_response.dart';
-import 'package:miru/utils/string_similarity.dart';
 
 class DanmakuApi {
   static final DanmakuClient _client = DanmakuClient.instance;
@@ -20,50 +19,6 @@ class DanmakuApi {
     return danmakuEpisodeResponse.bangumiId;
   }
 
-  // 从标题获取DanDanBangumiID
-  static Future<int> getBangumiIDByTitle(String title) async {
-    DanmakuSearchResponse danmakuSearchResponse =
-        await getDanmakuSearchResponse(title);
-
-    int bestAnimeId = 0;
-    double maxSimilarity = 0;
-
-    for (var anime in danmakuSearchResponse.animes) {
-      int animeId = anime.animeId;
-      if (animeId >= 100000 || animeId < 2) {
-        continue;
-      }
-
-      String animeTitle = anime.animeTitle;
-      double similarity = calculateSimilarity(animeTitle, title);
-      if (similarity == 1) {
-        MiruLogger().i('Danmaku: total match $title');
-        return animeId;
-      }
-
-      if (similarity > maxSimilarity) {
-        maxSimilarity = similarity;
-        bestAnimeId = animeId;
-        MiruLogger().i(
-            'Danmaku: match anime danmaku $title --- $animeTitle similarity: $similarity');
-      }
-    }
-
-    return bestAnimeId;
-  }
-
-  // 从BangumiID获取分集ID
-  static Future<DanmakuEpisodeResponse> getDanmakuEpisodesByBangumiID(
-      int bangumiID) async {
-    var path = ApiEndpoints.formatUrl(
-        ApiEndpoints.dandanAPIInfoByBgmBangumiId, [bangumiID]);
-    var endPoint = ApiEndpoints.dandanAPIDomain + path;
-    final jsonData = await _client.get(endPoint);
-    DanmakuEpisodeResponse danmakuEpisodeResponse =
-        DanmakuEpisodeResponse.fromJson(jsonData);
-    return danmakuEpisodeResponse;
-  }
-
   // 从DanDanBangumiID获取分集ID
   static Future<DanmakuEpisodeResponse> getDanDanEpisodesByDanDanBangumiID(
       int bangumiID) async {
@@ -75,19 +30,25 @@ class DanmakuApi {
     return danmakuEpisodeResponse;
   }
 
-  // 从标题检索DanDan番剧数据库
+  /// 手动弹幕检索入口。
+  ///
+  /// `/api/v2/search/anime` 结果 25 条封顶且无分页参数，大 franchises
+  /// （名侦探柯南 48 条）的主系列会被截掉；此端点不封顶，但必须带
+  /// `v2`：旧引擎会把关键词折叠成单条。其内联分集列表是截断的，
+  /// 分集仍走 [getDanDanEpisodesByDanDanBangumiID]。
+  /// （同步自上游 Kazumi c32db78 + 6c3c46c；保留 Miru 侧函数名，
+  /// 调用方 player_item 弹窗无需变更。）
   static Future<DanmakuSearchResponse> getDanmakuSearchResponse(
       String title) async {
-    var path = ApiEndpoints.dandanAPISearch;
+    var path = ApiEndpoints.dandanAPISearchEpisodes;
     var endPoint = ApiEndpoints.dandanAPIDomain + path;
     Map<String, String> keywordMap = {
-      'keyword': title,
+      'anime': title,
+      'v2': 'true',
     };
 
     final jsonData = await _client.get(endPoint, queryParameters: keywordMap);
-    DanmakuSearchResponse danmakuSearchResponse =
-        DanmakuSearchResponse.fromJson(jsonData);
-    return danmakuSearchResponse;
+    return DanmakuSearchResponse.fromJson(jsonData);
   }
 
   static Future<List<DanmakuEntry>> getDanDanmaku(

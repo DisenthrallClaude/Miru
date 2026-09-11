@@ -459,9 +459,18 @@ class HybridVideoSourceService implements IVideoSourceService {
     final directUrl = source.url;
     final isHls = _isHls(source);
 
+    // v1.6.8（R-1）：合并方向反转——插件头作基底，解析层（嗅探/云端/
+    // 快解）确认的 referer/cookie 覆盖其上。旧方向（source.playbackHeaders
+    // 在前、插件 headers 在后展开获胜）把嗅探捕获的 CDN 真实 referer/
+    // cookie 覆盖掉：三处探测（缓存命中/fast 候选/云端结果）都是解析层
+    // 头优先，于是「探测通过 → mpv 播放 403」→ 直连兜底同头再 403 →
+    // 自动恢复烧完 → 黑屏 + 换线路循环（换到哪条线路插件 referer 都
+    // 覆盖错）。与 video_controller 层（v1.6.7 P-8 已翻转）两层同向，
+    // 天然幂等。合并结果同时是代理 register() 的注册头，探测/回源/
+    // 播放三处同头（v1.5.2 探测-播放同头原则）。
     final mergedHeaders = <String, String>{
-      ...source.playbackHeaders,
-      ...headers,
+      ...headers, // 插件头作为基底（补 UA/cookie 缺项）
+      ...source.playbackHeaders, // 解析层确认的 referer/cookie 覆盖其上
     };
 
     if (prefetchEnabled) {

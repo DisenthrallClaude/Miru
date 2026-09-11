@@ -477,6 +477,16 @@ abstract class _VideoPageController with Store implements Disposable {
     _errorMessage = message;
   }
 
+  /// v1.6.8（R-12）：播放层失败终态（mpv 打开失败链烧尽）→ 错误页。
+  ///
+  /// 与解析失败共用 [_failLoading] 终态：错误页自带「重试」「换个
+  /// 线路」入口，播放器遮罩状态机在 errorMessage 非空时豁免 PlayerItem
+  /// 粘性挂载（video_page F3），错误页可见可点。播放控制器侧已用
+  /// openMedia 世代号守卫保证通知只落在发起它的那一集。
+  void _onPlaybackDead(String message) {
+    _failLoading(message);
+  }
+
   /// 解析失败后的自动换源兜底。
   ///
   /// 按候选顺序尝试拉取备选源的线路；拉到可用线路即替换当前源上下文，
@@ -504,12 +514,10 @@ abstract class _VideoPageController with Store implements Disposable {
       // 来源；动作照旧执行，只是提示节流。
       final now = DateTime.now();
       if (_lastFallbackToastAt == null ||
-          now.difference(_lastFallbackToastAt!) >
-              const Duration(seconds: 5)) {
+          now.difference(_lastFallbackToastAt!) > const Duration(seconds: 5)) {
         _lastFallbackToastAt = now;
         MiruDialog.showToast(
-          message:
-              '「${currentPlugin.name}」解析失败，正在尝试「${candidate.plugin.name}」',
+          message: '「${currentPlugin.name}」解析失败，正在尝试「${candidate.plugin.name}」',
         );
       }
       final List<Road> roads;
@@ -519,13 +527,13 @@ abstract class _VideoPageController with Store implements Disposable {
         MiruLogger().w(
             'VideoPageController: fallback source ${candidate.plugin.name} failed',
             error: e);
-        unawaited(PluginHealthTracker.instance
-            .recordFailure(candidate.plugin.name));
+        unawaited(
+            PluginHealthTracker.instance.recordFailure(candidate.plugin.name));
         continue;
       }
       if (roads.isEmpty || roads.every((road) => road.data.isEmpty)) {
-        unawaited(PluginHealthTracker.instance
-            .recordFailure(candidate.plugin.name));
+        unawaited(
+            PluginHealthTracker.instance.recordFailure(candidate.plugin.name));
         continue;
       }
       _applyFallbackContext(candidate, roads);
@@ -793,14 +801,12 @@ abstract class _VideoPageController with Store implements Disposable {
         'user-agent': currentPlugin.userAgent.isEmpty
             ? getSessionUA()
             : currentPlugin.userAgent,
-        if (currentPlugin.referer.isNotEmpty)
-          'referer': currentPlugin.referer,
+        if (currentPlugin.referer.isNotEmpty) 'referer': currentPlugin.referer,
         ...cookieHeader,
       };
 
-      final timeoutSeconds = GStorage.getSetting(SettingsKeys.parseTimeout)
-          .clamp(5, 120)
-          .toInt();
+      final timeoutSeconds =
+          GStorage.getSetting(SettingsKeys.parseTimeout).clamp(5, 120).toInt();
       final Duration timeout = Duration(seconds: timeoutSeconds);
       // 超时不再翻转解析器重试（阶段 0 / §1.5）——脚本已两套全量常驻
       // 注入，翻转只是原样重跑白付一轮超时；直接把超时交给兜底换源。
@@ -818,8 +824,7 @@ abstract class _VideoPageController with Store implements Disposable {
       // 解析成功即记一次健康样本：连续失败的源会在选源界面被排后。
       unawaited(PluginHealthTracker.instance.recordSuccess(currentPlugin.name));
       _finishLoading();
-      MiruLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
+      MiruLogger().i('VideoPageController: resolved video URL: ${source.url}');
 
       final bool forceAdBlocker =
           GStorage.getSetting(SettingsKeys.forceAdBlocker);
@@ -875,6 +880,12 @@ abstract class _VideoPageController with Store implements Disposable {
         initialized = false;
       }
       if (session.isActive && initialized) {
+        // v1.6.8（R-12）：挂上播放层失败终态的上行通道——mpv 打开失败
+        // 链（直连兑底 + 自动恢复烧尽/被冷却挡死）不再是裸黑屏，进入
+        // 与解析失败同款的错误页（重试/换线路入口现成）。挂接幂等，
+        // 每次成功 init 后重挂同一回调；迟到通知由播放控制器侧的
+        // openMedia 世代号守卫作废。
+        playerController.playback.onPlaybackDead = _onPlaybackDead;
         playingEpisode = VideoEpisodeSelection(
           episode: resolvedEpisode.listIndex,
           road: resolvedEpisode.roadIndex,
@@ -894,8 +905,7 @@ abstract class _VideoPageController with Store implements Disposable {
     } on VideoSourceTimeoutException {
       // 翻转解析器重试已删除（阶段 0）：超时健康度在这层记录（此前由
       // 内层翻转分支负责，避免双计数——现在只有这一处）。
-      unawaited(
-          PluginHealthTracker.instance.recordFailure(currentPlugin.name));
+      unawaited(PluginHealthTracker.instance.recordFailure(currentPlugin.name));
       if (session.isStale) {
         return;
       }
@@ -912,8 +922,7 @@ abstract class _VideoPageController with Store implements Disposable {
     } on VideoSourceCancelledException {
       MiruLogger().i('VideoPageController: video URL resolution cancelled');
     } catch (e) {
-      unawaited(
-          PluginHealthTracker.instance.recordFailure(currentPlugin.name));
+      unawaited(PluginHealthTracker.instance.recordFailure(currentPlugin.name));
       if (session.isStale) {
         return;
       }

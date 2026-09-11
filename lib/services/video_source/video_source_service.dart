@@ -33,7 +33,10 @@ class VideoSource {
   ///
   /// 云端/本地快速解析提取直链时，可能同时确认了源站要求的
   /// referer/UA（防盗链）。这组头会合并进 mpv 的 http-header-fields，
-  /// 保证「探测可达 → 播放也可达」。插件自身声明的头仍优先。
+  /// 保证「探测可达 → 播放也可达」。v1.6.8（R-1）：合并方向为
+  /// 解析层确认的头优先、插件声明的头作基底——嗅探捕获的 CDN 真实
+  /// referer/cookie 不被插件硬编码值覆盖（与 video_controller 播放层
+  /// 的合并方向一致）。
   final Map<String, String> playbackHeaders;
 
   const VideoSource({

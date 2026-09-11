@@ -18,6 +18,7 @@ import 'package:miru/services/player/player_screenshot_service.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/utils/async_serial_queue.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mobx/mobx.dart';
@@ -29,6 +30,22 @@ part 'player_playback_controller.g.dart';
 
 class PlayerPlaybackController = _PlayerPlaybackController
     with _$PlayerPlaybackController;
+
+/// v1.6.8（F5）：会话级一次性标志——「每次进播放会话只提示一次」类
+/// 去重（移动数据低内存 toast 等）。播放控制器随播放页路由创建/销毁，
+/// 实例生命周期即会话边界；连播/自动换源/换集兑底不会重复触发。
+class PlaybackSessionOnceFlag {
+  bool _fired = false;
+
+  /// 本次是否是会话内第一次（并消费掉唯一名额）。
+  bool consumeOnce() {
+    if (_fired) {
+      return false;
+    }
+    _fired = true;
+    return true;
+  }
+}
 
 final class _OwnedPlayer {
   _OwnedPlayer(this.player);
@@ -203,12 +220,23 @@ abstract class _PlayerPlaybackController with Store {
 
   /// 错误回调里判定是否值得自动恢复：仅网络播放、且播放器处于
   /// 播放/缓冲的活跃状态（用户主动暂停或已换集时绝不打扰）。
-  void _maybeScheduleAutoRecovery(Player player) {
+  /// [isOpenFailure]：错误是否属于「打开失败」族（open 阶段的错误，
+  /// 不是播放中的瞬时抖动）——v1.6.8（R-12）用它限定死亡通知的
+  /// 触发面：播放中瞬时错误有自愈/恢复链，不应进入终态判定。
+  void _maybeScheduleAutoRecovery(Player player, {bool isOpenFailure = false}) {
     if (!isCurrentPlayer(player)) return;
     if (isLocalPlayback()) return;
     if (playerCompleted) return;
     if (!playerPlaying && !playerBuffering) return;
-    if (!canAutoRecover) return;
+    if (!canAutoRecover) {
+      // v1.6.8（R-12）：恢复配额烧尽/被冷却挡死后，打开失败族错误
+      // 不再静默——延迟复检确认播放真的卡死才向上发终态通知
+      //（错误页自带重试/换线路入口）。
+      if (isOpenFailure) {
+        _maybeNotifyPlaybackDead(player);
+      }
+      return;
+    }
     if (_recoveryCheckInFlightFor != null &&
         identical(_recoveryCheckInFlightFor, player)) {
       return;
@@ -232,6 +260,31 @@ abstract class _PlayerPlaybackController with Store {
       // 断流反而失去原地重开保护。
       _recoveryCount++;
       await recoverPlayback();
+    });
+  }
+
+  /// v1.6.8（R-12）：恢复链尽头（配额烧尽/被冷却挡死）的终态复检。
+  ///
+  /// 延迟数秒确认播放确实卡死——期间重连/直连兑底/恢复任一成功则
+  /// 静默撤回并重新武装；世代号守卫保证通知只落在发起它的那一集
+  ///（换集 openMedia 会 bump 世代号，旧集的迟到通知直接作废）。
+  void _maybeNotifyPlaybackDead(Player player) {
+    if (_playbackDeadNotified) return;
+    _playbackDeadNotified = true;
+    final generation = _openMediaGeneration;
+    Future<void>.delayed(playbackDeadCheckDelay, () {
+      if (generation != _openMediaGeneration) return; // 已换集：作废
+      if (!isCurrentPlayer(player)) return; // 实例已销毁/替换：作废
+      if (playerCompleted) return;
+      if (playerPlaying && !playerBuffering && playerPosition > Duration.zero) {
+        // 期间自愈（重连/直连兑底/恢复成功）：撤回通知并重新武装，
+        // 后续真终态仍可上报。
+        _playbackDeadNotified = false;
+        return;
+      }
+      MiruLogger().w('PlayerController: playback dead after recovery exhausted '
+          '(${videoUrl()})');
+      onPlaybackDead?.call('播放失败，请尝试更换线路或视频来源');
     });
   }
 
@@ -375,11 +428,49 @@ abstract class _PlayerPlaybackController with Store {
   /// real.dart:221-225），与画面无关；而 Video 组件要等 stream 宽高
   /// >0 才渲染 Texture。旧遮罩条件以 playing 为准 → 遮罩撤得过早，
   /// 把「解析完成→首帧渲染」的黑窗口（期间音频包小先出声）完全暴露
-  /// 给用户：有声 + 纯黑 + 无转圈。此标志钉在真实的首帧信号上；
-  /// 纯音频流拿不到 videoParams，由 duration>0 兑底置位。
+  /// 给用户：有声 + 纯黑 + 无转圈。此标志钉在真实的首帧信号上。
   /// 复位点：resetForInit / softStop（换集重新等首帧）。
   @observable
   bool hasVideoParams = false;
+
+  /// v1.6.8（F2/R-2）：纯音频兑底信号——与首帧信号分离。
+  ///
+  /// v1.6.7 的 duration 兑底是即时的：HLS VOD 的 duration 事件在
+  /// demuxer 打开清单时即到达（远早于首帧解码），拿它置
+  /// hasVideoParams 会把「出声→首帧」的黑窗提前放出（遮罩在时长
+  /// 已知即撤、声音在开播即来、画面在首帧才到，三时点两两之间都是
+  /// 无转圈的黑屏）。现在 duration>0 只【预约】一个延迟兑底：期间
+  /// videoParams（真·首帧）到达则取消；到点仍无首帧才认定纯音频
+  /// 放行遮罩。复位点与 hasVideoParams 相同（resetForInit/softStop）。
+  @observable
+  bool hasAudioOnlyFallback = false;
+
+  /// 延迟兑底定时器（duration 已知、首帧未到时挂起）。
+  Timer? _audioOnlyFallbackTimer;
+
+  /// v1.6.8（F2）：纯音频兑底的延迟窗口。默认 3s；测试注入短值。
+  @visibleForTesting
+  Duration audioOnlyFallbackDelay = const Duration(seconds: 3);
+
+  /// v1.6.8（F5）：移动数据低内存 toast 的会话级 once 门。
+  final PlaybackSessionOnceFlag _meteredToastOnce = PlaybackSessionOnceFlag();
+
+  /// v1.6.8（R-12）：播放层失败终态的上行回调。
+  ///
+  /// mpv 打开失败链（直连兑底 + 自动恢复烧尽/被冷却挡死）此前止于
+  /// toast/静默——黑屏零入口零反馈。video_controller 挂上此回调后，
+  /// 终态进入与解析失败同款的错误页（重试/换线路入口现成）。
+  void Function(String message)? onPlaybackDead;
+
+  /// 本集是否已发过 playbackDead 通知（错误风暴去重；openMedia 复位）。
+  bool _playbackDeadNotified = false;
+
+  /// openMedia 世代号：延迟复检时校验「通知仍属于当前集」。
+  int _openMediaGeneration = 0;
+
+  /// v1.6.8（R-12）：死亡通知的延迟复检窗口。默认 5s；测试注入短值。
+  @visibleForTesting
+  Duration playbackDeadCheckDelay = const Duration(seconds: 5);
 
   bool isCurrentPlayer(Player player) {
     return identical(mediaPlayer, player);
@@ -424,10 +515,9 @@ abstract class _PlayerPlaybackController with Store {
         final pp = player.platform as NativePlayer;
         await pp.setProperty('cache-secs', _cacheSecsNetwork);
         if (!isCurrentPlayer(player)) return;
-        await pp.setProperty(
-            'demuxer-readahead-secs', _readaheadSecsNetwork);
-        MiruLogger()
-            .i('PlayerController: buffer promoted (cache-secs=120, readahead=10)');
+        await pp.setProperty('demuxer-readahead-secs', _readaheadSecsNetwork);
+        MiruLogger().i(
+            'PlayerController: buffer promoted (cache-secs=120, readahead=10)');
       } catch (e) {
         MiruLogger().w('PlayerController: buffer promote failed', error: e);
       }
@@ -444,12 +534,45 @@ abstract class _PlayerPlaybackController with Store {
     duration = Duration.zero;
     completed = false;
     hasVideoParams = false;
+    hasAudioOnlyFallback = false;
+    _cancelAudioOnlyFallback();
     startOffset = 0;
     _directVideoUrl = null;
     _effectiveUrl = null;
     _directFallbackAttempted = false;
     _bufferPromoted = false;
   }
+
+  /// v1.6.8（F2/R-2）：duration 已知后预约纯音频兑底。
+  ///
+  /// 纯音频流永远拿不到 videoParams——没有这层兑底会被遮罩卡死；
+  /// 视频流的最坏情况（首帧晚于 duration+3s，弱网大关键帧源）是
+  /// 兑底提前放行、画面再黑零点几秒到几秒，但音频已在播，仍远好于
+  /// v1.6.7 全体源的即时 duration 兑底。
+  void _scheduleAudioOnlyFallback() {
+    if (hasVideoParams || hasAudioOnlyFallback) return;
+    _audioOnlyFallbackTimer?.cancel();
+    _audioOnlyFallbackTimer = Timer(audioOnlyFallbackDelay, () {
+      _audioOnlyFallbackTimer = null;
+      if (hasVideoParams || hasAudioOnlyFallback) return;
+      if (duration <= Duration.zero) return;
+      hasAudioOnlyFallback = true;
+      MiruLogger()
+          .i('PlayerController: audio-only fallback engaged (no video params '
+              '${audioOnlyFallbackDelay.inSeconds}s after duration known)');
+    });
+  }
+
+  /// 首帧到达（或换集/复位）时取消纯音频兜底预约。
+  void _cancelAudioOnlyFallback() {
+    _audioOnlyFallbackTimer?.cancel();
+    _audioOnlyFallbackTimer = null;
+  }
+
+  /// v1.6.8（F2）：测试钩子——等价于 duration 流监听器在 duration>0
+  /// 时的兜底预约（生产路径见 ensurePlayer 内的 duration.listen）。
+  @visibleForTesting
+  void debugScheduleAudioOnlyFallback() => _scheduleAudioOnlyFallback();
 
   /// 设置秒开链路的直连兑底地址（由 PlayerController.init 传入）。
   void setDirectFallbackUrl(String? url) {
@@ -475,8 +598,7 @@ abstract class _PlayerPlaybackController with Store {
         'PlayerController: local proxy failed to open, retrying with direct url');
     unawaited(player.open(
       Media(direct,
-          start: Duration(seconds: startOffset),
-          httpHeaders: _lastHttpHeaders),
+          start: Duration(seconds: startOffset), httpHeaders: _lastHttpHeaders),
       play: true,
     ));
     return true;
@@ -776,7 +898,15 @@ abstract class _PlayerPlaybackController with Store {
         }
         // 错误时间戳先行更新：isAbnormalEnd 依赖它区分假 EOF。
         _lastStreamErrorAt = DateTime.now();
-        if (event.toString().contains('Failed to open') && playerBuffering) {
+        // v1.6.8（K-7，Kazumi 3e86da1）：打开失败族错误——「Failed to
+        // open」之外补上「Failed to recognize file format」（源打开了
+        // 但内容不是媒体：防盗链返回 HTML/坏规则假 m3u8）。此前这类
+        // 垃圾内容源走「播放器内部错误」toast，用户拿到的是不可操作
+        // 的内部错误而非换源指引。仍保留 playerBuffering 门控。
+        final bool isOpenFailure =
+            event.toString().contains('Failed to open') ||
+                event.toString().contains('Failed to recognize file format');
+        if (isOpenFailure && playerBuffering) {
           // 初始加载失败：本地代理播放时先用原始直链重开一次，
           // 直连也打不开才提示换源。
           // 自愈动作不受「错误提示」开关控制（v1.5.3）：开关只决定
@@ -786,8 +916,7 @@ abstract class _PlayerPlaybackController with Store {
             // 每次读实时值：用户在播放中途开关「错误提示」立即生效。
             if (GStorage.getSetting<bool>(SettingsKeys.showPlayerError)) {
               MiruDialog.showToast(
-                  message: '加载失败, 请尝试更换其他视频来源',
-                  showActionButton: true);
+                  message: '加载失败, 请尝试更换其他视频来源', showActionButton: true);
             }
           }
         } else if (GStorage.getSetting<bool>(SettingsKeys.showPlayerError)) {
@@ -797,7 +926,7 @@ abstract class _PlayerPlaybackController with Store {
         }
         MiruLogger().e('PlayerController: Player intent error ${videoUrl()}',
             error: event);
-        _maybeScheduleAutoRecovery(player);
+        _maybeScheduleAutoRecovery(player, isOpenFailure: isOpenFailure);
       });
 
       // 播放态直通（v1.5.3）：buffering/playing 直接订阅 mpv 流，转圈
@@ -827,24 +956,29 @@ abstract class _PlayerPlaybackController with Store {
         // v1.6.7（P-1）：首帧信号——mpv 解码出首帧后 video-params 事件才
         // 带上真实宽高。这是「真正开始播」的最早可靠信号（playing 在
         // loadlist 提交瞬间就被 fork 强制置 true，不可信）。
+        // v1.6.8（F2）：首帧到达同时取消纯音频延迟兑底预约。
         player.stream.videoParams.listen((event) {
           if (!isCurrentPlayer(player)) return;
           final w = event.dw ?? event.w;
           final h = event.dh ?? event.h;
           if ((w ?? 0) > 0 && (h ?? 0) > 0 && !hasVideoParams) {
             hasVideoParams = true;
+            _cancelAudioOnlyFallback();
           }
         }),
-        // v1.6.7（P-1）：时长直订（此前只有 1Hz 轮询同步，遮罩条件里
-        // duration>0 的分支最多慢一拍）+ 纯音频流兑底：拿不到
-        // videoParams 的源拿到时长即视为已开始，不被遮罩卡死。
+        // v1.6.7（P-1）时长直订 + v1.6.8（F2/R-2）纯音频延迟兑底：
+        // duration 事件在 demuxer 打开清单时即到达（HLS VOD 远早于
+        // 首帧），v1.6.7 拿它即时置位 hasVideoParams 兑成「遮罩在时长
+        // 已知即撤」。现在 duration>0 只预约延迟兑底，到点仍无首帧
+        // 才置 hasAudioOnlyFallback——纯音频流不再被遮罩卡死，视频流
+        // 的「出声→首帧」窗口全程有转圈。
         player.stream.duration.listen((value) {
           if (!isCurrentPlayer(player)) return;
           if (duration != value) {
             duration = value;
           }
           if (value > Duration.zero && !hasVideoParams) {
-            hasVideoParams = true;
+            _scheduleAudioOnlyFallback();
           }
         }),
       ]);
@@ -875,6 +1009,11 @@ abstract class _PlayerPlaybackController with Store {
     if (player == null) {
       return;
     }
+    // v1.6.8（R-12 补丁）：bump 世代号——softStop 与新集解析并行，
+    // 旧集的 5s playbackDead 复检若在此窗口内触发，四守卫全过会误报
+    // 「播放失败」并把错误页钉死在新集上（新集照常开播=有声+错误页）。
+    // openMedia 会再次 bump，计数器单调递增无副作用。
+    _openMediaGeneration++;
     try {
       await player.pause();
     } catch (_) {}
@@ -889,6 +1028,8 @@ abstract class _PlayerPlaybackController with Store {
     buffer = Duration.zero;
     duration = Duration.zero;
     hasVideoParams = false;
+    hasAudioOnlyFallback = false;
+    _cancelAudioOnlyFallback();
   }
 
   /// 每集打开（§2.1）：只做随集变化的装配——恢复计数/播放头、超分、
@@ -904,10 +1045,13 @@ abstract class _PlayerPlaybackController with Store {
       return null;
     }
     startOffset = offset;
-    // 新一集开始：自动恢复计数与错误时间戳归零。
+    // 新一集开始：自动恢复计数与错误时间戳归零；世代号 bump——
+    // 迟到的 playbackDead 复检（R-12）据此作废旧集通知。
+    _openMediaGeneration++;
     _recoveryCount = 0;
     _lastRecoveryAt = null;
     _lastStreamErrorAt = null;
+    _playbackDeadNotified = false;
     _lastHttpHeaders = httpHeaders;
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
     superResolutionMode = SuperResolutionMode.fromStorageValue(
@@ -954,13 +1098,15 @@ abstract class _PlayerPlaybackController with Store {
     // 6) video-sync=audio：音频主时钟，减少起播期丢帧重同步。
     if (!isLocalPlayback()) {
       await Future.wait([
-        pp.setProperty('demuxer-lavf-o',
+        pp.setProperty(
+            'demuxer-lavf-o',
             'http_persistent=1,http_multiple=1,http_seekable=0,'
-            'seg_max_retry=3,max_reload=5,'
-            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
-        pp.setProperty('stream-lavf-o',
+                'seg_max_retry=3,max_reload=5,'
+                'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
+        pp.setProperty(
+            'stream-lavf-o',
             'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3,'
-            'timeout=10000000'),
+                'timeout=10000000'),
         pp.setProperty('demuxer-lavf-probe-info', 'nostreams'),
         pp.setProperty('demuxer-lavf-analyzeduration', '1'),
         pp.setProperty('demuxer-lavf-probesize', '1048576'),
@@ -993,7 +1139,9 @@ abstract class _PlayerPlaybackController with Store {
       return null;
     }
 
-    if (cachePolicy.networkForced) {
+    // v1.6.8（F5）：移动数据提示会话级去重——此前每次 openMedia（换集
+    // /自动连播/换源兑底）都弹同一条，追番连播下每 24 分钟刷屏。
+    if (cachePolicy.networkForced && _meteredToastOnce.consumeOnce()) {
       MiruDialog.showToast(message: '正在使用移动数据，已临时启用低内存模式以减少缓存');
     }
 
@@ -1009,8 +1157,7 @@ abstract class _PlayerPlaybackController with Store {
     int offset = 0,
     VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
-    final player =
-        await ensurePlayer(adBlockerEnabled, canInstall: canInstall);
+    final player = await ensurePlayer(adBlockerEnabled, canInstall: canInstall);
     if (player == null) {
       return null;
     }
@@ -1157,6 +1304,8 @@ abstract class _PlayerPlaybackController with Store {
 
   Future<void> stop() async {
     cachePolicy.stopWatching();
+    _cancelAudioOnlyFallback();
+    hasAudioOnlyFallback = false;
     final ownedPlayer = _ownedPlayer;
     _ownedPlayer = null;
     videoController = null;

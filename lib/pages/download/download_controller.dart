@@ -149,10 +149,11 @@ abstract class _DownloadController with Store {
 
   void _onDownloadProgress(String recordKey, int episodeNumber,
       DownloadEpisode episode, double speed) {
-    // v1.6.7（B-🟡2）：进度回调是高频热路径（每个 tick 都跑），任何
-    // 一次 updateEpisode 抛错都会逃逸成 unhandled async exception——
-    // v1.6.6 只给 _failEpisode 加了同款防护，这里补齐。失败只记日志，
-    // 下一次 tick 自然重试。
+    // 进度回调是高频热路径（每个 tick 都跑）。注意：这个同步 try-catch
+    // 只能接住同步段抛出的异常——updateEpisode 返回的 Future 里的异步
+    // 异常（Hive 写盘失败等）要靠调用点的 catchError 链接住
+    // （v1.6.8 W-🟡1，见 _onDownloadProgressInner），两者缺一不可。
+    // 失败只记日志，下一次 tick 自然重试。
     try {
       _onDownloadProgressInner(recordKey, episodeNumber, episode, speed);
     } catch (e, stackTrace) {
@@ -184,7 +185,21 @@ abstract class _DownloadController with Store {
       episode.networkM3u8Url = '';
     }
 
-    _repository.updateEpisode(recordKey, episodeNumber, episode);
+    // v1.6.8（W-🟡1）：updateEpisode 是 async 且仓库侧 catch 后
+    // rethrow——异常只会进返回的 Future，同步 try-catch（上方包装）
+    // 与直接丢弃 Future 都接不住，会逃逸成 unhandled async exception
+    // （磁盘满时每个 tick 一条，可成错误风暴）。catchError 链接住并
+    // 记日志，持久化失败只影响本次 tick，下一次 tick 自然重试。
+    unawaited(_repository
+        .updateEpisode(recordKey, episodeNumber, episode)
+        .catchError((Object e, StackTrace st) {
+      MiruLogger().w(
+        'DownloadController: progress persist failed for '
+        '$recordKey#$episodeNumber',
+        error: e,
+        stackTrace: st,
+      );
+    }));
 
     final key = '${recordKey}_$episodeNumber';
 
@@ -979,9 +994,20 @@ abstract class _DownloadController with Store {
     if (episode == null) return;
     episode.status = DownloadStatus.failed;
     episode.errorMessage = message;
-    // v1.6.6 修复：仓库 updateEpisode 失败会 rethrow，此前未 await 也
-    // 未 unawaited，逃逸进被丢弃的 Future 成 unhandled async exception。
-    unawaited(_repository.updateEpisode(recordKey, episodeNumber, episode));
+    // v1.6.6 只加了 unawaited 抑制 lint，但 unawaited 仅丢弃 Future、
+    // 并不处理错误——仓库 updateEpisode 失败 rethrow 后仍会逃逸成
+    // unhandled async exception（与 v1.6.7 进度回调处的无效修复同病），
+    // v1.6.8（W-🟡1）一并改为 catchError 链接住记日志。
+    unawaited(_repository
+        .updateEpisode(recordKey, episodeNumber, episode)
+        .catchError((Object e, StackTrace st) {
+      MiruLogger().w(
+        'DownloadController: failed to persist failure state for '
+        '$recordKey#$episodeNumber',
+        error: e,
+        stackTrace: st,
+      );
+    }));
     _refreshRecord(recordKey);
     MiruLogger()
         .w('DownloadController: episode $episodeNumber failed: $message');
@@ -1104,11 +1130,26 @@ abstract class _DownloadController with Store {
       }
     }
     _cancelResolveRecord(recordKey);
-    await _downloadManager.deleteRecordFiles(
-      bangumiId,
-      pluginName,
-      record: record,
-    );
+    // v1.6.8（W-🔵2）：文件删除（Windows 下后台播放持锁等）抛异常时
+    // 不再让整条删除链中断逃逸——此前 fire-and-forget：弹窗关了、
+    // 列表没变、异常成 unhandled error 无任何提示。与 startDownload
+    // 清理旧分片的容错口径一致：记日志 + toast 后继续删 Hive 记录。
+    try {
+      await _downloadManager.deleteRecordFiles(
+        bangumiId,
+        pluginName,
+        record: record,
+      );
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'DownloadController: failed to delete record files for $recordKey',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      MiruDialog.showToast(
+          message: '部分文件删除失败（可能正被播放器占用），已移除下载记录，'
+              '残留文件请手动清理');
+    }
     await _repository.deleteRecord(recordKey);
     _refreshRecord(recordKey);
     _queueBackgroundNotificationUpdate();
@@ -1122,12 +1163,26 @@ abstract class _DownloadController with Store {
     _cancelResolve(recordKey, episodeNumber);
     final episode =
         _repository.getEpisode(bangumiId, pluginName, episodeNumber);
-    await _downloadManager.deleteEpisodeFiles(
-      bangumiId,
-      pluginName,
-      episodeNumber,
-      episode: episode,
-    );
+    // v1.6.8（W-🔵2）：同 deleteRecord——文件删除失败接住记日志 +
+    // toast，继续删 Hive 记录，不再静默逃逸。
+    try {
+      await _downloadManager.deleteEpisodeFiles(
+        bangumiId,
+        pluginName,
+        episodeNumber,
+        episode: episode,
+      );
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'DownloadController: failed to delete episode files for '
+        '$recordKey#$episodeNumber',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      MiruDialog.showToast(
+          message: '文件删除失败（可能正被播放器占用），已移除下载记录，'
+              '残留文件请手动清理');
+    }
     await _repository.deleteEpisode(recordKey, episodeNumber);
     _refreshRecord(recordKey);
     _queueBackgroundNotificationUpdate();

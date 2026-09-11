@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -9,6 +11,7 @@ import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/pages/download/download_controller.dart';
 import 'package:miru/pages/download/download_widgets.dart';
 import 'package:miru/pages/video/video_playback_args.dart';
+import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/format.dart';
 
 class DownloadPage extends StatefulWidget {
@@ -305,12 +308,8 @@ class _DownloadPageState extends State<DownloadPage> {
           ),
           TextButton(
             onPressed: () {
-              downloadController.deleteEpisode(
-                record.bangumiId,
-                record.pluginName,
-                episode.episodeNumber,
-              );
               MiruDialog.dismiss();
+              unawaited(_deleteEpisode(record, episode));
             },
             child: Text(
               '删除',
@@ -337,11 +336,8 @@ class _DownloadPageState extends State<DownloadPage> {
           ),
           TextButton(
             onPressed: () {
-              downloadController.deleteRecord(
-                record.bangumiId,
-                record.pluginName,
-              );
               MiruDialog.dismiss();
+              unawaited(_deleteRecord(record));
             },
             child: Text(
               '删除',
@@ -351,5 +347,43 @@ class _DownloadPageState extends State<DownloadPage> {
         ],
       ),
     );
+  }
+
+  /// v1.6.8（W-🔵2）：删除入口兜底。controller 侧已接住文件删除失败
+  /// （Windows 后台播放持锁等：记日志 + toast + 继续删 Hive 记录），
+  /// 这里再兜住 Hive 记录删除等意外异常——此前两处 onPressed 都是
+  /// fire-and-forget，任何异常都逃逸成 unhandled error 且零提示。
+  Future<void> _deleteEpisode(
+      DownloadRecord record, DownloadEpisode episode) async {
+    try {
+      await downloadController.deleteEpisode(
+        record.bangumiId,
+        record.pluginName,
+        episode.episodeNumber,
+      );
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'DownloadPage: delete episode failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      MiruDialog.showToast(message: '删除失败：$e');
+    }
+  }
+
+  Future<void> _deleteRecord(DownloadRecord record) async {
+    try {
+      await downloadController.deleteRecord(
+        record.bangumiId,
+        record.pluginName,
+      );
+    } catch (e, stackTrace) {
+      MiruLogger().w(
+        'DownloadPage: delete record failed',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      MiruDialog.showToast(message: '删除失败：$e');
+    }
   }
 }

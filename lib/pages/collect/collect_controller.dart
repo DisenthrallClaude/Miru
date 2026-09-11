@@ -223,6 +223,9 @@ abstract class _CollectController with Store {
     loadCollectibles();
   }
 
+  /// 同步收藏：按当前开关分发到所有已开启的云端通道（WebDAV +
+  /// GitHub）。GitHub-only 场景从 v1.6.8（W-🟡2）起也可从追番页同步
+  /// 按钮进入（按钮排程改为逐通道，见 collect_page._runFullSync）。
   Future<bool> syncCollectibles({bool showSuccessToast = true}) async {
     final bool webDavCollectEnable =
         GStorage.getSetting(SettingsKeys.webDavEnableCollect);
@@ -235,16 +238,21 @@ abstract class _CollectController with Store {
     }
     var succeeded = true;
     if (webDavCollectEnable) {
-      succeeded = await _syncCollectiblesViaWebDav(showSuccessToast) && succeeded;
+      succeeded = await syncCollectiblesViaWebDav(showSuccessToast: showSuccessToast) &&
+          succeeded;
     }
     if (githubCollectEnable) {
-      succeeded = await _syncCollectiblesViaGithub() && succeeded;
+      succeeded =
+          await syncCollectiblesViaGithub(showSuccessToast: showSuccessToast) &&
+              succeeded;
     }
     loadCollectibles();
     return succeeded;
   }
 
-  Future<bool> _syncCollectiblesViaWebDav(bool showSuccessToast) async {
+  /// v1.6.8（W-🟡2）：原 _syncCollectiblesViaWebDav 公开化，供追番页
+  /// 全量同步按通道排程调用（不再经由 syncCollectibles 混合分发）。
+  Future<bool> syncCollectiblesViaWebDav({bool showSuccessToast = true}) async {
     if (!WebDav().initialized) {
       MiruDialog.showToast(message: '未开启WebDav同步或配置无效');
       return false;
@@ -272,14 +280,19 @@ abstract class _CollectController with Store {
     return true;
   }
 
-  Future<bool> _syncCollectiblesViaGithub() async {
+  /// v1.6.8（W-🟡2）：原 _syncCollectiblesViaGithub 公开化，供追番页
+  /// 全量同步按通道排程调用——GitHub-only 用户此前被追番页同步按钮
+  /// 误报「同步功能不可用」（CollectSyncPlan 无 GitHub 通道字段）。
+  Future<bool> syncCollectiblesViaGithub({bool showSuccessToast = true}) async {
     try {
       final github = GithubSync();
       if (!github.initialized) {
         await github.init();
       }
       await github.syncCollectibles();
-      MiruDialog.showToast(message: 'GitHub 同步完成');
+      if (showSuccessToast) {
+        MiruDialog.showToast(message: 'GitHub 同步完成');
+      }
       return true;
     } catch (e) {
       MiruLogger().w('GithubSync: collectibles sync failed', error: e);

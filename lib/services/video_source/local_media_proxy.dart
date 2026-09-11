@@ -111,13 +111,25 @@ class LocalMediaProxy {
 
   void _emitEvent(String token, ProxyEventKind kind,
       {int? status, Duration? elapsed}) {
-    if (_eventsController.isClosed) return;
-    _eventsController.add(ProxyEvent(
+    final event = ProxyEvent(
       token: token,
       kind: kind,
       status: status,
       elapsed: elapsed ?? Duration.zero,
-    ));
+    );
+    // v1.6.8（R-7）：事件流此前设计完成后零消费者——精确决策
+    // （4xx→换候选 / timeout→原地重开）从未接线。保守接入现有日志
+    // 通道：失败类事件（upstream4xx/upstream5xx/timeout/segmentFail）
+    // 记 warning（持久化到日志文件，源站健康可见），segmentOk 记
+    // debug（debug 构建可见，release 被级别过滤不产生噪声）。流本身
+    // 保留：播放层后续接线精确决策时无需改这里。
+    if (kind == ProxyEventKind.segmentOk) {
+      MiruLogger().d('LocalMediaProxy: $event');
+    } else {
+      MiruLogger().w('LocalMediaProxy: $event');
+    }
+    if (_eventsController.isClosed) return;
+    _eventsController.add(event);
   }
 
   // -------------------------------------------------------------------------
@@ -1101,7 +1113,15 @@ class LocalMediaProxy {
         _manifestProxyUrlFor,
         attributeUrlFor: _attributeProxyUrlFor,
       );
-      return _BuiltManifest(manifest: rewritten, segmentUrls: const []);
+      // v1.6.8（R-3）：master 本身没有分片（分片在 variant 子清单里），
+      // 旧实现返回 const [] → 预取 0 片 → meta 无 segTokens →
+      // hasUsableCache 永远 false → useProxy 恒为 false，整条
+      // EXT-X-MEDIA 改写链路（上面的 P-10）成为死代码，且这类源
+      // 完全失去分片缓存/秒开二刷。现在跟进第一个视频 variant 的
+      // 子清单取分片序列——仅用于预取/meta 登记，不改写返回的 master
+      //（master 的改写由上方完成）。普通单轨源路径零变化。
+      final segUrls = await _prefetchableVariantSegments(raw, url, headers);
+      return _BuiltManifest(manifest: rewritten, segmentUrls: segUrls);
     }
     final resolved = await _resolveToPlayableManifest(url, raw, headers);
     if (resolved == null) return null;
@@ -1127,6 +1147,45 @@ class LocalMediaProxy {
       }
     }
     return false;
+  }
+
+  /// v1.6.8（R-3）：从（带音轨组的）master 跟进第一个视频 variant 的
+  /// 子清单，取其分片绝对地址列表——供 [_prefetchHls] 预取/写 meta，
+  /// 使 [hasUsableCache] 可满足（这是 useProxy 门控的判据）。与
+  /// [_resolveToPlayableManifest] 的「跟进第一条」语义对齐；子清单
+  /// 仍是多码率时最多再跟进一层。任何一步失败返回空表（行为退化为
+  /// 旧版：不进代理、直连，不影响可播放性）。
+  Future<List<String>> _prefetchableVariantSegments(
+      String master, String url, Map<String, String> headers) async {
+    var childUri = _firstVariantUri(master);
+    var baseUrl = url;
+    for (var level = 0; level < 2 && childUri != null; level++) {
+      final childUrl = absolutizeUrl(childUri, baseUrl);
+      if (childUrl == null) return const [];
+      final text = await _fetchPlaylistText(childUrl, headers);
+      if (text == null) return const [];
+      final segmentUrls = extractSegmentUrls(text, childUrl);
+      if (segmentUrls.isNotEmpty) return segmentUrls;
+      // 子清单仍是多码率清单：继续跟进下一级
+      childUri = _firstVariantUri(text);
+      baseUrl = childUrl;
+    }
+    return const [];
+  }
+
+  /// 清单里第一条 #EXT-X-STREAM-INF 的子清单 URI（无 variant 返回 null）。
+  String? _firstVariantUri(String manifest) {
+    final lines = manifest.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+      for (var j = i + 1; j < lines.length; j++) {
+        final l = lines[j].trim();
+        if (l.isNotEmpty && !l.startsWith('#')) {
+          return l;
+        }
+      }
+    }
+    return null;
   }
 
   /// v1.6.7（P-10）：子清单（variant / 音频 rendition）→ 代理
@@ -1455,6 +1514,17 @@ class LocalMediaProxy {
     final referer = request.headers.value(HttpHeaders.refererHeader);
     if (referer != null && referer.isNotEmpty) {
       headers['referer'] = referer;
+    }
+    // v1.6.8（R-5）：mpv 请求携带的 Cookie 同样透传到回源——
+    // media_kit 把 http-header-fields 设为全局属性，对 127.0.0.1
+    // 代理的分段/子清单/KEY 请求都带 Cookie；/seg/、/key/、/m3u8/
+    // 子清单 token 从未 register() 过（注册表查不到头），全靠这里
+    // 的请求头透传。旧白名单只有 UA/Referer：cookie 门禁 CDN（CF
+    // clearance / 会话 cookie）走代理必 403 → 502 → 直连兜底 churn。
+    // 与 UA/Referer 同款「请求头优先」语义；无 Cookie 的源零变化。
+    final cookie = request.headers.value(HttpHeaders.cookieHeader);
+    if (cookie != null && cookie.isNotEmpty) {
+      headers['cookie'] = cookie;
     }
     return headers;
   }

@@ -283,13 +283,21 @@ class VideoWebviewAndroidImpl
       // §1.5：HTMLMediaElement.src setter 劫持——动态播放器（p2p 播放器/
       // MSE 混合型）先赋 src 再 load()，MutationObserver 属性过滤抓不到
       // setter 路径的赋值，劫持后 src 一被设置即上报。
+      // v1.6.8（R-4）：上报前加元素类型判定（this.tagName === 'VIDEO'）
+      // ——劫持挂在 HTMLMediaElement.prototype 上，<audio> 同样继承；
+      // 站点 BGM（bgm = document.createElement('audio'); bgm.src=…mp3）
+      // 在播放器给 <video> 赋 src 之前先到，旧逻辑会把 BGM 直链误报为
+      // 视频源冻结上报 → mpv 播纯音频 →「有声黑屏」假解析结果。
+      // <audio> 的真实媒体请求仍由网络层嗅探按 URL 形态捕获（与
+      // processVideoElement 的 AUDIO 排除同一语义，P-4）。
       try {
         const _origSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
         if (_origSrcDesc && _origSrcDesc.set) {
           Object.defineProperty(HTMLMediaElement.prototype, 'src', {
             set(v) {
               try {
-                if (v && typeof v === 'string' && v.startsWith('http')) {
+                if (v && typeof v === 'string' && v.startsWith('http')
+                    && this.tagName === 'VIDEO') {
                   window.flutter_inappwebview.callHandler('LogBridge', 'Media src set: ' + v);
                   window.flutter_inappwebview.callHandler('VideoBridgeDebug', v);
                 }
@@ -722,4 +730,17 @@ class VideoWebviewAndroidImplProbe {
   /// 网络层嗅探的媒体 URL 判定。
   static bool isSniffableMediaUrl(String url) =>
       VideoWebviewAndroidImpl._isSniffableMediaUrl(url);
+
+  /// video 标签嗅探 + src setter 劫持脚本全文（v1.6.8 R-4 回归锁用）。
+  ///
+  /// 直接从 [_buildAllUserScripts] 的真实产物里取（不另存副本，脚本
+  /// 内容改动自动反映到测试）——断言 src setter 劫持的上报条件包含
+  /// 元素类型判定（this.tagName === 'VIDEO'），防止 <audio> 的
+  /// src 赋值（站点 BGM）被误报为视频源的回归。
+  static String videoTagParserScript() {
+    final scripts = VideoWebviewAndroidImpl()._buildAllUserScripts();
+    return scripts
+        .firstWhere((s) => s.source.contains('VideoTagParser script loaded'))
+        .source;
+  }
 }

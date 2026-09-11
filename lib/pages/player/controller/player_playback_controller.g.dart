@@ -169,6 +169,39 @@ mixin _$PlayerPlaybackController on _PlayerPlaybackController, Store {
     });
   }
 
+  late final _$hasVideoParamsAtom =
+      Atom(name: '_PlayerPlaybackController.hasVideoParams', context: context);
+
+  @override
+  bool get hasVideoParams {
+    _$hasVideoParamsAtom.reportRead();
+    return super.hasVideoParams;
+  }
+
+  @override
+  set hasVideoParams(bool value) {
+    _$hasVideoParamsAtom.reportWrite(value, super.hasVideoParams, () {
+      super.hasVideoParams = value;
+    });
+  }
+
+  late final _$hasAudioOnlyFallbackAtom = Atom(
+      name: '_PlayerPlaybackController.hasAudioOnlyFallback', context: context);
+
+  @override
+  bool get hasAudioOnlyFallback {
+    _$hasAudioOnlyFallbackAtom.reportRead();
+    return super.hasAudioOnlyFallback;
+  }
+
+  @override
+  set hasAudioOnlyFallback(bool value) {
+    _$hasAudioOnlyFallbackAtom.reportWrite(value, super.hasAudioOnlyFallback,
+        () {
+      super.hasAudioOnlyFallback = value;
+    });
+  }
+
   late final _$_PlayerPlaybackControllerActionController =
       ActionController(name: '_PlayerPlaybackController', context: context);
 
@@ -228,7 +261,9 @@ completed: ${completed},
 currentPosition: ${currentPosition},
 buffer: ${buffer},
 duration: ${duration},
-playerSpeed: ${playerSpeed}
+playerSpeed: ${playerSpeed},
+hasVideoParams: ${hasVideoParams},
+hasAudioOnlyFallback: ${hasAudioOnlyFallback}
     ''';
   }
 }

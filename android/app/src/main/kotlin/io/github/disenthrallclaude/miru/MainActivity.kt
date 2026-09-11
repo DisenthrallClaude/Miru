@@ -23,6 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.ryanheise.audioservice.AudioService
 import com.ryanheise.audioservice.AudioServiceActivity
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -56,6 +57,10 @@ class MainActivity: AudioServiceActivity() {
     private val actionPipForward = "io.github.disenthrallclaude.miru.pip.FORWARD"
     private val actionPipToggleDanmaku = "io.github.disenthrallclaude.miru.pip.TOGGLE_DANMAKU"
 
+    // Ratios outside [1:2.39, 2.39:1] make enterPictureInPictureMode throw.
+    // （同步自上游 Kazumi 281ee9c：超宽/超高视频进画中画的崩溃防线。）
+    private val maxPipAspectRatio = 2.39f
+
     private val pipActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             val action = intent?.action ?: return
@@ -74,6 +79,10 @@ class MainActivity: AudioServiceActivity() {
 
     override fun onDestroy() {
         unregisterPipActionReceiverIfNeeded()
+        // audio_service stays bound for the whole activity lifetime, so its
+        // own stopSelf() never destroys a service started for playback.
+        // （同步自上游 Kazumi 80af230：退出应用后媒体通知复活的防线。）
+        stopService(Intent(this, AudioService::class.java))
         super.onDestroy()
     }
 
@@ -260,7 +269,7 @@ class MainActivity: AudioServiceActivity() {
     private fun buildPictureInPictureParams(): PictureInPictureParams {
         val actions = buildPipActions()
         val builder = PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(pipAspectWidth, pipAspectHeight))
+            .setAspectRatio(buildPipAspectRatio())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setAutoEnterEnabled(autoEnterPipOnHomeGesture && pipInPlayerPage)
             builder.setSeamlessResizeEnabled(false)
@@ -277,6 +286,20 @@ class MainActivity: AudioServiceActivity() {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             setPictureInPictureParams(buildPictureInPictureParams())
+        }
+    }
+
+    // Clamp the requested aspect ratio into the range Android accepts;
+    // width/height come from the real video size and can be 0 before the
+    // first frame reports dimensions.
+    private fun buildPipAspectRatio(): Rational {
+        val width = if (pipAspectWidth > 0) pipAspectWidth else 16
+        val height = if (pipAspectHeight > 0) pipAspectHeight else 9
+        val ratio = width.toFloat() / height.toFloat()
+        return when {
+            ratio > maxPipAspectRatio -> Rational(239, 100)
+            ratio < 1f / maxPipAspectRatio -> Rational(100, 239)
+            else -> Rational(width, height)
         }
     }
 

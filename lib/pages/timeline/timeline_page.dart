@@ -33,7 +33,6 @@ class _TimelinePageState extends State<TimelinePage>
     with SingleTickerProviderStateMixin {
   TimelineController get timelineController => widget.controller;
   TabController? tabController;
-  late bool showRating;
   final GlobalKey filterSectionKey = GlobalKey();
 
   /// B2：双击当前 tab 回顶——把回顶回调登记给 shell。
@@ -63,7 +62,9 @@ class _TimelinePageState extends State<TimelinePage>
         TabController(vsync: this, length: tabs.length, initialIndex: weekday);
     // B2：当前 tab 存活期间向 shell 登记回顶回调。
     TabScrollToTop.register(_scrollToTop);
-    showRating = GStorage.getSetting(SettingsKeys.showRating);
+    // v1.6.8（W-🔵3）：showRating 改为在 contentGrid 内实时读（与追番页
+    // showAnimeCounter 同款）——此前只在 initState 读一次，设置里切换
+    // 「显示评分」返回后当前页仍持旧值，切走再切回（页面重建）才生效。
     if (timelineController.bangumiCalendar.isEmpty) {
       timelineController.init();
     }
@@ -779,6 +780,9 @@ class _TimelinePageState extends State<TimelinePage>
   }
 
   List<Widget> contentGrid(List<List<BangumiItem>> bangumiCalendar) {
+    // v1.6.8（W-🔵3）：实时读设置键，设置页切换「显示评分」返回后
+    // 随页面重建立即生效，不再持有 initState 时刻的旧值。
+    final bool showRating = GStorage.getSetting(SettingsKeys.showRating);
     List<Widget> gridViewList = [];
     int crossCount = 1;
     if (MediaQuery.sizeOf(context).width > LayoutBreakpoint.compact['width']!) {
