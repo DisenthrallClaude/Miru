@@ -1,0 +1,18 @@
+{
+  "api": "5",
+  "type": "anime",
+  "name": "baimao",
+  "version": "2.0",
+  "muliSources": true,
+  "useWebview": true,
+  "useNativePlayer": true,
+  "userAgent": "",
+  "adBlocker": true,
+  "baseURL": "https://www.bmmdmm.com/",
+  "searchURL": "https://www.bmmdmm.com/s_all?ex=1&kw=@keyword",
+  "searchList": "//div[contains(@class,'lpic')]/ul/li",
+  "searchName": "./h2/a",
+  "searchResult": "./h2/a",
+  "chapterRoads": "//div[contains(@class,'movurl') and not(contains(@class,'movurl_pan'))]",
+  "chapterResult": "./ul/li/a"
+}

@@ -23,14 +23,20 @@ const Set<String> kJapaneseRuleNames = <String>{
   'girigirilove',
   'mgnacg',
   'mutefun',
+  // v1.6.10：上游新增源，站点排行/推荐位全为日漫，
+  // 且实测搜索接口失效（返回排行列表而非搜索结果）。
+  'moonci',
 };
 
 /// 已知损坏的规则名单（实测确认站点失效或解析失败）。
 ///
-/// * baimao: 选集列表由混淆 JS 动态渲染，XPath 解析不到剧集。
 /// * mwcy: 域名已失效，重定向到无关站点。
+///
+/// v1.6.10：baimao（白猫）移出本名单——站点已迁移至 bmmdmm.com 并
+/// 改名「黑猫动漫」，选集列表现为服务端直出（旧「混淆 JS 动态渲染」
+/// 的结论已过时），内置规则已更新为 v2.0（新域名 + 稳定的 class 型
+/// XPath）并随包分发、存量用户经启动时的内置规则刷新获得修复。
 const Set<String> kBrokenRuleNames = <String>{
-  'baimao',
   'mwcy',
 };
 

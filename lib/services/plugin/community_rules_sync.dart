@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_modular/flutter_modular.dart' show inject;
 import 'package:miru/plugins/plugins.dart';
 import 'package:miru/plugins/plugins_controller.dart';
-import 'package:miru/plugins/rule_policy.dart';
 import 'package:miru/request/clients/rules_repo_client.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/utils/version.dart';
@@ -48,27 +47,28 @@ class CommunityRulesSync {
         if (name == null || name.isEmpty || remoteVersion.isEmpty) continue;
 
         final local = localByName[name.toLowerCase()];
-        // 未安装的日漫/失效规则不做静默安装：这些规则只应经由
-        // 设置 → 规则管理 → 规则仓库 由用户主动决定是否安装。
-        // 用户已经手动装上的规则则照常跟进版本更新。
-        if (local == null && shouldSkipAutoInstall(name)) {
+        // v1.6.10 修复：静默同步只「更新已安装的规则」，不再静默安装
+        // 本地没有的规则。旧逻辑（仅跳过日漫/失效名单）会让上游新增的
+        // 任何规则（如 moonci：日漫向且搜索失效）在用户无感知的情况
+        // 下被装进列表——与 rule_policy「由用户自行决定是否安装」的
+        // 设计相悖。新规则的引入只剩两条正道：随包内置（assets/plugins，
+        // 存量用户经启动时的内置规则刷新获得）与用户在规则仓库手动安装。
+        if (local == null) {
           continue;
         }
-        if (local != null) {
-          // v1.6.6 修复：本地已修改的规则不做静默覆盖——此前版本升级是
-          // 全字段整对象替换，用户在编辑器里改的 referer/UA/反爬配置
-          // 被静默重置（「边看边下」等依赖自定义 referer 的场景会突然
-          // 回到 403 且极难排查）。记日志提示远端有新版本未同步。
-          if (local.localModified) {
-            MiruLogger().i(
-              'CommunityRules: skip locally modified rule ${local.name} '
-              '(remote version $remoteVersion available)',
-            );
-            continue;
-          }
-          if (!_remoteIsNewer(local.version, remoteVersion)) {
-            continue;
-          }
+        // v1.6.6 修复：本地已修改的规则不做静默覆盖——此前版本升级是
+        // 全字段整对象替换，用户在编辑器里改的 referer/UA/反爬配置
+        // 被静默重置（「边看边下」等依赖自定义 referer 的场景会突然
+        // 回到 403 且极难排查）。记日志提示远端有新版本未同步。
+        if (local.localModified) {
+          MiruLogger().i(
+            'CommunityRules: skip locally modified rule ${local.name} '
+            '(remote version $remoteVersion available)',
+          );
+          continue;
+        }
+        if (!_remoteIsNewer(local.version, remoteVersion)) {
+          continue;
         }
 
         final plugin = await _fetchRule(name);

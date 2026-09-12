@@ -1,229 +1,250 @@
 {
-  "announcements": [
+ "announcements": [
+  {
+   "id": "ann-20260912-v1610",
+   "enabled": true,
+   "priority": 23,
+   "title": "v1.6.10 发布：白猫规则复活 + 播放稳定性根治",
+   "body": "这版针对你反馈的「白猫规则有问题」和「同一个源同一条线路，有时候很容易进入、有时候又进不去」两个问题做了根因级修复。\n\n1. 白猫（baimao）规则 v2.0：排查发现站点已从 baimaodm.com 迁移到 bmmdmm.com（改名「黑猫动漫」），且选集列表已改为服务端直出——旧规则「混淆 JS 解析不到剧集」的结论彻底过时。新规则换用新域名和更稳的 class 型 XPath，搜索、六条播放线路、选集全部实测通过。存量用户升级 App 后首次启动即自动完成规则修复，无需手动操作；本地改过规则的用户不受影响。\n\n2. 播放间歇性进不去的根因：这类站点有「IP 核验」反爬（ipchk），播放页加载正常、但取流接口会间歇性拒绝，站点自己都在用 4 秒间隔重试。现在 WebView 嗅探层学会了同样的自救：页面加载完成却迟迟嗅不到视频时，自动重载一次播放页换新的会话握手再等——实测卡死后重载的成功率显著提升；网络慢（页面还没加载完）则不会浪费式重载。\n\n3. 规则体系治理：社区规则仓库的静默同步改为「只更新已安装的规则」——上游新增的坏源（如搜索已失效的 moonci）不再被悄悄装进你的列表；内置规则修复现在每次启动都会检查落地（零流量、被用户改过的规则绝不覆盖）；fqdm 同步上游 v2.0（新搜索接口与新版站点结构）。\n\n到 GitHub Releases 下载 v1.6.10 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
     {
-      "id": "ann-20260912-v169",
-      "enabled": true,
-      "priority": 22,
-      "title": "v1.6.9 发布：解析链 23 项工单闭环 + 更新断点续传",
-      "body": "这版把《播放器深度修复提示词》工单里的 23 项问题逐项修完并逐项复查了一遍，都是「平时不显眼、坏起来很要命」的那种。\n\n1. 解析全部失败时不再干等：以前快解/云端/网页嗅探三层全挂时，要对着「解析中」干转 20 秒才弹换线路提示；现在秒级就给重试/换线路入口。\n\n2. 应用内更新抗弱网（你反馈的更新失败/慢）：下载支持断点续传——网络抖一下不再从零重下几十 MB；断流 30 秒自动判死重试（以前会永远卡住）；检查更新改为双通道并发竞速，被墙时不再先白等 8 秒；下载弹窗新增实时速度和已下载量，慢速下载也能确认「在动」。\n\n3. 播放器细节：MP4 源不再被误判成 HLS 解析失败；外挂字幕轨不再被本地代理劫持成 502；你主动暂停后 App 不再「自作主张」帮你恢复播放；换集过渡画面不再闪烁。\n\n4. 稳定性：云端解析启动预热不再因一次网络抖动就熔断 5 分钟；全量搜索不再先清空旧结果（弱网下不再白屏等十几秒）；换集后旧集的后台预取请求自动作废不抢带宽。\n\n5. 工程验证：flutter analyze 零问题，353 项自动化测试全绿（新增字幕透传/断点续传边界/缓存覆盖语义等回归锁）。修复了一个新版编译器拒绝构建的着色器变量命名问题。\n\n到 GitHub Releases 下载 v1.6.9 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.9"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.8",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260911-v168",
-      "enabled": false,
-      "priority": 21,
-      "title": "v1.6.8 发布：「有声黑屏」终极根治",
-      "body": "这版把播放器黑屏问题的最后一环挖出来修掉了。\n\n1. 「有声音却黑屏/转圈」终极根因：上一版的修复逻辑全对，但最后一处接线是断的——正常播放时页面挂的是一个空容器而不是播放器画面。这版接通之后又加了自动化回归锁，这类「修了但没生效」的问题从流程上绝根。加载转圈现在从点开到真实出画面全程都在，不再闪黑窗。\n\n2. 播放失败不再卡死：真失败时给明确的错误页和重试/换线路按钮，不再黑屏永转圈零入口；换线路也不再把好线路误判成坏线路。\n\n3. 导入规则的源修复：「能探测到但一播放就 403 然后无限换线路」的问题这版才真正修到根上（上版修错了层）。用 Kazumi 规则包的朋友这版应该明显改善。\n\n4. 跟随上游同步的实用修复：移动数据下大缓冲/预取立即让路不偷跑流量；退出应用后媒体通知不再「复活」；超宽电影（2.4:1）进画中画不再崩溃；柯南等超长篇的手动弹幕检索修复（旧接口只查 25 条还折叠，现在能查到主系列）。\n\n5. 其他：倍速下弹幕时长滑条显示真实秒数、GitHub 同步用户追番页按钮修复、下载异常兜底等 20 余项。全程四轮代理审查+修复+验证，348 项自动化测试全绿。\n\n到 GitHub Releases 下载 v1.6.8 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.8"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.7",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260911-v167",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.7 发布：声画同步根治 + 真磨砂质感",
-      "body": "这版针对你反馈的两大问题做了根治级修复。\n\n1. 播放器「声画不同步/有声音却黑屏加载中」：找到了三个真正的根因——解析用的隐藏网页会漏出视频声音（让你误以为已加载成功）、起播遮罩被播放器的假状态骗过（画面没出来就撤了遮罩）、缓冲恢复门槛太低（声音先出画面后到）。三个全部修复，更新后重播次数显著减少，换线路也更容易成功（解析超时不再被内部 12 秒上限砍掉，慢站点也能等到结果）。\n\n2. 底部导航磨砂：上一版顶部会漏出一条透明带——整个磨砂架构重写为单层自包含方案，红绿蓝三通道全部真实高斯化开 + 逐像素磨砂颗粒质感，任何封面滚过都只剩柔和的色彩呼吸。\n\n3. 新功能：每次更新后的首次进入，都会播放一遍高级开屏动效。\n\n到 GitHub Releases 下载 v1.6.7 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.7"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.6",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260907-v166",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.6 发布：真磨砂玻璃 + 全面细节打磨",
-      "body": "这版是一次全面体检：前端细节全量审阅打磨 + 后端逻辑深审，约 120 项修复与增强。\n\n1. 底部导航真磨砂：之前的模糊只作用在绿通道，红蓝通道还是清晰的——动漫轮廓隔着玻璃照样看得清。现在底层先做全通道真实高斯（R/G/B 全部化开），上层玻璃折射叠加在磨砂基底上，强度同步加大——既是液态玻璃，也是真磨砂。\n\n2. 播放器交互大补：双击屏幕左右 10 秒快进退；点控制栏不再被自动隐藏；字幕默认样式修正；选集当前集高亮+已看角标；解析失败可直接重试/换线路。\n\n3. 后端修了 18 个真 bug：自动换源熔断失效、断点续传换线路混源损坏、下载暂停后卡死、GitHub 云同步第二轮起必失败等。\n\n4. 开屏：深夜冷启动不再闪白；旋转不再整页重置。\n\n到 GitHub Releases 下载 v1.6.6 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.6"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.5",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260907-v165",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.5 发布：开屏昼夜切换 + 导航玻璃可读性",
-      "body": "这版主打开屏昼夜切换和底部导航可读性：\n\n1. 开屏自动分昼夜：北京时间 23 点到次日 6 点打开 App，开屏直接是深夜星空版（黑色那版）；应用内或系统开了深色模式也同样切夜版。\n\n2. 底部导航玻璃终于「读得清」：之前动漫封面贴着玻璃滚过去时看得太清楚，推荐/时间表/追番/我的那行文字被冲得看不清——现在玻璃带真实高斯模糊，封面化开成柔和色块，折射与色散保留，文字任何时候都读得清。\n\n3. 滑动小球居中修复：点切换页签时滑动的小球之前没落在文字正中心（首尾两项各偏 9px）、页签还被手势区挤扁——已逐像素对齐并恢复满高。\n\n到 GitHub Releases 下载 v1.6.5 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.5"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.4",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260906-v164",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.4 发布：播放器大修 + 自定义字体",
-      "body": "这版把播放器和字体一起做透了：\n\n1. 播放器三处根因修复：有声音没画面、一直显示「解析中」的黑遮罩问题；解析成功却报失败并无限换源的死循环；换集时旧一集声音外放。加载提示现在显示真实阶段和已耗时秒数。\n\n2. 自定义字体：设置 → 外观 → 字体。内置 8 款精选免费商用字体（霞鹜文楷、思源黑体、站酷快乐体、毛笔手写等），默认不下载，看中哪款下哪款，下载完立即生效。\n\n3. 主界面底部导航升级为悬浮液态玻璃 Dock——内容从玻璃下滚过时会被真实折射。\n\n4. 开屏上滑时 MIRU 字标周围的白方块穿帮已修；「通过 GitHub 进入」改为应用内登录面板，不再跳浏览器。\n\n到 GitHub Releases 下载 v1.6.4 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.4"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.3",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260906-v163",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.3 发布：玻璃开屏光影通透修复",
-      "body": "玻璃开屏这次真的「玻璃」了：\n\n1. 修复玻璃球不通透、没有光影的根因——之前全部玻璃光影着色器在运行时静默加载失败，球只是一片半透明白。现在外光晕、乳白玻璃体、发丝缘光、推动时的彩虹焦散与背景真实折射全部生效，与原版一致。\n\n2. 文字重叠修复：任何屏幕比例下标题都不再叠行；文案重写为「追番这件事——不将就，要讲究」。\n\n3. 删除白底启动页：点开应用直接落入液态玻璃开屏，全程同色无缝。\n\n4. 设置 → 界面设置 新增「每次启动显示开屏动画」：想每次都看一遍开屏就打开它。\n\n到 GitHub Releases 下载 v1.6.3 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.3"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.2",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260906-v162",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.2 发布：液态玻璃开屏大修",
-      "body": "上滑之后的体验这次全部修好：\n\n1. 修复上滑松手后画面「冻结」——贴纸、文案、按钮不出现的根因已除。\n\n2. 修复贴纸放大 5 倍糊满全屏、文案失焦动画失效、贴纸层偶发整层空白。\n\n3. 玻璃球透镜升级为真实折射：云海视频、星空与贴纸都会被玻璃弯折放大。\n\n4. 开屏字标换为 chrome 气球字（昼夜两个色调），观感对齐原版。\n\n到 GitHub Releases 下载 v1.6.2 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.6.1",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260905-v160",
-      "enabled": false,
-      "priority": 20,
-      "title": "v1.6.0 发布：播放链路全面提速",
-      "body": "本轮播放链路全面升级，目标「秒开、稳开、换集秒切」：\n\n1. 解析改对冲竞速：本地快解、云端解析、WebView 兜底不再逐级排队（最坏近一分钟），梯队同时推进，谁先拿到可用直链谁先开播，任何路径硬上限 12 秒，绝无永远转圈。\n\n2. 换集秒切：播放器实例常驻复用（省 300~900ms 黑屏），本地代理滑窗预取始终领先播放头 4 个分片，快进回看不卡顿。\n\n3. 线路健康一目了然：进播放页自动摸底各线路可用性与延迟，换线路菜单显示毫秒徽标，死线路一眼避开，无播放历史时自动优先健康线路。\n\n4. 签名感知缓存：带过期时间的直链按真实剩余寿命缓存，过期自动重新解析，转圈减少。\n\n5. 起播参数分级：起播小缓冲快出首帧，稳定后自动拉高到 120 秒大缓冲，网络抖动自动重连。\n\n到 GitHub Releases 下载 v1.6.0 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.0"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.5.3",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260828-v153",
-      "enabled": false,
-      "priority": 10,
-      "title": "v1.5.3 发布：播放稳定性大修",
-      "body": "本轮经过三轮深度代码审查，累计修复 131 项问题，播放链路全面加固：\n\n1. 播放自愈修复：之前关闭「播放错误提示」会连带关闭自动换源自愈（表现为永久转圈），现已分离。\n\n2. 假直链不再入缓存：源站错误页伪装的 m3u8 之前会被缓存 30 分钟一直转圈，现在严格校验直接判死降级。\n\n3. 卡死源站秒级失败：黑洞源站之前会把解析挂住近 2 分钟，现在 8 处链路全部有超时，自动降级下一级。\n\n4. 防盗链头随缓存持久化：二刷、换集不再因丢失 Referer/Cookie 而 403。\n\n5. 下载接入五级解析漏斗：下载不再每任务硬等 30 秒 WebView 嗅探。\n\n6. 16:9 海报加载不出修复：图片加超时与失败回退。\n\n到 GitHub Releases 下载 v1.5.3 覆盖安装即可，固定签名无需卸载。",
-      "coverImage": "",
-      "actions": [
-        {
-          "label": "去下载",
-          "type": "url",
-          "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.3"
-        }
-      ],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "1.5.2",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
-    },
-    {
-      "id": "ann-20260827-5sei",
-      "enabled": false,
-      "priority": 10,
-      "title": "测试弹窗无需在意",
-      "body": "该弹窗为测试，无需在意",
-      "coverImage": "",
-      "actions": [],
-      "minAppVersion": "1.3.0",
-      "maxAppVersion": "",
-      "startAt": "",
-      "endAt": "",
-      "showFrequency": "once",
-      "font": "longCang"
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.10"
     }
-  ]
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.9",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260912-v169",
+   "enabled": false,
+   "priority": 22,
+   "title": "v1.6.9 发布：解析链 23 项工单闭环 + 更新断点续传",
+   "body": "这版把《播放器深度修复提示词》工单里的 23 项问题逐项修完并逐项复查了一遍，都是「平时不显眼、坏起来很要命」的那种。\n\n1. 解析全部失败时不再干等：以前快解/云端/网页嗅探三层全挂时，要对着「解析中」干转 20 秒才弹换线路提示；现在秒级就给重试/换线路入口。\n\n2. 应用内更新抗弱网（你反馈的更新失败/慢）：下载支持断点续传——网络抖一下不再从零重下几十 MB；断流 30 秒自动判死重试（以前会永远卡住）；检查更新改为双通道并发竞速，被墙时不再先白等 8 秒；下载弹窗新增实时速度和已下载量，慢速下载也能确认「在动」。\n\n3. 播放器细节：MP4 源不再被误判成 HLS 解析失败；外挂字幕轨不再被本地代理劫持成 502；你主动暂停后 App 不再「自作主张」帮你恢复播放；换集过渡画面不再闪烁。\n\n4. 稳定性：云端解析启动预热不再因一次网络抖动就熔断 5 分钟；全量搜索不再先清空旧结果（弱网下不再白屏等十几秒）；换集后旧集的后台预取请求自动作废不抢带宽。\n\n5. 工程验证：flutter analyze 零问题，353 项自动化测试全绿（新增字幕透传/断点续传边界/缓存覆盖语义等回归锁）。修复了一个新版编译器拒绝构建的着色器变量命名问题。\n\n到 GitHub Releases 下载 v1.6.9 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.9"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.8",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260911-v168",
+   "enabled": false,
+   "priority": 21,
+   "title": "v1.6.8 发布：「有声黑屏」终极根治",
+   "body": "这版把播放器黑屏问题的最后一环挖出来修掉了。\n\n1. 「有声音却黑屏/转圈」终极根因：上一版的修复逻辑全对，但最后一处接线是断的——正常播放时页面挂的是一个空容器而不是播放器画面。这版接通之后又加了自动化回归锁，这类「修了但没生效」的问题从流程上绝根。加载转圈现在从点开到真实出画面全程都在，不再闪黑窗。\n\n2. 播放失败不再卡死：真失败时给明确的错误页和重试/换线路按钮，不再黑屏永转圈零入口；换线路也不再把好线路误判成坏线路。\n\n3. 导入规则的源修复：「能探测到但一播放就 403 然后无限换线路」的问题这版才真正修到根上（上版修错了层）。用 Kazumi 规则包的朋友这版应该明显改善。\n\n4. 跟随上游同步的实用修复：移动数据下大缓冲/预取立即让路不偷跑流量；退出应用后媒体通知不再「复活」；超宽电影（2.4:1）进画中画不再崩溃；柯南等超长篇的手动弹幕检索修复（旧接口只查 25 条还折叠，现在能查到主系列）。\n\n5. 其他：倍速下弹幕时长滑条显示真实秒数、GitHub 同步用户追番页按钮修复、下载异常兜底等 20 余项。全程四轮代理审查+修复+验证，348 项自动化测试全绿。\n\n到 GitHub Releases 下载 v1.6.8 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.8"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.7",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260911-v167",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.7 发布：声画同步根治 + 真磨砂质感",
+   "body": "这版针对你反馈的两大问题做了根治级修复。\n\n1. 播放器「声画不同步/有声音却黑屏加载中」：找到了三个真正的根因——解析用的隐藏网页会漏出视频声音（让你误以为已加载成功）、起播遮罩被播放器的假状态骗过（画面没出来就撤了遮罩）、缓冲恢复门槛太低（声音先出画面后到）。三个全部修复，更新后重播次数显著减少，换线路也更容易成功（解析超时不再被内部 12 秒上限砍掉，慢站点也能等到结果）。\n\n2. 底部导航磨砂：上一版顶部会漏出一条透明带——整个磨砂架构重写为单层自包含方案，红绿蓝三通道全部真实高斯化开 + 逐像素磨砂颗粒质感，任何封面滚过都只剩柔和的色彩呼吸。\n\n3. 新功能：每次更新后的首次进入，都会播放一遍高级开屏动效。\n\n到 GitHub Releases 下载 v1.6.7 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.7"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.6",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260907-v166",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.6 发布：真磨砂玻璃 + 全面细节打磨",
+   "body": "这版是一次全面体检：前端细节全量审阅打磨 + 后端逻辑深审，约 120 项修复与增强。\n\n1. 底部导航真磨砂：之前的模糊只作用在绿通道，红蓝通道还是清晰的——动漫轮廓隔着玻璃照样看得清。现在底层先做全通道真实高斯（R/G/B 全部化开），上层玻璃折射叠加在磨砂基底上，强度同步加大——既是液态玻璃，也是真磨砂。\n\n2. 播放器交互大补：双击屏幕左右 10 秒快进退；点控制栏不再被自动隐藏；字幕默认样式修正；选集当前集高亮+已看角标；解析失败可直接重试/换线路。\n\n3. 后端修了 18 个真 bug：自动换源熔断失效、断点续传换线路混源损坏、下载暂停后卡死、GitHub 云同步第二轮起必失败等。\n\n4. 开屏：深夜冷启动不再闪白；旋转不再整页重置。\n\n到 GitHub Releases 下载 v1.6.6 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.6"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.5",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260907-v165",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.5 发布：开屏昼夜切换 + 导航玻璃可读性",
+   "body": "这版主打开屏昼夜切换和底部导航可读性：\n\n1. 开屏自动分昼夜：北京时间 23 点到次日 6 点打开 App，开屏直接是深夜星空版（黑色那版）；应用内或系统开了深色模式也同样切夜版。\n\n2. 底部导航玻璃终于「读得清」：之前动漫封面贴着玻璃滚过去时看得太清楚，推荐/时间表/追番/我的那行文字被冲得看不清——现在玻璃带真实高斯模糊，封面化开成柔和色块，折射与色散保留，文字任何时候都读得清。\n\n3. 滑动小球居中修复：点切换页签时滑动的小球之前没落在文字正中心（首尾两项各偏 9px）、页签还被手势区挤扁——已逐像素对齐并恢复满高。\n\n到 GitHub Releases 下载 v1.6.5 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.5"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.4",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260906-v164",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.4 发布：播放器大修 + 自定义字体",
+   "body": "这版把播放器和字体一起做透了：\n\n1. 播放器三处根因修复：有声音没画面、一直显示「解析中」的黑遮罩问题；解析成功却报失败并无限换源的死循环；换集时旧一集声音外放。加载提示现在显示真实阶段和已耗时秒数。\n\n2. 自定义字体：设置 → 外观 → 字体。内置 8 款精选免费商用字体（霞鹜文楷、思源黑体、站酷快乐体、毛笔手写等），默认不下载，看中哪款下哪款，下载完立即生效。\n\n3. 主界面底部导航升级为悬浮液态玻璃 Dock——内容从玻璃下滚过时会被真实折射。\n\n4. 开屏上滑时 MIRU 字标周围的白方块穿帮已修；「通过 GitHub 进入」改为应用内登录面板，不再跳浏览器。\n\n到 GitHub Releases 下载 v1.6.4 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.4"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.3",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260906-v163",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.3 发布：玻璃开屏光影通透修复",
+   "body": "玻璃开屏这次真的「玻璃」了：\n\n1. 修复玻璃球不通透、没有光影的根因——之前全部玻璃光影着色器在运行时静默加载失败，球只是一片半透明白。现在外光晕、乳白玻璃体、发丝缘光、推动时的彩虹焦散与背景真实折射全部生效，与原版一致。\n\n2. 文字重叠修复：任何屏幕比例下标题都不再叠行；文案重写为「追番这件事——不将就，要讲究」。\n\n3. 删除白底启动页：点开应用直接落入液态玻璃开屏，全程同色无缝。\n\n4. 设置 → 界面设置 新增「每次启动显示开屏动画」：想每次都看一遍开屏就打开它。\n\n到 GitHub Releases 下载 v1.6.3 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.3"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.2",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260906-v162",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.2 发布：液态玻璃开屏大修",
+   "body": "上滑之后的体验这次全部修好：\n\n1. 修复上滑松手后画面「冻结」——贴纸、文案、按钮不出现的根因已除。\n\n2. 修复贴纸放大 5 倍糊满全屏、文案失焦动画失效、贴纸层偶发整层空白。\n\n3. 玻璃球透镜升级为真实折射：云海视频、星空与贴纸都会被玻璃弯折放大。\n\n4. 开屏字标换为 chrome 气球字（昼夜两个色调），观感对齐原版。\n\n到 GitHub Releases 下载 v1.6.2 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.2"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.6.1",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260905-v160",
+   "enabled": false,
+   "priority": 20,
+   "title": "v1.6.0 发布：播放链路全面提速",
+   "body": "本轮播放链路全面升级，目标「秒开、稳开、换集秒切」：\n\n1. 解析改对冲竞速：本地快解、云端解析、WebView 兜底不再逐级排队（最坏近一分钟），梯队同时推进，谁先拿到可用直链谁先开播，任何路径硬上限 12 秒，绝无永远转圈。\n\n2. 换集秒切：播放器实例常驻复用（省 300~900ms 黑屏），本地代理滑窗预取始终领先播放头 4 个分片，快进回看不卡顿。\n\n3. 线路健康一目了然：进播放页自动摸底各线路可用性与延迟，换线路菜单显示毫秒徽标，死线路一眼避开，无播放历史时自动优先健康线路。\n\n4. 签名感知缓存：带过期时间的直链按真实剩余寿命缓存，过期自动重新解析，转圈减少。\n\n5. 起播参数分级：起播小缓冲快出首帧，稳定后自动拉高到 120 秒大缓冲，网络抖动自动重连。\n\n到 GitHub Releases 下载 v1.6.0 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.6.0"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.5.3",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260828-v153",
+   "enabled": false,
+   "priority": 10,
+   "title": "v1.5.3 发布：播放稳定性大修",
+   "body": "本轮经过三轮深度代码审查，累计修复 131 项问题，播放链路全面加固：\n\n1. 播放自愈修复：之前关闭「播放错误提示」会连带关闭自动换源自愈（表现为永久转圈），现已分离。\n\n2. 假直链不再入缓存：源站错误页伪装的 m3u8 之前会被缓存 30 分钟一直转圈，现在严格校验直接判死降级。\n\n3. 卡死源站秒级失败：黑洞源站之前会把解析挂住近 2 分钟，现在 8 处链路全部有超时，自动降级下一级。\n\n4. 防盗链头随缓存持久化：二刷、换集不再因丢失 Referer/Cookie 而 403。\n\n5. 下载接入五级解析漏斗：下载不再每任务硬等 30 秒 WebView 嗅探。\n\n6. 16:9 海报加载不出修复：图片加超时与失败回退。\n\n到 GitHub Releases 下载 v1.5.3 覆盖安装即可，固定签名无需卸载。",
+   "coverImage": "",
+   "actions": [
+    {
+     "label": "去下载",
+     "type": "url",
+     "value": "https://github.com/DisenthrallClaude/Miru/releases/tag/v1.5.3"
+    }
+   ],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "1.5.2",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  },
+  {
+   "id": "ann-20260827-5sei",
+   "enabled": false,
+   "priority": 10,
+   "title": "测试弹窗无需在意",
+   "body": "该弹窗为测试，无需在意",
+   "coverImage": "",
+   "actions": [],
+   "minAppVersion": "1.3.0",
+   "maxAppVersion": "",
+   "startAt": "",
+   "endAt": "",
+   "showFrequency": "once",
+   "font": "longCang"
+  }
+ ]
 }

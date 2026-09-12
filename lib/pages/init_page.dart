@@ -462,6 +462,21 @@ class _InitPageState extends State<InitPage> {
   Future<void> _pluginInit() async {
     try {
       await pluginsController.init();
+      // v1.6.10：启动时内置规则刷新——随包分发的规则修复（域名迁移、
+      // XPath 更新等）无需等社区仓库跟进即可触达存量用户。本地 asset
+      // 读取、零网络流量（计量网络下也执行）；已安装且版本不落后或被
+      // 用户本地修改过的规则不会被覆盖（见 copyPluginsToExternalDirectory
+      // 的预扫描与 localModified 保护）。必须先于社区规则同步执行：
+      // 内置 baimao v2.0 落盘后，上游 v1.0 不再被视为「更新」。
+      try {
+        await pluginsController.copyPluginsToExternalDirectory();
+      } catch (error, stackTrace) {
+        MiruLogger().w(
+          'Plugin: bundled rule refresh failed on startup',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       unawaited(_pluginUpdate());
     } catch (error, stackTrace) {
       MiruLogger().e(

@@ -592,7 +592,24 @@ class VideoWebviewAndroidImpl
     // 本地代理/自身请求不嗅探
     if (url.contains('127.0.0.1')) return;
 
-    logEventController.add('Network sniff: $url');
+    // v1.6.10：仅 query 携带媒体链接的 URL（ArtPlayer 内嵌播放器
+    // index.html?url=xx.m3u8、api.php?url=…）本身是 HTML/接口页，
+    // 原样交给 mpv 必然打开失败。先用与 JSBridgeDebug 同源的
+    // decodeVideoSource 从 query 参数提取真实直链；提取不到（如
+    // api.php?type=m3u8 的短标记型）维持原样上报（重定向型接口
+    // mpv 可自行跟随），行为与旧版一致。
+    var reportedUrl = url;
+    final path = url.split('#').first.split('?').first;
+    final pathIsDirectMedia =
+        _mediaExtRe.hasMatch(path) || _playlistPathRe.hasMatch(path);
+    if (!pathIsDirectMedia) {
+      final extracted = decodeVideoSource(url);
+      if (extracted != url && extracted.isNotEmpty) {
+        reportedUrl = extracted;
+      }
+    }
+
+    logEventController.add('Network sniff: $reportedUrl');
     isIframeLoaded = true;
     isVideoSourceLoaded = true;
     _freezeAfterSniffSuccess();
@@ -608,8 +625,10 @@ class VideoWebviewAndroidImpl
     });
 
     notifyVideoSourceResolved(
-      url,
-      format: _isHlsUrl(url) ? VideoSourceFormat.hls : VideoSourceFormat.auto,
+      reportedUrl,
+      format: _isHlsUrl(reportedUrl)
+          ? VideoSourceFormat.hls
+          : VideoSourceFormat.auto,
       headers: headers.isEmpty ? null : headers,
     );
   }
@@ -619,12 +638,17 @@ class VideoWebviewAndroidImpl
       r'\.(m3u8|mp4|flv|mkv|mov|webm)(\?|$)',
       caseSensitive: false);
 
+  /// playlist 型清单路径（/index.m3u8 / /playlist.m3u8 / mixed 型）。
+  static final RegExp _playlistPathRe = RegExp(
+      r'/(index|mixed|playlist|hls)[^/]*\.m3u8',
+      caseSensitive: false);
+
   static bool _isSniffableMediaUrl(String url) {
     final lower = url.toLowerCase();
     final path = lower.split('#').first.split('?').first;
     if (_mediaExtRe.hasMatch(path)) return true;
     // /index.m3u8 / /playlist.m3u8 / mixed 型清单路径
-    if (RegExp(r'/(index|mixed|playlist|hls)[^/]*\.m3u8').hasMatch(path)) {
+    if (_playlistPathRe.hasMatch(path)) {
       return true;
     }
     // query 里带 .m3u8（如 /api.php?type=m3u8 或 ?url=xx.m3u8）

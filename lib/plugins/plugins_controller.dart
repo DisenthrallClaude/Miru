@@ -206,6 +206,32 @@ abstract class _PluginsController with Store {
       MiruLogger().i(
           'Plugin: ${bundled.length} bundled plugin files scanned for ${newPluginDirectory!.path}');
 
+      // v1.6.10：预扫描——没有任何可落盘变更时直接返回，既省掉一次
+      // plugins.json 全量重写，也让「启动时内置规则刷新」的常态开销
+      // 近乎为零（读取 14 个 asset JSON 本身是毫秒级）。
+      // 变更条件与下方实际变更完全同款：未安装（新内置规则）、或内置
+      // 版本更新且本地未被用户修改过。
+      var hasChange = false;
+      for (final plugin in bundled) {
+        Plugin? local;
+        for (final candidate in pluginList) {
+          if (_catalogKey(candidate.name) == _catalogKey(plugin.name)) {
+            local = candidate;
+            break;
+          }
+        }
+        final needsWrite = local == null ||
+            (_remoteIsNewer(local.version, plugin.version) &&
+                !local.localModified);
+        if (needsWrite) {
+          hasChange = true;
+          break;
+        }
+      }
+      if (!hasChange) {
+        return;
+      }
+
       await _mutateAndPersistNow(
         () {
           for (final plugin in bundled) {
@@ -219,6 +245,17 @@ abstract class _PluginsController with Store {
             // 已安装且本地版本不落后于内置版本时不覆盖，
             // 保护用户对规则的本地修改与手动升级。
             if (local != null && !_remoteIsNewer(local.version, plugin.version)) {
+              continue;
+            }
+            // v1.6.10：本地已修改的规则同样不覆盖（与社区规则同步
+            // v1.6.6 的 localModified 保护同款语义）——用户在编辑器里
+            // 调过的 referer/UA 不因「随包规则升级」被静默重置。
+            // 首次引导时 pluginList 为空、不触发本分支，行为不变。
+            if (local != null && local.localModified) {
+              MiruLogger().i(
+                'Plugin: skip locally modified rule ${local.name} '
+                '(bundled ${plugin.version} available)',
+              );
               continue;
             }
             _replacePlugin(plugin);

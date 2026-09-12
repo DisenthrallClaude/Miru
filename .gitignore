@@ -14,3 +14,10 @@ build/
 *.iml
 .gradle/
 local.properties
+
+# 环境变量文件（含密钥，严禁入库）
+.env
+.env.*
+toolchain_setup.log
+.toolchain/
+flutter_clone.log

@@ -112,7 +112,13 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
       request.throwIfNotCurrent(_activeRequest);
 
-      final event = await _waitForParserEvent(request, timeout);
+      final event = await _waitForParserEventWithReload(
+        request,
+        timeout: timeout,
+        episodeUrl: episodeUrl,
+        useLegacyParser: useLegacyParser,
+        offset: offset,
+      );
 
       request.throwIfNotCurrent(_activeRequest);
 
@@ -178,39 +184,107 @@ class WebViewVideoSourceService implements IVideoSourceService {
     }
   }
 
-  /// 等待解析器事件。使用显式订阅而非 `.first.timeout`：
-  /// 超时/取消路径下广播流订阅会被立即释放，避免悬挂订阅泄漏。
-  Future<VideoParserEvent> _waitForParserEvent(
-    _ResolveRequest request,
-    Duration timeout,
-  ) {
+  /// 等待解析器事件（v1.6.10 两轮结构）。
+  ///
+  /// 第一轮等待 [firstRoundFraction] 的预算；超时且页面已完成加载
+  /// （说明 JS 已跑完但视频握手卡住——典型如站点反爬的 ipchk 间歇
+  /// 拒绝：页面 200、脚本执行完毕、取流接口却持续拒绝，站点自身也
+  /// 在用 4s 间隔重试）时，重载一次播放页换取全新的 Cookie/握手
+  /// 状态再等剩余预算。页面尚未加载完成（网络慢）时不重载——此时
+  /// 重载只会清零已下载进度，剩余预算继续等原加载更有胜算。
+  ///
+  /// 使用共享的 completer + 常驻订阅（而非每轮 `.first.timeout`）：
+  /// 重载间隙到达的嗅探事件不丢失；超时/取消路径下广播流订阅会被
+  /// 立即释放，避免悬挂订阅泄漏。
+  Future<VideoParserEvent> _waitForParserEventWithReload(
+    _ResolveRequest request, {
+    required Duration timeout,
+    required String episodeUrl,
+    required bool useLegacyParser,
+    required int offset,
+    double firstRoundFraction = 0.6,
+  }) {
     final completer = Completer<VideoParserEvent>();
     StreamSubscription<VideoParserEvent>? subscription;
-    Timer? timer;
 
-    void settle(VideoParserEvent event) {
+    // 页面加载完成标记：onLoadStop 的日志行（「loading completed: …」）。
+    // 任意子文档（播放器 iframe 等）完成也算——主文档未完成而子文档
+    // 完成的场景几乎不存在，宁可多触发一次重载也不放过卡死握手。
+    var pageLoadCompleted = false;
+    StreamSubscription<String>? logSubscription;
+
+    subscription = _webview!.onVideoURLParser.listen((event) {
       if (!completer.isCompleted) {
         completer.complete(event);
       }
-    }
-
-    subscription = _webview!.onVideoURLParser.listen(settle);
+    });
+    logSubscription = _webview!.onLog.listen((log) {
+      if (log.startsWith('loading completed')) {
+        pageLoadCompleted = true;
+      }
+    });
     request.cancelled.then((_) {
       if (!completer.isCompleted) {
         completer.completeError(const VideoSourceCancelledException());
       }
     });
-    timer = Timer(timeout, () {
-      if (!completer.isCompleted) {
-        completer.completeError(VideoSourceTimeoutException(timeout));
-      }
-    });
 
-    return completer.future.whenComplete(() async {
-      // timer 是闭包捕获的可空局部变量，无法类型提升，需条件调用。
-      timer?.cancel();
+    final firstRound = Duration(
+      milliseconds: (timeout.inMilliseconds * firstRoundFraction).round(),
+    );
+
+    Future<void> release() async {
       await subscription?.cancel();
-    });
+      await logSubscription?.cancel();
+    }
+
+    return () async {
+      try {
+        return await completer.future.timeout(firstRound);
+      } on TimeoutException {
+        final remaining = timeout - firstRound;
+        request.throwIfNotCurrent(_activeRequest);
+        if (!pageLoadCompleted || remaining <= Duration.zero) {
+          // 页面仍在加载（网络慢）或预算耗尽：剩余时间继续等原加载。
+          if (remaining <= Duration.zero) {
+            throw VideoSourceTimeoutException(timeout);
+          }
+          try {
+            return await completer.future.timeout(remaining);
+          } on TimeoutException {
+            throw VideoSourceTimeoutException(timeout);
+          }
+        }
+        MiruLogger().i(
+          'WebViewResolver: page finished but no media sniffed in '
+          '${firstRound.inSeconds}s (anti-bot handshake stall?), '
+          'reloading once for a fresh session',
+        );
+        try {
+          await _webview!.loadUrl(
+            episodeUrl,
+            useLegacyParser,
+            offset: offset,
+          ).timeout(const Duration(seconds: 10));
+        } catch (error) {
+          if (error is VideoSourceCancelledException) rethrow;
+          // 重载失败（进程僵死等）：不是放弃的理由，原有加载的嗅探
+          // 事件仍可能在剩余窗口内到达，继续等。
+          MiruLogger().w(
+            'WebViewResolver: reload attempt failed, keep waiting',
+            error: error,
+          );
+        }
+        request.throwIfNotCurrent(_activeRequest);
+        try {
+          return await completer.future.timeout(remaining);
+        } on TimeoutException {
+          throw VideoSourceTimeoutException(timeout);
+        }
+      } finally {
+        await release();
+      }
+    }();
   }
 
   @override
