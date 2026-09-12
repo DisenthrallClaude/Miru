@@ -123,9 +123,23 @@ class ResolutionResultCache {
   }
 
   /// 写入解析成功结果。
+  ///
+  /// v1.6.9（P1-5）：[overwrite] 为 false 时（预取路径），未过期的
+  /// 正条目拒绝覆盖——预取写入的是未探测的首候选，缓存里可能是刚
+  /// 验证过可用性的播放结果，后台预取把它顶掉会让下次播放拿到更差
+  /// /未验证的直链。正式解析路径保持默认覆盖（force 重解析、失效后
+  /// 重写都依赖覆盖语义）。
   Future<void> put(String episodeUrl, VideoSource source,
-      {Duration? ttl}) async {
+      {Duration? ttl, bool overwrite = true}) async {
     await _ensureLoaded();
+    if (!overwrite) {
+      final existing = _entries[episodeUrl];
+      if (existing != null &&
+          !existing.isNegative &&
+          !existing.isExpired(DateTime.now())) {
+        return;
+      }
+    }
     _entries[episodeUrl] = _CacheEntry(
       episodeUrl,
       videoUrl: source.url,

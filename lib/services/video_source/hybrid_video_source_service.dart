@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/services/video_source/cloud_video_source_resolver.dart';
@@ -147,12 +149,21 @@ class HybridVideoSourceService implements IVideoSourceService {
     // 「解析超时」>12s 的区段全是 placebo；竞速的快站路径零变化
     // （胜出即取消 deadline timer）。
     final hardDeadline = timeout;
+    // v1.6.9（P1-1）：云端层级专属取消令牌——竞速胜出/会话结束/外部
+    // 取消时立即止损在途的云端 HTTP 请求（旧实现里它们会跑到自身
+    // 超时，占用带宽拖慢新集解析）。
+    final cloudCancel = CancelToken();
     final session = ResolveSession<VideoSource>(
       waves: {
         Duration.zero: (trace) =>
             _runFastLevel(episodeUrl, headers, force: force, trace: trace),
-        const Duration(milliseconds: 600): (trace) =>
-            _runCloudLevel(episodeUrl, headers, force: force, trace: trace),
+        const Duration(milliseconds: 600): (trace) => _runCloudLevel(
+              episodeUrl,
+              headers,
+              force: force,
+              trace: trace,
+              cancelToken: cloudCancel,
+            ),
         const Duration(milliseconds: 1500): (trace) =>
             _runWebViewLevel(
               episodeUrl,
@@ -167,7 +178,11 @@ class HybridVideoSourceService implements IVideoSourceService {
       // 继续加载/自动播放只会白烧流量并拉长漏音窗口（P-4 已消音，
       // 这里止损流量与 CPU），其结果也不再有机会覆盖已写入的缓存。
       // cancel() 本身是同步 fire-and-forget，直接调用即可。
-      onWin: _webviewService.cancel,
+      // v1.6.9（P1-1）：云端波的在途请求一并取消。
+      onWin: () {
+        _webviewService.cancel();
+        cloudCancel.cancel();
+      },
       // v1.6.6 修复（B1-🟡9）：硬上限/取消抛上层异常体系（而非裸
       // TimeoutException），video_controller/download_controller 的
       // 特判分支（超时文案/取消不计插件失败）得以命中。
@@ -187,6 +202,10 @@ class HybridVideoSourceService implements IVideoSourceService {
           offset: offset, headers: headers, prefetchEnabled: prefetchEnabled);
     } finally {
       _activeSessions.remove(session);
+      // 会话结束（胜出/硬上限/全败/异常）后云端在途请求一并止损。
+      if (!cloudCancel.isCancelled) {
+        cloudCancel.cancel();
+      }
     }
   }
 
@@ -287,6 +306,7 @@ class HybridVideoSourceService implements IVideoSourceService {
     Map<String, String> headers, {
     required bool force,
     required ResolveTrace trace,
+    CancelToken? cancelToken,
   }) async {
     if (!_cloud.isConfigured) {
       trace.record(ResolveStage.cloud, 'not-configured');
@@ -300,6 +320,7 @@ class HybridVideoSourceService implements IVideoSourceService {
       episodeUrl,
       userAgent: headers['user-agent'],
       referer: headers['referer'],
+      cancelToken: cancelToken,
     );
     final cloudResult = cloudReport.source;
     if (cloudResult == null) {
@@ -417,7 +438,10 @@ class HybridVideoSourceService implements IVideoSourceService {
         result = cloudReport.source;
       }
       if (result == null) return;
-      await _cache.put(episodeUrl, result);
+      // v1.6.9（P1-5）：预取结果不得覆盖未过期的正条目——预取用的是
+      // 未探测的首候选，而缓存里可能是刚验证过可用性的播放结果；
+      // 后台预取把它顶掉会让下次播放拿到更差/未验证的直链。
+      await _cache.put(episodeUrl, result, overwrite: false);
       await _proxy.prefetch(
         result.url,
         isHls: _isHls(result),
@@ -510,13 +534,14 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   Map<String, String> _mergedPlaybackHeaders(
       Map<String, String> playbackHeaders) {
-    final headers = <String, String>{
-      'user-agent': playbackHeaders['user-agent'] ?? getSessionUA(),
-      if (playbackHeaders.containsKey('referer'))
-        'referer': playbackHeaders['referer']!,
-      if (playbackHeaders.containsKey('cookie'))
-        'cookie': playbackHeaders['cookie']!,
-    };
+    // v1.6.9（P2-4）：完整保留调用方传入的全部自定义头——旧白名单
+    // 只留 UA/referer/cookie 三键，Origin 等防盗链 CDN 会校验的头被
+    // 直接丢弃（探测/回源/播放三处同丢，指纹不完整）。UA 仅作兑底
+    // 填充并统一 trim（P0-1：首尾空白会造成字节级指纹分裂）；referer
+    // 不凭空发明值（调用方未声明时填错值比不填更糟），仅在已有时保留。
+    final headers = <String, String>{...playbackHeaders};
+    final callerUa = headers['user-agent']?.trim() ?? '';
+    headers['user-agent'] = callerUa.isNotEmpty ? callerUa : getSessionUA();
     return headers;
   }
 
@@ -773,8 +798,12 @@ class HybridVideoSourceService implements IVideoSourceService {
       String url, String text, Map<String, String> headers) async {
     try {
       await _proxy.seedManifest(url, text, headers);
-    } catch (_) {
-      // seed 失败无碍：代理回退到自行拉取
+    } catch (e) {
+      // v1.6.9（P2-4）：seed 失败仍无碍（代理回退到自行拉取），但
+      // fire-and-forget 不再零观测——至少 debug 日志能回答「为什么
+      // 播放时代理文清空缓存里没有 seed」。
+      MiruLogger()
+          .d('HybridResolver: seed manifest failed for $url', error: e);
     }
   }
 

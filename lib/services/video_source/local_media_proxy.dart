@@ -101,6 +101,12 @@ class LocalMediaProxy {
   /// 每个 token 的写盘互斥（避免并发 tee 写坏文件）。
   final Set<String> _writing = {};
 
+  /// v1.6.9（P1-6）：淘汰扫描节流字段（见 _evictIfNeeded 注释）。
+  DateTime? _lastEvictScanAt;
+  int _approxBytesSinceEvictScan = 0;
+  static const Duration _evictScanInterval = Duration(seconds: 30);
+  static const int _evictScanMinNewBytes = 4 * 1024 * 1024;
+
   /// 分片预取事件流（§2.2(f)）：播放层订阅做精确错误决策
   /// （403/404 → 换候选；timeout → 原地重开）。
   final StreamController<ProxyEvent> _eventsController =
@@ -899,12 +905,25 @@ class LocalMediaProxy {
         if (holdingWriteLock) {
           teeSink = cacheFile.openWrite(mode: FileMode.append);
         }
+        // v1.6.9（P1-6）：tee 边界改用本地计数——旧实现每 chunk 都
+        // `await cacheFile.length()`：既在热路径上多一次系统调用，又
+        // 因 IOSink 缓冲未落盘而低估长度（竞态窗口内可写入超限字节）。
+        // 本地 teeWritten 与 cachedLen 相加才是真实写入位置；跨界
+        // chunk 按 limit - written 截断，绝不超限。
+        var teeWritten = 0;
         await for (final chunk in response.timeout(originChunkTimeout)) {
           request.response.add(chunk);
           if (teeSink != null) {
-            if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
+            if (cachedLen + teeWritten + chunk.length <= mp4PrefetchBytes) {
               teeSink.add(chunk);
+              teeWritten += chunk.length;
+              _approxBytesSinceEvictScan += chunk.length;
             } else {
+              final remaining = mp4PrefetchBytes - cachedLen - teeWritten;
+              if (remaining > 0) {
+                teeSink.add(chunk.sublist(0, remaining));
+                _approxBytesSinceEvictScan += remaining;
+              }
               await teeSink.close();
               teeSink = null;
               holdingWriteLock = false;
@@ -997,12 +1016,22 @@ class LocalMediaProxy {
         teeSink = cacheFile.openWrite(mode: FileMode.append);
         holdingWriteLock = true;
       }
+      // v1.6.9（P1-6）：同 _serveMediaRange case4 的本地计数式 tee 边界
+      //（canTee 已保证 requestedStart == cachedLen，两个基值等价）。
+      var teeWritten = 0;
       await for (final chunk in response.timeout(originChunkTimeout)) {
         request.response.add(chunk);
         if (teeSink != null) {
-          if (await cacheFile.length() + chunk.length <= mp4PrefetchBytes) {
+          if (cachedLen + teeWritten + chunk.length <= mp4PrefetchBytes) {
             teeSink.add(chunk);
+            teeWritten += chunk.length;
+            _approxBytesSinceEvictScan += chunk.length;
           } else {
+            final remaining = mp4PrefetchBytes - cachedLen - teeWritten;
+            if (remaining > 0) {
+              teeSink.add(chunk.sublist(0, remaining));
+              _approxBytesSinceEvictScan += remaining;
+            }
             await teeSink.close();
             teeSink = null;
             holdingWriteLock = false;
@@ -1220,13 +1249,34 @@ class LocalMediaProxy {
 
   /// KEY/MAP 属性 URI 的统一改写入口（§2.2(d)）：按行分流——
   /// EXT-X-KEY → /key/，EXT-X-MAP → /map/，
-  /// EXT-X-MEDIA（v1.6.7 P-10，带 URI 的音频 rendition）→ /m3u8/
-  /// 递归改写，其余 URI 属性绝对化直连。
+  /// EXT-X-MEDIA → 仅 TYPE=AUDIO 且 URI 形如媒体清单时改写为 /m3u8/
+  /// 递归改写，其余（SUBTITLES/CLOSED-CAPTIONS 或非清单 AUDIO URI）
+  /// 原样透传绝对地址。
+  ///
+  /// v1.6.9（P0-4）：旧实现对所有含 URI= 的 EXT-X-MEDIA 行都改写成
+  /// 清单代理路径——字幕组（TYPE=SUBTITLES）的 WebVTT 清单被按 HLS
+  /// 清单改写后，代理端会试图把 .vtt 分片当 HLS 分片处理，外挂字幕
+  /// 加载 502/卡死（mpv 对 master playlist 外挂轨本就有首帧延迟
+  /// media_kit#1372，误改写把窗口放大成永久失败）。只有确认是音频
+  /// rendition 且 URI 是 .m3u8 清单才走递归改写，其余透传直连。
   String _attributeProxyUrlFor(String line, String absUri) {
     if (line.startsWith('#EXT-X-KEY')) return _keyProxyUrlFor(absUri);
     if (line.startsWith('#EXT-X-MAP')) return _mapProxyUrlFor(absUri);
     if (line.startsWith('#EXT-X-MEDIA') && line.contains('URI=')) {
-      return _manifestProxyUrlFor(absUri);
+      final isAudioRendition =
+          RegExp('TYPE=["\']?AUDIO', caseSensitive: false).hasMatch(line);
+      final uriLooksLikeManifest = absUri
+          .split('#')
+          .first
+          .split('?')
+          .first
+          .toLowerCase()
+          .endsWith('.m3u8');
+      if (isAudioRendition && uriLooksLikeManifest) {
+        return _manifestProxyUrlFor(absUri);
+      }
+      // 字幕/CC 轨或非清单形态的音频 URI：绝对地址直连透传。
+      return absUri;
     }
     return absUri;
   }
@@ -1386,7 +1436,13 @@ class LocalMediaProxy {
       };
       await File('${_cacheDir!.path}/$token.meta')
           .writeAsString(json.encode(meta));
-    } catch (_) {}
+    } catch (e) {
+      // v1.6.9（P1-6）：meta 写失败不再静默——丢了 meta 的缓存条目会
+      // 退化成「不可回源的孤儿分片」（命中判断/_readMeta 全靠它），
+      // 记 warning 才能诊断「缓存命中率异常下降」这类问题。
+      MiruLogger()
+          .w('LocalMediaProxy: write meta failed for $token', error: e);
+    }
   }
 
   Future<_ProxyMeta?> _readMeta(String token, {String? expectUrl}) async {
@@ -1426,7 +1482,22 @@ class LocalMediaProxy {
   }
 
   /// LRU 清理：meta 条目数超限删最旧条目；目录总大小超限删最旧文件。
+  ///
+  /// v1.6.9（P1-6）：扫描节流——旧实现每次预取/登记都全目录 stat
+  /// 扫描（数百条规模下每扫一次几十次系统调用，追番连播时高频触发）。
+  /// 现在距上次扫描不足 [_evictScanInterval] 且期间累计写入量不大时
+  /// 直接跳过；写入量按各写盘路径粗略累计，上限 Overshoot 不超过
+  /// 一个节流窗口内的写入量，风险可控。
   Future<void> _evictIfNeeded() async {
+    final last = _lastEvictScanAt;
+    final now = DateTime.now();
+    if (last != null &&
+        now.difference(last) < _evictScanInterval &&
+        _approxBytesSinceEvictScan < _evictScanMinNewBytes) {
+      return;
+    }
+    _lastEvictScanAt = now;
+    _approxBytesSinceEvictScan = 0;
     try {
       final dir = _cacheDir;
       if (dir == null) return;
@@ -1540,11 +1611,29 @@ class LocalMediaProxy {
     );
   }
 
+  /// v1.6.9（P0-6）：Content-Range 总长解析健壮化。
+  ///
+  /// 旧实现 `RegExp(r'/(\d+)\s*$')` 要求「斜杠+数字」顶到串尾：
+  /// - `bytes 0-999/1000; boundary=x`（带尾参数）→ 匹配失败误判无总长；
+  /// - 尾随空白/OWS 也会失配。
+  /// 改为规范解析：取 '/' 之后、';' 之前的末段，trim 后严格 `^\d+$`；
+  /// `bytes */*`（未知总长）与其他非数字形态返回 null 并记日志，
+  /// 不再把「解析失败」当「无总长」之外的隐式语义。
   int? _totalFromContentRange(HttpClientResponse response) {
     final value = response.headers.value(HttpHeaders.contentRangeHeader);
     if (value == null) return null;
-    final match = RegExp(r'/(\d+)\s*$').firstMatch(value);
-    return match == null ? null : int.parse(match.group(1)!);
+    // 去掉可选的扩展参数段（`; boundary=...` 等 RFC 7233 ext-param）。
+    final withoutParams = value.split(';').first;
+    final slash = withoutParams.lastIndexOf('/');
+    if (slash < 0) return null;
+    final totalPart = withoutParams.substring(slash + 1).trim();
+    if (!RegExp(r'^\d+$').hasMatch(totalPart)) {
+      // bytes */*（长度未知）或其他非标形态：按无总长处理。
+      MiruLogger()
+          .d('LocalMediaProxy: unparsable Content-Range total: "$value"');
+      return null;
+    }
+    return int.tryParse(totalPart);
   }
 
   int? _totalFromContentLength(HttpClientResponse response) {
@@ -1580,6 +1669,7 @@ class LocalMediaProxy {
         sink.add(chunk);
         written += chunk.length;
       }
+      _approxBytesSinceEvictScan += written;
       await sink.close();
     } catch (_) {
       await sink.close().catchError((_) {});

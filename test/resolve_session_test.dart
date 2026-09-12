@@ -3,10 +3,11 @@
 // 用假层级任务（可控延迟/结果/异常）验证波次语义：
 // 1. t=0 层最快产出 → 后续波次不启动；
 // 2. 首层 yield → 600ms 层接手产出；
-// 3. 全部 yield → 硬上限抛 TimeoutException；
+// 3. 全部 yield → 立即以 TimeoutException 失败（v1.6.9：不再等硬上限）；
 // 4. 外部 cancel → 立即以异常收场；
 // 5. 层级抛异常不终止竞速（后续波次仍可胜出）。
-// 6. ttlFor 的 exp 提取与 clamp。
+// 6. run() 重入幂等（v1.6.9 P0-5：复用同一 future，不再抛 StateError）。
+// 7. ttlFor 的 exp 提取与 clamp。
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -53,18 +54,22 @@ void main() {
     expect(result, 'cloud');
   });
 
-  test('全部 yield：硬上限抛 TimeoutException', () async {
+  test('全部 yield：立即失败（不再等硬上限）', () async {
     final session = ResolveSession<String>(
       waves: {
         Duration.zero: (trace) async => null,
         const Duration(milliseconds: 50): (trace) async => null,
       },
-      hardDeadline: const Duration(milliseconds: 300),
+      hardDeadline: const Duration(seconds: 10),
     );
+    final sw = Stopwatch()..start();
     await expectLater(
       session.run(),
       throwsA(isA<TimeoutException>()),
     );
+    sw.stop();
+    // v1.6.9：全部波次落定即失败——若仍在等 10s 硬上限，这里会超秒。
+    expect(sw.elapsed.inSeconds, lessThan(5));
   });
 
   test('层级抛异常不终止竞速：后续波次仍可胜出', () async {
@@ -96,13 +101,15 @@ void main() {
     );
   });
 
-  test('run() 只能调用一次', () async {
+  test('run() 重入幂等（v1.6.9 P0-5）：复用同一 future', () async {
     final session = ResolveSession<int>(
       waves: {Duration.zero: (trace) async => 1},
       hardDeadline: const Duration(seconds: 1),
     );
-    await session.run();
-    expect(() => session.run(), throwsStateError);
+    final first = await session.run();
+    // 旧实现这里抛 StateError，上层重试/双击会把整次解析打断。
+    final second = await session.run();
+    expect(second, first);
   });
 
   test('ResolveTrace：环形淘汰与导出', () {

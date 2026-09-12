@@ -145,6 +145,10 @@ abstract class _PlayerPlaybackController with Store {
   /// 最近一次流错误时间。用于把「错误导致的假 EOF」与正常播完区分开。
   DateTime? _lastStreamErrorAt;
 
+  /// v1.6.9（P1-4）：换集过渡标志（softStop 置位 → openMedia 完成
+  /// 后解除），过渡期 playing/buffering 流事件不更新 UI 态。
+  bool _switchingEpisode = false;
+
   /// 当前集已用掉的自动恢复次数（每次 createVideoController 重置）。
   int _recoveryCount = 0;
 
@@ -174,6 +178,11 @@ abstract class _PlayerPlaybackController with Store {
 
   /// 距离结尾还有 30s 以上却收到 completed，且 10s 内出现过流错误，
   /// 判定为网络中断造成的假 EOF——不应触发自动连播。
+  ///
+  /// v1.6.9（P1-2）：参与判定的错误时间戳只限「已触发自恢复链」的
+  /// 那些记录——用户主动暂停/换集/软停止时 [clearStreamErrorMarker]
+  /// 会清掉它，后台挂起期的瞬时错误不再把暂停中的 completed 误判为
+  /// 假 EOF 而自作主张地重开（把用户暂停变成继续播放）。
   bool get isAbnormalEnd {
     final at = _lastStreamErrorAt;
     if (at == null) return false;
@@ -184,6 +193,15 @@ abstract class _PlayerPlaybackController with Store {
     final p = playerPosition;
     if (d <= Duration.zero) return false;
     return d - p > const Duration(seconds: 30);
+  }
+
+  /// v1.6.9（P1-2）：清空假 EOF 判定的错误时间戳。
+  ///
+  /// 调用时机：用户主动暂停、换集软停、重进播放页——这些都是
+  /// 「用户主导的停止」，随后的 completed 是正常语义；只有活跃
+  /// 播放中自恢复链记录的错误才应参与假 EOF 判定。
+  void clearStreamErrorMarker() {
+    _lastStreamErrorAt = null;
   }
 
   /// 是否还允许自动恢复（未超上限、不在冷却期）。
@@ -541,6 +559,8 @@ abstract class _PlayerPlaybackController with Store {
     _effectiveUrl = null;
     _directFallbackAttempted = false;
     _bufferPromoted = false;
+    // v1.6.9（P1-4）：防软停后 open 未跟上导致过渡标志悬挂。
+    _switchingEpisode = false;
   }
 
   /// v1.6.8（F2/R-2）：duration 已知后预约纯音频兑底。
@@ -936,12 +956,16 @@ abstract class _PlayerPlaybackController with Store {
       _playbackStateSubscriptions.addAll([
         player.stream.buffering.listen((value) {
           if (!isCurrentPlayer(player)) return;
+          // v1.6.9（P1-4）：换集过渡期不更新 UI 态（见 softStop）。
+          if (_switchingEpisode) return;
           if (isBuffering != value) {
             isBuffering = value;
           }
         }),
         player.stream.playing.listen((value) {
           if (!isCurrentPlayer(player)) return;
+          // v1.6.9（P1-4）：换集过渡期不更新 UI 态（见 softStop）。
+          if (_switchingEpisode) return;
           if (playing != value) {
             playing = value;
           }
@@ -1014,12 +1038,26 @@ abstract class _PlayerPlaybackController with Store {
     // 「播放失败」并把错误页钉死在新集上（新集照常开播=有声+错误页）。
     // openMedia 会再次 bump，计数器单调递增无副作用。
     _openMediaGeneration++;
+    // v1.6.9（P1-2）：软停清错误时间戳——换集后的旧集残留错误不再
+    // 参与新集的假 EOF 判定。
+    _lastStreamErrorAt = null;
+    // v1.6.9（P1-4）：换集过渡标志——过渡期间 playing/buffering 流
+    // 事件不更新 UI 态（旧集 stop 序列会把两态短暂翻转，遮罩已经在
+    // loading=true 上盖着，UI 抖动毫无信息量）；下一集 openMedia
+    // 完成后解除。
+    _switchingEpisode = true;
     try {
       await player.pause();
-    } catch (_) {}
+    } catch (e) {
+      // v1.6.9（P1-4）：软停序列的异常不再静默——至少记 warning，
+      // 否则 stop 挂起类故障零观测。
+      MiruLogger().w('PlayerController: softStop pause failed', error: e);
+    }
     try {
       await player.stop();
-    } catch (_) {}
+    } catch (e) {
+      MiruLogger().w('PlayerController: softStop stop failed', error: e);
+    }
     playing = false;
     loading = true;
     isBuffering = true;
@@ -1138,6 +1176,9 @@ abstract class _PlayerPlaybackController with Store {
     if (!isCurrentPlayer(player)) {
       return null;
     }
+    // v1.6.9（P1-4）：新一集已提交 open——解除换集过渡标志，
+    // playing/buffering 流事件恢复直通 UI。
+    _switchingEpisode = false;
 
     // v1.6.8（F5）：移动数据提示会话级去重——此前每次 openMedia（换集
     // /自动连播/换源兑底）都弹同一条，追番连播下每 24 分钟刷屏。

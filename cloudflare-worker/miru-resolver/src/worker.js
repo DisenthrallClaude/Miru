@@ -160,8 +160,15 @@ export default {
             429,
           );
         }
-        // 负缓存也走热门门槛：单次失败不写，反复失败才写
-        if (popularityOf(cacheKeyFor(episodeUrl)) >= POPULARITY_THRESHOLD) {
+        // v1.6.9（P1-11b）：瞬态失败不写负缓存——传输层/源站瞬时故障
+        //（304/重定向异常、5xx、429、超时、网络中断）是「这次没解出来」
+        // 而非「这个站解不了」，写负缓存会让后续请求在 NEG_TTL 内直接
+        // 放弃尝试（旧实现一次基础设施抖动关掉该条目 60s+）。
+        // 负缓存也走热门门槛：单次失败不写，反复失败才写。
+        if (
+          !isTransientFailure(message) &&
+          popularityOf(cacheKeyFor(episodeUrl)) >= POPULARITY_THRESHOLD
+        ) {
           ctx.waitUntil(putNegative(env, cacheKeyFor(episodeUrl), message));
         }
         return jsonResponse(
@@ -278,8 +285,11 @@ async function resolveEpisode(episodeUrl, ua, referer, uid, env, ctx) {
   // 4) 计一次使用（成功才计；失败不扣用户的额度）
   const quota = await countUsage(uid, day, env, ctx);
 
-  // 热门门槛：本 isolate 内第 2 次被请求的条目才值得占一次 KV 写
-  if (popularityOf(key) >= POPULARITY_THRESHOLD) {
+  // 热门门槛：本 isolate 内第 2 次被请求的条目才值得占一次 KV 写；
+  // v1.6.9（P2-5）：叠加 10% 随机落盘——隔离场景（某集只有单个用户
+  // 看，且请求落在不同 isolate）永远到不了阈值 2，正结果不落盘、
+  // KV 命中率受损；随机写补上这条长尾。
+  if (popularityOf(key) >= POPULARITY_THRESHOLD || Math.random() < 0.1) {
     const record = { ok: true, ...result, at: Date.now() };
     ctx.waitUntil(
       env.RESOLVE_CACHE.put(key, JSON.stringify(record), {
@@ -448,7 +458,15 @@ async function countUsage(uid, day, env, ctx) {
 
 function popularityOf(key) {
   const n = (seenKeys.get(key) || 0) + 1;
-  if (seenKeys.size > MAX_TRACKED_KEYS) seenKeys.clear();
+  // v1.6.9（P1-11c）：超上限不再整表 clear()——那会把热门条目的
+  // 计数一并清零，热门门槛（POPULARITY_THRESHOLD）瞬间全部失效；
+  // 改为按计数升序淘汰最冷的一半，保留热条目的记忆。
+  if (seenKeys.size > MAX_TRACKED_KEYS) {
+    const entries = [...seenKeys.entries()].sort((a, b) => a[1] - b[1]);
+    for (let i = 0; i < Math.floor(entries.length / 2); i++) {
+      seenKeys.delete(entries[i][0]);
+    }
+  }
   seenKeys.set(key, n);
   return n;
 }
@@ -459,6 +477,28 @@ async function putNegative(env, key, message) {
       ok: false, error: message, at: Date.now(),
     }), { expirationTtl: NEG_TTL });
   } catch (_) {}
+}
+
+/**
+ * v1.6.9（P1-11b）：瞬态故障判定——这类失败不应写入负缓存。
+ * - 传输层/网络类消息（timeout / network / fetch failed）；
+ * - page fetch failed:<status>：3xx（重定向/304 异常）、429、5xx
+ *   与非数字状态（网络层异常）是瞬态；其余 4xx（403/404/410）
+ *   是确定性拒绝，写负缓存是正确行为。
+ */
+function isTransientFailure(message) {
+  const m = String(message || '');
+  if (m === 'quota exceeded' || m === 'negative cache hit') return true;
+  const fetchFailed = 'page fetch failed:';
+  if (m.startsWith(fetchFailed)) {
+    const status = Number(m.slice(fetchFailed.length).trim());
+    if (!Number.isInteger(status)) return true; // 网络层异常（无状态码）
+    if (status >= 500 || status === 429) return true;
+    if (status >= 300 && status < 400) return true; // 304/重定向异常
+    return false;
+  }
+  if (/timeout|abort|network|fetch failed|connect/i.test(m)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -657,16 +697,46 @@ async function extractFromPage(pageUrl, ua, referer, depth) {
 function cacheKeyFor(episodeUrl) {
   // 完整 URL 作 key（防 32 位 FNV 碰撞被刻意构造跨用户毒缓存，
   // 返回错集直链）；超长（>400 字符）或含非 ASCII 的 URL 退回
-  // FNV-1a+长度（KV key 上限 512 字节）。
-  if (episodeUrl.length <= 400 && !/[^\x00-\x7F]/.test(episodeUrl)) {
-    return `r:${episodeUrl}`;
+  // FNV-1a+字节长度（KV key 上限 512 字节）。
+  // v1.6.9（P1-11a）：归一化后再哈希——同一逻辑 URL 的百分号编码
+  // 差异（大小写 escape / 未编码 CJK）不再产生不同 key（只是缓存
+  // miss，但热门统计也被分裂）；字节长度用 TextEncoder（charCodeAt
+  // 是 UTF-16 码元，与字节长度不等价）。
+  const normalized = normalizeUrlForKey(episodeUrl);
+  const asBytes = new TextEncoder().encode(normalized);
+  if (asBytes.length <= 400 && !/[^\x00-\x7F]/.test(normalized)) {
+    return `r:${normalized}`;
   }
   let h = 0x811c9dc5;
-  for (let i = 0; i < episodeUrl.length; i++) {
-    h ^= episodeUrl.charCodeAt(i);
+  for (let i = 0; i < asBytes.length; i++) {
+    h ^= asBytes[i];
     h = Math.imul(h, 0x01000193);
   }
-  return `r:${(h >>> 0).toString(36)}:${episodeUrl.length}`;
+  return `r:${(h >>> 0).toString(36)}:${asBytes.length}`;
+}
+
+/**
+ * v1.6.9（P1-11a）：URL 归一化——统一百分号编码大小写、query 参数
+ * 按字典序排序。仅用于缓存 key 生成（不影响实际抓取的 URL）；
+ * 归一化失败时退回原串，key 语义与旧版一致。
+ * ⚠️ 绝不能去掉 fragment：Miru/Kazumi 的选集 URL 用 #road/episode
+ * 编码线路与集数（如 play.html#r1-2），丢 hash 会把不同集映射到
+ * 同一 key，造成跨集缓存投毒（拿到上一集的直链）。
+ */
+function normalizeUrlForKey(raw) {
+  try {
+    const u = new URL(raw);
+    // query 参数按字典序排序：参数顺序差异不产生新 key。
+    const params = [...u.searchParams.entries()].sort((a, b) =>
+      a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]),
+    );
+    u.search = '';
+    for (const [k, v] of params) u.searchParams.append(k, v);
+    // URL 序列化自带百分号编码归一（大写 hex 统一小写）；hash 原样保留。
+    return u.toString();
+  } catch (_) {
+    return raw;
+  }
 }
 
 function pickCacheFields(cached) {

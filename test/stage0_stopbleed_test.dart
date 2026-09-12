@@ -331,17 +331,19 @@ void main() {
       await goodEndpoint.close(force: true);
     });
 
-    test('warmUp 失败计熔断 + Hive 持久化 + 第 4 次不再请求坏端点',
+    test('warmUp 失败单独计数（2×阈值）+ Hive 持久化 + 熔断后不再请求坏端点',
         () async {
       final resolver = CloudVideoSourceResolver.instance;
-      // 3 轮 warmUp：坏端点连续 3 次失败 → 熔断打开
+      // v1.6.9（P1-7）：warmUp 失败不再与正式解析同权重——单次启动
+      // 抖动（3 次以内）不熔断；跨 6 次（2×阈值，约两次进程启动）
+      // 仍不可达才打开熔断。
       for (var i = 0; i < 3; i++) {
         await resolver.warmUp();
       }
       expect(badHealthRequests, 3,
-          reason: '熔断阈值 3：坏端点恰好被请求 3 次');
+          reason: 'warmUp 失败 3 次（单次启动抖动范围）：不熔断，继续请求');
 
-      // 持久化验证：Hive 盒里坏端点的失败计数 = 3
+      // 持久化验证：Hive 盒里坏端点的 warmUp 失败计数 = 3（'w' 字段）
       final box = await Hive.openBox('cloud_resolver_health');
       final health = box.get('health');
       expect(health, isA<Map>());
@@ -349,11 +351,19 @@ void main() {
       expect((health as Map)[badKey], isNotNull,
           reason: '坏端点健康状态应持久化到 Hive');
       final entry = health[badKey] as Map;
-      expect(entry['f'], 3);
+      expect(entry['w'], 3,
+          reason: 'warmUp 失败应记入独立计数字段 w（P1-7）');
 
-      // 第 4 轮：坏端点已被熔断，不再收到请求
+      // 再来 3 轮（累计 6 = 2×阈值）：熔断打开
+      for (var i = 0; i < 3; i++) {
+        await resolver.warmUp();
+      }
+      expect(badHealthRequests, 6,
+          reason: '累计 6 次 warmUp 失败（2×阈值）后熔断打开');
+
+      // 第 7 轮：坏端点已被熔断，不再收到请求
       await resolver.warmUp();
-      expect(badHealthRequests, 3,
+      expect(badHealthRequests, 6,
           reason: '熔断打开后 warmUp 不应再请求坏端点');
 
       // 清理：测试间不串扰

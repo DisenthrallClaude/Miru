@@ -18,6 +18,14 @@ class PluginSiteClient {
   /// host → 本会话固定使用的 UA。
   final Map<String, String> _hostUserAgents = {};
 
+  /// v1.6.9（P1-10）：代理切换后失效粘性 UA 缓存——出口变了，
+  /// 同一 host 的既有 UA 会与新出口 IP 组成全新指纹（站点风控视角），
+  /// 留着旧 UA 反而成了「同 IP 换 UA」的可疑特征；清空后首个请求
+  /// 重新随机生成并固定。
+  void invalidateStickyUserAgents() {
+    _hostUserAgents.clear();
+  }
+
   Future<String> requestText(
     String url, {
     required String method,

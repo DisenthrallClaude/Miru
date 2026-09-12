@@ -71,6 +71,19 @@ void main() {
 video/index.m3u8
 ''';
 
+  /// v1.6.9（P0-4）回归素材：同时带音频组与字幕组的 master。
+  /// 旧实现对所有含 URI= 的 EXT-X-MEDIA 行都改写成 /m3u8/ 清单代理
+  /// ——字幕组的 WebVTT 清单被当 HLS 清单递归改写，外挂字幕加载
+  /// 502/卡死。现在 SUBTITLES 的 URI 必须原样透传绝对地址。
+  const masterWithSubsText = '''
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="audio",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="zh",URI="audio/track.m3u8"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="sub",NAME="字幕",DEFAULT=NO,AUTOSELECT=YES,LANGUAGE="zh",URI="subs/zh.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,AUDIO="aud",SUBTITLES="sub"
+video/index.m3u8
+''';
+
   // 8 个分片：预取只覆盖前 6（hlsPrefetchSegments），v-007 留作
   // 「未缓存分片的回源透传」测试素材。
   const videoPlaylist = '''
@@ -130,12 +143,14 @@ a-004.ts
 
       switch (path) {
         case '/master.m3u8':
+        case '/master_subs.m3u8':
         case '/video/index.m3u8':
         case '/audio/track.m3u8':
           request.response.headers.contentType =
               ContentType('application', 'vnd.apple.mpegurl');
           request.response.add(utf8.encode(switch (path) {
             '/master.m3u8' => masterText,
+            '/master_subs.m3u8' => masterWithSubsText,
             '/video/index.m3u8' => videoPlaylist,
             _ => audioPlaylist,
           }));
@@ -281,5 +296,41 @@ a-004.ts
       cookie,
       reason: '音频子清单回源必须透传 Cookie（R-5）',
     );
+  });
+
+  test('P0-4: SUBTITLES 轨的 URI 原样透传，仅 AUDIO 走 /m3u8/ 代理',
+      () async {
+    final master = originUrl('/master_subs.m3u8');
+    await LocalMediaProxy.instance.prefetch(master, isHls: true);
+    final proxyMaster = (await LocalMediaProxy.instance
+        .register(master, isHls: true, headers: const {}))!;
+    final rewritten = await getBody(proxyMaster);
+
+    final lines = rewritten.split('\n');
+    final audioLine = lines.firstWhere(
+        (l) => l.startsWith('#EXT-X-MEDIA') && l.contains('TYPE=AUDIO'));
+    final subtitleLine = lines.firstWhere((l) =>
+        l.startsWith('#EXT-X-MEDIA') && l.contains('TYPE=SUBTITLES'));
+
+    // AUDIO rendition：URI 仍是 .m3u8 清单 → 改写为 /m3u8/ 递归代理。
+    final audioUri =
+        RegExp('URI="([^"]+)"').firstMatch(audioLine)!.group(1)!;
+    expect(audioUri, startsWith('http://127.0.0.1:'));
+    expect(audioUri, contains('/m3u8/'),
+        reason: 'AUDIO rendition 的清单 URI 必须走 /m3u8/ 代理（P-10）');
+
+    // SUBTITLES rendition：URI 必须是源站绝对地址（P0-4 病灶：
+    // 旧实现把 WebVTT 字幕清单也改写成 HLS 清单代理 → 外挂字幕
+    // 加载 502/卡死）。
+    final subtitleUri =
+        RegExp('URI="([^"]+)"').firstMatch(subtitleLine)!.group(1)!;
+    expect(subtitleUri, originUrl('/subs/zh.m3u8'),
+        reason: 'SUBTITLES 的 URI 必须原样透传绝对地址，不得进清单代理');
+    // 源站与代理都在 127.0.0.1 上，用 /m3u8/ 代理路径段判别：
+    // 透传地址不得携带代理清单路径（也不带 ?u= 注册参数）。
+    expect(subtitleUri.contains('/m3u8/'), isFalse,
+        reason: '字幕 URI 指向清单代理即 P0-4 回归');
+    expect(subtitleUri.contains('?u='), isFalse,
+        reason: '透传地址不得携带代理注册参数');
   });
 }

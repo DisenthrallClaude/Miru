@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:hive_ce/hive.dart';
+import 'package:dio/dio.dart';
+
 import 'package:miru/request/clients/download_http_client.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/request/core/network_exception.dart';
@@ -74,10 +76,12 @@ class CloudVideoSourceResolver {
         data.forEach((key, value) {
           if (key is String && value is Map) {
             final failures = (value['f'] as num?)?.toInt() ?? 0;
+            final warmUpFailures = (value['w'] as num?)?.toInt() ?? 0;
             final openedAt = (value['o'] as num?)?.toInt();
-            if (failures > 0) {
+            if (failures > 0 || warmUpFailures > 0) {
               _endpointHealth[key] = _EndpointHealth()
                 ..consecutiveFailures = failures
+                ..warmUpFailures = warmUpFailures
                 ..openedAt = openedAt != null && openedAt > 0
                     ? DateTime.fromMillisecondsSinceEpoch(openedAt)
                     : null;
@@ -99,6 +103,7 @@ class CloudVideoSourceResolver {
         for (final e in _endpointHealth.entries)
           e.key: {
             'f': e.value.consecutiveFailures,
+            'w': e.value.warmUpFailures,
             'o': e.value.openedAt?.millisecondsSinceEpoch ?? 0,
           },
       };
@@ -134,12 +139,13 @@ class CloudVideoSourceResolver {
           return true;
         } catch (e) {
           final failureClass = _classifyFailure(e);
-          // 传输层/服务器故障才计熔断（与正式解析同一口径）
+          // 传输层/服务器故障才计入熔断（与正式解析同一口径），但走
+          // warmUp 专用计数（P1-7：阈值放宽为 2×，单次启动抖动不熔断）。
           if (failureClass == 'timeout' ||
               failureClass == 'connect-error' ||
               failureClass == 'bad-certificate' ||
               failureClass.startsWith('http-5')) {
-            _recordEndpointFailure(endpoint);
+            _recordWarmUpFailure(endpoint);
           }
           return false;
         }
@@ -227,6 +233,7 @@ class CloudVideoSourceResolver {
     String episodeUrl, {
     String? userAgent,
     String? referer,
+    CancelToken? cancelToken,
   }) async {
     if (episodeUrl.isEmpty) {
       return const CloudResolveReport(null, null);
@@ -251,6 +258,7 @@ class CloudVideoSourceResolver {
             userAgent: userAgent,
             referer: referer,
             onFailure: failures.add,
+            cancelToken: cancelToken,
           )),
     );
     if (result == null) {
@@ -312,8 +320,12 @@ class CloudVideoSourceResolver {
   }
 
   void _recordEndpointSuccess(Uri endpoint) {
-    _endpointHealth.remove(endpoint.toString());
-    unawaited(_persistHealth());
+    final health = _endpointHealth.remove(endpoint.toString());
+    // v1.6.9（P1-7）：成功即整体移除健康条目（连 warmUp 失败记忆一并
+    // 清零）——期间网络已恢复的端点不该被旧抖动继续压着。
+    if (health != null) {
+      unawaited(_persistHealth());
+    }
   }
 
   void _recordEndpointFailure(Uri endpoint) {
@@ -322,6 +334,20 @@ class CloudVideoSourceResolver {
         _endpointHealth.putIfAbsent(key, _EndpointHealth.new);
     health.consecutiveFailures++;
     if (health.consecutiveFailures >= circuitThreshold) {
+      health.openedAt ??= DateTime.now();
+    }
+    unawaited(_persistHealth());
+  }
+
+  /// v1.6.9（P1-7）：warmUp 失败单独计数——阈值放宽为
+  /// [circuitThreshold] * 2（跨两次启动仍不可达才熔断），单次启动
+  /// 网络抖动不再把好端点误熔断 5 分钟。
+  void _recordWarmUpFailure(Uri endpoint) {
+    final key = endpoint.toString();
+    final health =
+        _endpointHealth.putIfAbsent(key, _EndpointHealth.new);
+    health.warmUpFailures++;
+    if (health.warmUpFailures >= circuitThreshold * 2) {
       health.openedAt ??= DateTime.now();
     }
     unawaited(_persistHealth());
@@ -390,6 +416,7 @@ class CloudVideoSourceResolver {
     String? userAgent,
     String? referer,
     void Function(String failureClass)? onFailure,
+    CancelToken? cancelToken,
   }) async {
     final started = DateTime.now();
     try {
@@ -406,6 +433,7 @@ class CloudVideoSourceResolver {
       final raw = await _client.getPlain(
         uri.toString(),
         receiveTimeout: perEndpointTimeout,
+        cancelToken: cancelToken,
       ).timeout(perEndpointTimeout);
 
       final data = json.decode(raw);
@@ -443,6 +471,11 @@ class CloudVideoSourceResolver {
         elapsed,
       );
     } catch (e) {
+      // v1.6.9（P1-1）：取消不计熔断/不计失败分类——竞速胜出/用户换集
+      // 触发的取消是正常生命周期，不是端点故障。
+      if (cancelToken != null && cancelToken.isCancelled) {
+        rethrow;
+      }
       // 失败分类记日志（B14）+ 熔断计数（B6），异常继续向上抛给 _race 吞掉
       final elapsed = DateTime.now().difference(started).inMilliseconds;
       final failureClass = _classifyFailure(e);
@@ -470,6 +503,12 @@ class CloudVideoSourceResolver {
 /// 端点健康状态（持久化于 Hive `cloud_resolver_health`，§1.4）。
 class _EndpointHealth {
   int consecutiveFailures = 0;
+
+  /// v1.6.9（P1-7）：warmUp 期失败的独立计数——启动时网络抖动
+  /// （wifi 切换瞬间/弱网启动）不应与正式解析的失败同权重计入
+  /// 熔断；连续多个进程生命周期都 warmUp 失败（真正不可达的端点）
+  /// 才允许它打开熔断。
+  int warmUpFailures = 0;
 
   /// 熔断打开时刻；null = 未熔断（只是累计失败数）。
   DateTime? openedAt;

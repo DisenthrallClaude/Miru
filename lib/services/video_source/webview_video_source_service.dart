@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:miru/webview/video/video_webview_controller.dart';
 import 'package:miru/services/video_source/video_source_service.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/utils/http_headers.dart';
 
 /// WebView 视频源解析服务
 ///
@@ -113,13 +116,36 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
       request.throwIfNotCurrent(_activeRequest);
 
-      // 统一兜底：嗅探回调未标注 format 时，按 URL 形态判定 HLS。
-      // mpv 侧拿到 hls 会强制 demuxer-lavf-format=hls，
-      // 避开内容探测失误导致的打开失败（上游 43e0fe8 同源思路）。
-      final format = event.format == VideoSourceFormat.auto &&
-              _looksLikeHls(event.url)
-          ? VideoSourceFormat.hls
-          : event.format;
+      // v1.6.9（P0-2）：嗅探回调未标注 format 且 URL 形似 HLS 时，
+      // 不再直接按后缀强制 hls——先用首 1KB 内容确认 #EXTM3U magic，
+      // 确认后才给 mpv 设 demuxer-lavf-format=hls；内容不是清单
+      //（如 .m3u8 后缀的 MP4 / 重定向到媒体流）则保留 auto 交给
+      // mpv 自探测，避免「URL 像清单但实际是媒体流」被强制按 HLS
+      // 解析而直接失败。嗅探不可判定时维持 auto（mpv 自探测），
+      // 不因嗅探失败损失可播性。
+      var format = event.format;
+      if (format == VideoSourceFormat.auto && _looksLikeHls(event.url)) {
+        final sniffHeaders = <String, String>{
+          ...?event.headers,
+          'user-agent':
+              (event.headers?['user-agent'] ?? event.headers?['User-Agent'])
+                      ?.trim()
+                      .isNotEmpty ==
+                  true
+                  ? (event.headers?['user-agent'] ??
+                      event.headers?['User-Agent'])!
+                  : getSessionUA(),
+        };
+        final isManifest = await _sniffManifestMagic(event.url, sniffHeaders);
+        request.throwIfNotCurrent(_activeRequest);
+        if (isManifest == true) {
+          format = VideoSourceFormat.hls;
+        } else if (isManifest == false) {
+          MiruLogger().i(
+              'WebViewResolver: url looks like m3u8 but content is not a '
+              'manifest, keeping format=auto for mpv self-probe');
+        }
+      }
 
       // 网络层嗅探捕获的请求头（Referer/Cookie，阶段 0 / §1.5）：
       // 随结果带给播放层，防盗链 CDN 不再因丢 Referer 拒播。
@@ -233,4 +259,57 @@ bool _looksLikeHls(String url) {
   // v1.6.6 修复（B1-🔵6）：大小写不敏感（大写 .M3U8 同为 HLS），
   // 与 hybrid 层判定对齐，避免两侧语义漂移。
   return path.toLowerCase().endsWith('.m3u8');
+}
+
+/// v1.6.9（P0-2）：首 1KB 内容嗅探是否为 HLS 清单（#EXTM3U magic）。
+///
+/// 用 Range 请求只拉开头若干字节：
+/// - 返回 true：内容以 #EXTM3U 开头（BOM/空白后），确认是清单；
+/// - 返回 false：拿到了内容但不是清单（媒体流/HTML 错误页）；
+/// - 返回 null：嗅探不可判定（网络失败/超时），调用方维持 auto。
+Future<bool?> _sniffManifestMagic(
+  String url,
+  Map<String, String> headers,
+) async {
+  HttpClient? client;
+  try {
+    client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 3);
+    final request = await client
+        .getUrl(Uri.parse(url))
+        .timeout(const Duration(seconds: 3));
+    // 只取首 1KB：源站不支持 Range 时读满 1KB 即主动断开，不会拉多。
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1023');
+    headers.forEach(request.headers.set);
+    final response = await request.close().timeout(const Duration(seconds: 4));
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk
+        in response.timeout(const Duration(seconds: 4))) {
+      builder.add(chunk);
+      if (builder.length >= 1024) break;
+    }
+    final bytes = builder.takeBytes();
+    if (bytes.isEmpty) return null;
+    // 跳过 UTF-8 BOM 与前导空白后找 #EXTM3U magic。
+    var start = 0;
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xEF &&
+        bytes[1] == 0xBB &&
+        bytes[2] == 0xBF) {
+      start = 3;
+    }
+    while (start < bytes.length &&
+        (bytes[start] == 0x20 ||
+            bytes[start] == 0x09 ||
+            bytes[start] == 0x0A ||
+            bytes[start] == 0x0D)) {
+      start++;
+    }
+    final head = String.fromCharCodes(bytes.skip(start).take(7));
+    return head.toUpperCase() == '#EXTM3U';
+  } catch (_) {
+    return null;
+  } finally {
+    client?.close(force: true);
+  }
 }

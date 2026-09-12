@@ -69,10 +69,18 @@ class PluginSearchService {
   }
 
   Future<void> queryAllSource(String keyword) async {
-    infoController.pluginSearchResponseList.clear();
-    infoController.pluginSearchStatus.clear();
-
+    // v1.6.9（P1-9）：全量搜索改为增量覆盖——旧实现发起前先
+    // clear() 整个结果列表，弱网下几十个插件要查十几秒，期间用户
+    // 看着白屏列表等结果回来；现在旧结果保留占位，每个插件返回时
+    // 原位替换自己的条目，失败的插件保留旧结果并打错误状态标记，
+    // 「有总比没有强」。已被卸载的插件条目在发起前清掉（防止幽灵
+    // 条目常驻）。
     final plugins = List<Plugin>.of(pluginsController.pluginList);
+    final validNames = plugins.map((p) => p.name).toSet();
+    infoController.pluginSearchResponseList.removeWhere(
+      (response) => !validNames.contains(response.pluginName),
+    );
+    infoController.pluginSearchStatus.clear();
     for (final plugin in plugins) {
       infoController.pluginSearchStatus[plugin.name] =
           PluginSearchStatus.pending;
@@ -123,6 +131,11 @@ class PluginSearchService {
         pluginsController.validityTracker.markSearchValid(plugin.name);
         unawaited(PluginHealthTracker.instance.recordSuccess(plugin.name));
       }
+      // v1.6.9（P1-9）：增量覆盖——替换本插件的旧条目而非追加，
+      // 全量搜索期间旧结果仍占位展示。
+      infoController.pluginSearchResponseList.removeWhere(
+        (response) => response.pluginName == plugin.name,
+      );
       infoController.pluginSearchResponseList.add(result);
     } on TimeoutException {
       // 超时后取消底层请求，避免它继续占用连接打站点。

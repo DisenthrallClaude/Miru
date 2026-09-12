@@ -48,6 +48,9 @@ void main() {
   var originChunkDelay = const Duration(milliseconds: 0);
   /// 源站是否支持 Range（false = 一律 200 全量）。
   var originSupportsRange = true;
+  /// v1.6.9（P0-6）测试开关：Content-Range 追加尾参数（如
+  /// `; boundary=x`），验证总长解析不受扩展参数影响。
+  var originContentRangeSuffix = '';
 
   final totalSize = 8 * 1024 * 1024; // 8MB 假视频
 
@@ -71,7 +74,7 @@ void main() {
       if (useRange) {
         request.response.statusCode = HttpStatus.partialContent;
         request.response.headers.set(HttpHeaders.contentRangeHeader,
-            'bytes $start-$end/$totalSize');
+            'bytes $start-$end/$totalSize$originContentRangeSuffix');
       } else {
         request.response.statusCode = HttpStatus.ok;
       }
@@ -297,6 +300,39 @@ void main() {
     expect(
         await LocalMediaProxy.instance.hasUsableCache(url, isHls: false),
         isTrue);
+  });
+
+  test('P0-6: Content-Range 带尾参数（; boundary=x）仍能学到总长', () async {
+    originContentRangeSuffix = '; boundary=x';
+    try {
+      final url = originUrl('/stream-trailing-params.mp4');
+      // 无预取：直接注册（无 meta → 总长未知），走透传学总长路径。
+      final proxyUrl = (await LocalMediaProxy.instance
+          .register(url, isHls: false, headers: const {}))!;
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(Uri.parse(proxyUrl));
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
+        final response = await request.close();
+        expect(response.statusCode, HttpStatus.partialContent);
+        final (_, body) = await readBody(response);
+        expect(body.length, totalSize);
+      } finally {
+        client.close(force: true);
+      }
+      // 透传应把总长学回 meta：旧正则 `/(\d+)\s*$` 对带尾参数的
+      // Content-Range 匹配失败 → total null → 下次播放无法走磁盘合并。
+      final metaFile = File(
+          '/tmp/miru_proxy_test/media_cache/${fnvToken(url)}.meta');
+      expect(await metaFile.exists(), isTrue,
+          reason: '透传后应写入 meta');
+      final meta =
+          json.decode(await metaFile.readAsString()) as Map<String, dynamic>;
+      expect(meta['t'], totalSize,
+          reason: 'P0-6：带尾参数的 Content-Range 也必须解析出总长');
+    } finally {
+      originContentRangeSuffix = '';
+    }
   });
 }
 

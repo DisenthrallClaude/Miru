@@ -150,13 +150,19 @@ class ResolveSession<T> {
   final List<Future<void>> _inflight = [];
   bool _cancelled = false;
 
+  /// v1.6.9：已落定的波次数（全部落定且无胜者→提前失败，见
+  /// [_onWaveSettled]）。
+  int _settledWaves = 0;
+
   /// 是否已有层级产出（防止后续波次在胜者产生后仍然启动）。
   bool _won = false;
 
-  /// 竞速主体。同一会话只能跑一次。
+  /// v1.6.9（P0-5）：run() 幂等化——上层重试/双击/自动重解析触发的
+  /// 重入直接复用同一 future，不再抛 StateError 把整次解析打断。
   Future<T> run() {
-    if (_completer != null) {
-      throw StateError('ResolveSession.run() called twice');
+    final existing = _completer;
+    if (existing != null) {
+      return existing.future;
     }
     final completer = Completer<T>();
     _completer = completer;
@@ -210,13 +216,38 @@ class ResolveSession<T> {
         trace.record(_stageFor(delay), 'wave-yield', 'no result');
         onTrace?.call(trace);
       }
+      // 注意顺序：胜出（完成 completer）之后才结算波次——
+      // _onWaveSettled 对已完成的 completer 直接短路。
+      _onWaveSettled();
     }).catchError((Object e) {
       if (_won || _cancelled || _completer!.isCompleted) return;
       trace.record(_stageFor(delay), 'wave-error', '$e');
       onTrace?.call(trace);
       // 层级故障不终止竞速：还有后续波次与硬上限兜底。
+      _onWaveSettled();
     });
     _inflight.add(future);
+  }
+
+  /// v1.6.9（P1-8 根因）：所有波次（含延迟启动的）都已落定且无胜者
+  /// 时立即以失败完成会话——旧实现只能等 hardDeadline（默认 20s）
+  /// 兜底，快/云/WebView 三层全部秒败的源会让用户对着 loading 转
+  /// 将近 20s 才等到换线路提示。波次定时器未触发前不计入
+  /// [_settledWaves]，因此「到达总数」意味着连延迟波次都已实际跑完。
+  void _onWaveSettled() {
+    _settledWaves++;
+    final completer = _completer;
+    if (completer == null || completer.isCompleted) return;
+    if (_won || _cancelled) return;
+    if (_settledWaves < waves.length) return;
+    _cancelTimers();
+    trace.record(ResolveStage.fast, 'all-levels-failed',
+        '$_settledWaves/${waves.length} waves settled without winner');
+    onTrace?.call(trace);
+    completer.completeError(
+      _timeoutErrorFactory?.call() ??
+          TimeoutException('all resolve levels failed', hardDeadline),
+    );
   }
 
   ResolveStage _stageFor(Duration delay) {

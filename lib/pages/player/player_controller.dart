@@ -369,6 +369,10 @@ class PlayerController implements Disposable {
     final player = playback.mediaPlayer;
     if (player == null) return;
     danmaku.canvasController.pause();
+    // v1.6.9（P1-2）：用户主动暂停——清空假 EOF 判定的错误时间戳，
+    // 后台挂起期的瞬时错误不再把暂停中的 completed 误判为假 EOF
+    // 触发自作主张的重开（把用户暂停变成继续播放）。
+    playback.clearStreamErrorMarker();
     try {
       await player.pause();
     } catch (_) {

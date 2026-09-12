@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
@@ -206,31 +207,65 @@ class AutoUpdater {
   }
 
   Future<Map<String, dynamic>> _latestRelease() async {
-    // 优先请求 GitHub Releases（Miru 自己的仓库），失败后降级到镜像源。
-    // 每源限时：直连被墙时 connect 阶段可能挂十几秒，
-    // 没有外层兜底的话弹窗会迟到半分钟。
+    // v1.6.9：并发竞速替代串行轮询——直连被墙时旧实现要先白等 8s
+    // 超时才轮到镜像源（「检查更新慢」的主因）；现在两源同发，首个
+    // 有效应答胜出，未胜出的在途请求随 CancelToken 止损。
     final sources = [ApiEndpoints.latestApp, ApiEndpoints.latestAppMirror];
-    Object? lastError;
-    for (final source in sources) {
-      try {
-        final raw = await _downloadClient
-            .getPlain(
-              source,
-              receiveTimeout: const Duration(seconds: 8),
-            )
-            .timeout(const Duration(seconds: 10));
-        final data = json.decode(raw);
-        if (data is! Map) {
-          throw Exception('Invalid update response');
+    final cancelToken = CancelToken();
+    try {
+      return await _firstSuccess(sources.map((source) async {
+        try {
+          final raw = await _downloadClient.getPlain(
+            source,
+            receiveTimeout: const Duration(seconds: 8),
+            cancelToken: cancelToken,
+          ).timeout(const Duration(seconds: 10));
+          final data = json.decode(raw);
+          if (data is! Map) {
+            throw Exception('Invalid update response');
+          }
+          return Map<String, dynamic>.from(data);
+        } catch (e) {
+          MiruLogger().w('Update: failed to fetch release from $source',
+              error: e);
+          rethrow;
         }
-        return Map<String, dynamic>.from(data);
-      } catch (e) {
-        lastError = e;
-        MiruLogger().w('Update: failed to fetch release from $source',
-            error: e);
-      }
+      }));
+    } catch (e) {
+      throw Exception('所有更新源均不可用: $e');
+    } finally {
+      cancelToken.cancel();
     }
-    throw lastError ?? Exception('All update sources failed');
+  }
+
+  /// v1.6.9：首个成功者胜出的并发赛跑（Future.any 遇到先完成的
+  /// 失败会立即抛错，不能用）；全部失败时抛最后一个错误。
+  Future<T> _firstSuccess<T>(Iterable<Future<T>> futures) {
+    final list = futures.toList();
+    if (list.isEmpty) {
+      return Future.error(Exception('no sources'));
+    }
+    final completer = Completer<T>();
+    var pending = list.length;
+    Object? lastError;
+    for (final future in list) {
+      unawaited(
+        future.then((value) {
+          if (!completer.isCompleted) {
+            completer.complete(value);
+          }
+        }).catchError((Object e) {
+          lastError = e;
+        }).whenComplete(() {
+          pending--;
+          if (pending == 0 && !completer.isCompleted) {
+            completer.completeError(
+                lastError ?? Exception('all update sources failed'));
+          }
+        }),
+      );
+    }
+    return completer.future;
   }
 
   /// 自动检查更新（仅在启用自动更新时）。
@@ -412,6 +447,23 @@ class AutoUpdater {
                   );
                 },
               ),
+              // v1.6.9：弱网下百分比变化慢，速度/流量行让用户确认
+              //「还在下、没有卡死」，也方便判断要不要换网络重试。
+              ValueListenableBuilder<String?>(
+                valueListenable: _downloadStats,
+                builder: (context, value, child) {
+                  if (value == null || value.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      value,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  );
+                },
+              ),
             ],
           ),
           actions: [
@@ -503,10 +555,38 @@ class AutoUpdater {
   }
 
   final ValueNotifier<double> _downloadProgress = ValueNotifier(0.0);
+
+  /// v1.6.9：下载可观测性——已下载量/总量/速度的文本行，弱网慢速
+  /// 下载时用户至少能看到「在动」而不是干等百分比。
+  final ValueNotifier<String?> _downloadStats = ValueNotifier(null);
+
   CancelToken? _cancelToken;
 
   void _cancelDownload() {
     _cancelToken?.cancel();
+  }
+
+  /// v1.6.9：重置下载统计（新一段下载开始时）。
+  void _resetDownloadStats(int baselineBytes) {
+    _downloadStats.value = baselineBytes > 0
+        ? '已续传基线 ${(baselineBytes / 1024 / 1024).toStringAsFixed(1)} MB'
+        : null;
+  }
+
+  /// v1.6.9：更新下载统计文本（每 ~500ms 刷新一次）。
+  void _updateDownloadStats(
+      int received, int? total, int windowBytes, Duration elapsed) {
+    final receivedMb = received / 1024 / 1024;
+    final totalPart = total != null && total > 0
+        ? ' / ${(total / 1024 / 1024).toStringAsFixed(1)} MB'
+        : '';
+    final seconds = elapsed.inMilliseconds / 1000.0;
+    final speed = seconds > 0 ? windowBytes / seconds : 0.0;
+    final speedPart = speed > 0
+        ? ' · ${(speed / 1024 / 1024).toStringAsFixed(2)} MB/s'
+        : '';
+    _downloadStats.value =
+        '已下载 ${receivedMb.toStringAsFixed(1)} MB$totalPart$speedPart';
   }
 
   /// 显示下载完成对话框
@@ -656,54 +736,157 @@ class AutoUpdater {
     final candidates = _downloadUrlCandidates(url);
     final ranked = await _rankDownloadCandidates(candidates);
 
+    // v1.6.9：断点续传 + 同源重试——弱网下一次网络抖动就删半成品从零
+    // 重下（几十 MB 的 APK 基本永远下不完）。现在：
+    // - 下载写入 <filePath>.part，失败保留半成品；
+    // - 同一源最多 3 次尝试，每次用 Range 从断点续传（源站/镜像
+    //   不支持 Range 回 200 全量时自动退回全量重下）；
+    // - 换源时也带着 .part 续传（镜像与直连的字节内容一致，digest
+    //   终检兜底）；
+    // - 哈希校验仍是安装前的硬关口：续传拼接若损坏会在终检暴露，
+    //   届时删 .part 全量重来。
+    final partFile = File('$filePath.part');
     Object? lastError;
     for (final candidate in ranked) {
-      _cancelToken = CancelToken();
-      _downloadProgress.value = 0.0;
-      try {
-        await _downloadClient.download(
-          candidate,
-          filePath,
-          cancelToken: _cancelToken,
-          onReceiveProgress: (received, total) {
-            if (total > 0) {
-              _downloadProgress.value = received / total;
-            }
-          },
-        );
-
-        // 下载完成后验证文件哈希（安装前的强制关口：换源重试不会
-        // 跳过这一步，见方法注释）。
-        final downloadedHash = await _sha256File(file);
-        if (expectedHash.isNotEmpty && downloadedHash != expectedHash) {
-          // 哈希不匹配，删除文件并抛出异常
-          await file.delete();
-          throw Exception(
-              '文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
-        }
-        if (expectedHash.isEmpty) {
-          MiruLogger().w(
-              'Update: asset has no sha256 digest, skip integrity verification');
-        }
-        MiruLogger()
-            .i('Update: file downloaded from $candidate and hash verified');
-        return filePath;
-      } catch (e) {
-        // 用户主动取消不换源，直接抛出
-        if (_cancelToken?.isCancelled ?? false) {
-          rethrow;
-        }
-        lastError = e;
-        MiruLogger().w('Update: download failed from $candidate', error: e);
-        // 清掉半成品，换下一个源重试
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        final cancelToken = CancelToken();
+        _cancelToken = cancelToken;
         try {
-          if (await file.exists()) {
-            await file.delete();
+          final received = await _downloadWithResume(
+            candidate,
+            partFile,
+            cancelToken: cancelToken,
+          );
+          // 终检：续传拼好的完整文件先过哈希，再落成正式文件名。
+          final downloadedHash = await _sha256File(partFile);
+          if (expectedHash.isNotEmpty && downloadedHash != expectedHash) {
+            await partFile.delete();
+            throw Exception(
+                '文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
           }
-        } catch (_) {}
+          if (expectedHash.isEmpty) {
+            MiruLogger().w(
+                'Update: asset has no sha256 digest, skip integrity verification');
+          }
+          await partFile.rename(filePath);
+          MiruLogger().i(
+              'Update: file downloaded from $candidate ($received bytes, attempt $attempt) and hash verified');
+          return filePath;
+        } catch (e) {
+          // 用户主动取消：不重试不换源，直接抛出（半成品保留，
+          // 用户下次点重试还能续传）。
+          if (_cancelToken?.isCancelled ?? false) {
+            rethrow;
+          }
+          lastError = e;
+          final kept = await partFile.exists()
+              ? ' (kept ${await partFile.length()} bytes for resume)'
+              : '';
+          MiruLogger().w(
+              'Update: download failed from $candidate (attempt $attempt/3)$kept',
+              error: e);
+          // 哈希终检失败时上面已删 .part，attempt 递进自动全量重下；
+          // 其他失败保留 .part 供下一次续传。
+          if (e.toString().contains('文件完整性验证失败')) {
+            // 已经删除，直接进入下一次尝试。
+          }
+          // 网络层死亡（连接被重置等）时小睡片刻再重试，避免立即
+          // 撞同一故障。
+          if (attempt < 3) {
+            await Future<void>.delayed(
+                Duration(milliseconds: 500 * attempt));
+          }
+        }
       }
     }
     throw lastError ?? Exception('所有下载源均不可用');
+  }
+
+  /// v1.6.9：带断点续传的流式下载。
+  ///
+  /// - [partFile] 已有内容时携带 `Range: bytes=<n>-` 续传，追加写盘；
+  /// - 源站回 206 且起始对齐 → 续传；回 200（不支持 Range）→ 全量重下；
+  /// - body 流自带 30s chunk 间隔超时（dio 的 receiveTimeout 只覆盖
+  ///   响应头，流式 body 无任何超时——断流会挂死，这是弱网更新
+  ///   「卡住不动」的直接成因）；
+  /// - 返回本次会话结束时的累计字节数（含续传基线）。
+  Future<int> _downloadWithResume(
+    String candidate,
+    File partFile, {
+    required CancelToken cancelToken,
+  }) async {
+    var existing =
+        await partFile.exists() ? await partFile.length() : 0;
+
+    final headers = <String, dynamic>{
+      if (existing > 0) 'Range': 'bytes=$existing-',
+    };
+    final response = await _downloadClient.getStream(
+      candidate,
+      headers: headers,
+      cancelToken: cancelToken,
+    );
+    final status = response.statusCode ?? 200;
+    final contentRange = response.headers.value('content-range') ?? '';
+    var append = false;
+    if (status == HttpStatus.partialContent && existing > 0) {
+      final match = RegExp(r'^bytes\s+(\d+)-').firstMatch(contentRange.trim());
+      final start = match == null ? null : int.parse(match.group(1)!);
+      if (start == existing) {
+        append = true; // 起始对齐：从断点继续
+      } else {
+        // 起始错位（镜像改写/缓存错位）：放弃本地半成品，全量重下。
+        existing = 0;
+      }
+    } else if (existing > 0) {
+      // 200 全量：源站不支持续传，从零开始。
+      existing = 0;
+    }
+
+    final contentLength =
+        int.tryParse(response.headers.value('content-length') ?? '');
+    final total = contentLength == null
+        ? null
+        : (append ? existing + contentLength : contentLength);
+
+    _downloadProgress.value =
+        total != null && total > 0 ? existing / total : 0.0;
+    _resetDownloadStats(existing);
+
+    final sink =
+        partFile.openWrite(mode: append ? FileMode.append : FileMode.write);
+    var received = existing;
+    var windowStart = DateTime.now();
+    var windowBytes = 0;
+    try {
+      // 30s 无任何数据到达即判死断流（见方法注释）。
+      await for (final chunk in response.data!.stream
+          .timeout(const Duration(seconds: 30))) {
+        sink.add(chunk);
+        received += chunk.length;
+        windowBytes += chunk.length;
+        if (total != null && total > 0) {
+          _downloadProgress.value = (received / total).clamp(0.0, 1.0);
+        }
+        final elapsed = DateTime.now().difference(windowStart);
+        if (elapsed.inMilliseconds >= 500) {
+          _updateDownloadStats(received, total, windowBytes, elapsed);
+          windowBytes = 0;
+          windowStart = DateTime.now();
+        }
+      }
+      final elapsed = DateTime.now().difference(windowStart);
+      if (windowBytes > 0 || elapsed.inMilliseconds > 0) {
+        _updateDownloadStats(received, total, windowBytes, elapsed);
+      }
+      await sink.flush();
+      await sink.close();
+    } catch (e) {
+      // 失败时保留已写盘的部分（续传资产），只保证 sink 关闭。
+      await sink.close().catchError((_) {});
+      rethrow;
+    }
+    return received;
   }
 
   /// 构造下载候选地址：镜像在前，原始直连在后。

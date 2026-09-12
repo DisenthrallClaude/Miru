@@ -237,9 +237,17 @@ class _DefaultRuleRequestExecutor implements RuleRequestExecutor {
     final cookieHeader = request.includeCookies
         ? await _cookieHeaderFor(config.pluginName, request.url)
         : '';
-    final verifiedUserAgent = cookieHeader.isNotEmpty
-        ? await PluginCookieManager.instance.userAgentFor(config.pluginName)
-        : null;
+    // v1.6.9（P0-1）：verified UA 启用条件从「有 Cookie 时」放宽为
+    //「有 Cookie 或规则请求自带 UA」——规则声明了 UA 的验证场景同样
+    // 要保持指纹一致（验证会话签发的 clearance 与 UA 绑定，换 UA
+    // 重发会再吃挑战页）；未验证过的规则 userAgentFor 返回 null，
+    // 行为不变。
+    final hasCallerUserAgent = request.headers.keys
+        .any((key) => key.toLowerCase() == 'user-agent');
+    final verifiedUserAgent =
+        (cookieHeader.isNotEmpty || hasCallerUserAgent)
+            ? await PluginCookieManager.instance.userAgentFor(config.pluginName)
+            : null;
     // Header names are lowercased so a rule-supplied 'User-Agent' collides
     // with ours instead of being sent as a second, conflicting header.
     final headers = <String, dynamic>{

@@ -175,6 +175,12 @@ abstract class _VideoPageController with Store implements Disposable {
   /// （不与起播/拉流抢带宽），缓冲稳定后才真正发起。
   Timer? _nextEpisodePrefetchTimer;
 
+  /// v1.6.9（P1-3）：预取专用会话——换集/退出播放时使旧预取回调过期。
+  /// Timer 只能取消未触发的排程，已触发但还在 await Cookie/解析中的
+  /// 预取回调只能靠会话过期未拦（旧实现会继续为已不是「下一集」的
+  /// 集数白耗一次解析+预取带宽）。
+  final AsyncSessionOwner _prefetchSessions = AsyncSessionOwner();
+
   final StreamController<String> _logStreamController =
       StreamController<String>.broadcast();
 
@@ -600,6 +606,8 @@ abstract class _VideoPageController with Store implements Disposable {
     // 才会重排），窗口内触发只会用旧线路 pageUrl 拼出错误 URL 白耗一次解析。
     _nextEpisodePrefetchTimer?.cancel();
     _nextEpisodePrefetchTimer = null;
+    // v1.6.9（P1-3）：连带使已触发但仍在途的预取回调过期。
+    _prefetchSessions.cancel();
     playerController.danmaku.finishDanmakuLoad();
     _videoSourceService?.cancel();
 
@@ -994,18 +1002,25 @@ abstract class _VideoPageController with Store implements Disposable {
     if (nextEpisode == null || nextEpisode.pageUrl.isEmpty) {
       return;
     }
+    // v1.6.9（P1-3）：本次排程的专属会话——换集/重排时旧回调通过
+    // isStale 拦截，防止已触发的回调继续为过时的「下一集」发起解析
+    // +预取（Cookie await 期间换集即触发）。
+    final session = _prefetchSessions.begin();
     _nextEpisodePrefetchTimer = Timer(const Duration(seconds: 8), () {
+      if (session.isStale) return;
       final prefetchService = _videoSourceService;
       if (prefetchService == null || isOfflineMode) {
         return;
       }
       // 当前集仍在缓冲：预取会让本集拉流雪上加霜，顺延 8 秒重试。
       if (playerController.playback.playerBuffering && deferrals > 0) {
-        _scheduleNextEpisodePrefetch(
-          currentEpisode,
-          playerController: playerController,
-          deferrals: deferrals - 1,
-        );
+        if (!session.isStale) {
+          _scheduleNextEpisodePrefetch(
+            currentEpisode,
+            playerController: playerController,
+            deferrals: deferrals - 1,
+          );
+        }
         return;
       }
       final url = normalizeEpisodeUrl(
@@ -1014,8 +1029,10 @@ abstract class _VideoPageController with Store implements Disposable {
       );
       final cookieHeader = _playbackCookieHeader(url);
       unawaited(
-        cookieHeader.then((cookies) {
-          return prefetchService.prefetchResolve(
+        cookieHeader.then((cookies) async {
+          // Cookie 请求期间用户可能已换集/退出：旧会话过期即放弃。
+          if (session.isStale) return;
+          await prefetchService.prefetchResolve(
             url,
             playbackHeaders: {
               'user-agent': currentPlugin.userAgent.isEmpty

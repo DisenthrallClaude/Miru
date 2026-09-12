@@ -90,10 +90,10 @@ vec4 blurSample(vec2 pos) {
 
 void main() {
   vec2 p = FlutterFragCoord().xy;
-  vec2 half2 = sceneRes * 0.5;
+  vec2 halfSize = sceneRes * 0.5;
   // Panel-local centered coordinates.
-  vec2 c = p - half2;
-  float d = sdRoundedBox(c, half2, radius);
+  vec2 c = p - halfSize;
+  float d = sdRoundedBox(c, halfSize, radius);
 
   if (d >= 0.0) {
     // Outside the panel shape (corner regions beyond the rounding):
@@ -103,7 +103,7 @@ void main() {
   }
 
   float edgeDist = -d; // px from the rim, growing inward
-  float bevelW = max(min(radius, min(half2.x, half2.y) * 0.5), 1.0);
+  float bevelW = max(min(radius, min(halfSize.x, halfSize.y) * 0.5), 1.0);
   // 1.0 exactly at the rim, 0.0 past the bevel band.
   float bev = 1.0 - smoothstep(0.0, bevelW, edgeDist);
 
@@ -112,7 +112,7 @@ void main() {
   float k = thickness * (0.34 + 0.62 * bev * bev);
   // Refraction: sample outward from the panel centre so content appears
   // pulled toward the middle (convex plate reading).
-  vec2 n = c / max(half2, vec2(1.0));      // -1..1, corners exceed slightly
+  vec2 n = c / max(halfSize, vec2(1.0));      // -1..1, corners exceed slightly
   vec2 back = n * k * bevelW * 1.6;
 
   // Chromatic dispersion: R/G/B land slightly apart — strongest at rim.
@@ -148,7 +148,7 @@ void main() {
   // the far edge of the glass. p.y IS the distance to the top rim.
   float topBand = 1.0 - smoothstep(0.0, bevelW * 2.8, p.y);
   // Fade the band out near the left/right rims so corners stay clean.
-  float xFade = smoothstep(0.0, radius * 1.6, half2.x - abs(c.x));
+  float xFade = smoothstep(0.0, radius * 1.6, halfSize.x - abs(c.x));
   float spec = topBand * xFade * highlight;
   glass += vec3(spec);
 

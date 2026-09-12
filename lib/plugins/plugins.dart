@@ -272,9 +272,12 @@ class Plugin {
 
   /// Headers used when resolving or downloading the final media resource.
   Map<String, String> buildHttpHeaders() {
+    // v1.6.9（P0-1）：UA 统一 trim 归一化——规则 JSON 里的首尾空白
+    // 会造成「字面相同、字节不同」的指纹分裂（CDN 按字节比对 UA）。
+    final ua = userAgent.trim();
     return {
       // 会话级 UA：与 WebView 解析、mpv 播放保持同一指纹。
-      'user-agent': userAgent.isEmpty ? getSessionUA() : userAgent,
+      'user-agent': ua.isEmpty ? getSessionUA() : ua,
       if (referer.isNotEmpty) 'referer': referer,
     };
   }
