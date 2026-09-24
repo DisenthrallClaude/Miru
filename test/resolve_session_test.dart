@@ -158,5 +158,27 @@ void main() {
     test('非数字 exp 返回 null', () {
       expect(ttlFor('https://cdn.example.com/v.mp4?exp=abc'), isNull);
     });
+
+    // v1.7.0（P2-5）
+    test('P2-5: t 键不再参与判定（大量站点的 t 是生成时间，恒判过期）',
+        () {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      // 只有 t（生成时间，过去值）：不得返回 1min（旧行为），应返回 null
+      //（无有效过期签名 → 默认 30min TTL）。
+      expect(ttlFor('https://cdn.example.com/v.mp4?t=$now'), isNull);
+      expect(
+          ttlFor('https://cdn.example.com/v.mp4?t=${now - 500}'), isNull);
+    });
+
+    test('P2-5: e 键负剩余视同生成时间跳过，正剩余正常采用', () {
+      final past = (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 500;
+      final future = (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 1800;
+      // e 在过去：跳过 → 无其他键 → null。
+      expect(ttlFor('https://cdn.example.com/v.mp4?e=$past'), isNull);
+      // e 在未来：正常作为过期时刻。
+      final ttl = ttlFor('https://cdn.example.com/v.mp4?e=$future');
+      expect(ttl, isNotNull);
+      expect(ttl!.inMinutes, inInclusiveRange(28, 31));
+    });
   });
 }

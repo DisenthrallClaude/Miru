@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter/services.dart'
+    show FilteringTextInputFormatter, Clipboard, ClipboardData;
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/dialog/destructive_confirm.dart';
@@ -13,6 +14,7 @@ import 'package:miru/services/video_source/resolution_result_cache.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/player/pip_utils.dart';
+import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/bean/settings/settings_list.dart';
 import 'package:miru/utils/device.dart';
 
@@ -717,6 +719,19 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                     ],
                   ),
                 ),
+                // v1.7.0（§5）：播放诊断——关键路径时间线（点按→解析→
+                // 胜出→首帧）最近 50 条，P50/P90 统计与导出。
+                SettingsTile(
+                  leading: Icons.timeline_rounded,
+                  onPressed: (_) {
+                    showDialog(
+                      context: context,
+                      builder: (_) => const _PlaybackDiagnosticsDialog(),
+                    );
+                  },
+                  title: Text('播放诊断'),
+                  description: Text('最近播放的关键路径耗时（点按→首帧）'),
+                ),
               ],
             ),
             SettingsSection(
@@ -846,6 +861,126 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// v1.7.0（§5）：播放诊断弹窗——最近 50 条关键路径时间线。
+///
+/// 纯本地数据（内存环形缓冲，不上报不落盘）：P50/P90 统计帮助量化
+/// 「点了一集到画面出来」的体验；每条时间线可展开看分段耗时与胜出
+/// 层级（cache/fast/cloud/webview@host）——「为什么这一集播了 8 秒」
+/// 事后归因。提供「复制为文本」方便反馈问题。
+class _PlaybackDiagnosticsDialog extends StatefulWidget {
+  const _PlaybackDiagnosticsDialog();
+
+  @override
+  State<_PlaybackDiagnosticsDialog> createState() =>
+      _PlaybackDiagnosticsDialogState();
+}
+
+class _PlaybackDiagnosticsDialogState extends State<_PlaybackDiagnosticsDialog> {
+  @override
+  Widget build(BuildContext context) {
+    final recorder = PlaybackTimelineRecorder.instance;
+    final records = recorder.records;
+    final tap = recorder.tapToFirstFrameStats();
+    final resolve = recorder.resolveStats();
+    final colorScheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('播放诊断'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '点按→首帧  P50: ${tap.p50?.inMilliseconds ?? '-'}ms   '
+              'P90: ${tap.p90?.inMilliseconds ?? '-'}ms   （样本 ${tap.samples}）',
+              style: TextStyle(color: colorScheme.primary),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '解析段      P50: ${resolve.p50?.inMilliseconds ?? '-'}ms   '
+              'P90: ${resolve.p90?.inMilliseconds ?? '-'}ms   （样本 ${resolve.samples}）',
+              style: TextStyle(color: colorScheme.primary),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '数据仅保存在本地，不上报。',
+              style: TextStyle(fontSize: 12, color: colorScheme.outline),
+            ),
+            const SizedBox(height: 12),
+            if (records.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: Text('暂无记录——去播放一集再来')),
+              )
+            else
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: records.length,
+                  itemBuilder: (_, i) {
+                    final t = records[i];
+                    final ok = t.succeeded;
+                    final ttff = t.tapToFirstFrame?.inMilliseconds;
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        ok ? Icons.check_circle_rounded : Icons.error_rounded,
+                        color: ok ? Colors.green : Colors.redAccent,
+                        size: 20,
+                      ),
+                      title: Text(
+                        t.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      subtitle: Text(
+                        ok
+                            ? '${ttff ?? '-'}ms · ${t.winnerLevel ?? '-'}@${t.winnerHost ?? '-'}'
+                            : (t.failureReason ?? '失败'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: records.isEmpty
+              ? null
+              : () async {
+                  await Clipboard.setData(
+                      ClipboardData(text: recorder.exportAll()));
+                  if (context.mounted) {
+                    MiruDialog.showToast(message: '诊断信息已复制');
+                  }
+                },
+          child: const Text('复制为文本'),
+        ),
+        TextButton(
+          onPressed: () {
+            setState(() {
+              recorder.clear();
+            });
+          },
+          child: const Text('清空'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('关闭'),
+        ),
+      ],
     );
   }
 }

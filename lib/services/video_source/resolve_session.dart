@@ -51,8 +51,13 @@ class ResolveTrace {
 /// 从 URL 推导解析结果的缓存 TTL（阶段 2 / §2.4）。
 ///
 /// 带签名的 CDN 直链通常在 URL 查询里携带过期时间戳（exp / expire /
-/// expires / e / x-oss-expires …秒或毫秒）。从中提取并 clamp 到
+/// expires / x-oss-expires …秒或毫秒）。从中提取并 clamp 到
 /// [min]~[max]：取不到返回 null（调用方用默认 TTL）。
+///
+/// v1.7.0（P2-5）：`t` 键移除——大量站点的 `t` 是**生成**时间戳而非
+/// 过期时间，恒为「已过期」→ TTL 被钉死 1 分钟 → 缓存形同虚设（同一
+/// 集反复全量解析）。`e` 键仅在取值大于当前时间时才当作过期时刻
+/// 采用（负剩余视同生成时间，跳过）。
 Duration? ttlFor(
   String url, {
   Duration min = const Duration(minutes: 1),
@@ -64,7 +69,7 @@ Duration? ttlFor(
   } catch (_) {
     return null;
   }
-  const keys = ['exp', 'expire', 'expires', 'e', 'x-oss-expires', 't'];
+  const keys = ['exp', 'expire', 'expires', 'e', 'x-oss-expires'];
   for (final key in keys) {
     final values = parsed.queryParametersAll[key];
     if (values == null || values.isEmpty) continue;
@@ -77,7 +82,13 @@ Duration? ttlFor(
     final expiresAt =
         DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
     final remaining = expiresAt.difference(DateTime.now().toUtc());
-    if (remaining.isNegative) return min; // 已过期：仍给 1min，由探测纠偏
+    if (remaining.isNegative) {
+      // v1.7.0（P2-5）：'e' 键负剩余 → 大概率是生成时间，继续找
+      // 下一个键（其余键语义明确是过期时刻，仍按「已过期」给 min，
+      // 由探测纠偏）。
+      if (key == 'e') continue;
+      return min; // 已过期：仍给 1min，由探测纠偏
+    }
     if (remaining < min) return min;
     if (remaining > max) return max;
     return remaining;

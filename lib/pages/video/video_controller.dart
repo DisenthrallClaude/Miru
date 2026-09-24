@@ -12,6 +12,7 @@ import 'package:miru/modules/history/history_module.dart';
 import 'package:miru/repositories/download_repository.dart';
 import 'package:miru/services/download/download_manager.dart';
 import 'package:miru/services/video_source/services.dart';
+import 'package:miru/services/player/playback_timeline.dart';
 import 'package:mobx/mobx.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
@@ -481,6 +482,9 @@ abstract class _VideoPageController with Store implements Disposable {
   void _failLoading(String message) {
     _loading = false;
     _errorMessage = message;
+    // v1.7.0（§5）：时间线终止标记（迟到失败由 ??= 幂等，不会覆盖
+    // 下一集的新时间线——换集 begin 会替换 _current）。
+    PlaybackTimelineRecorder.instance.fail(message);
   }
 
   /// v1.6.8（R-12）：播放层失败终态（mpv 打开失败链烧尽）→ 错误页。
@@ -646,6 +650,14 @@ abstract class _VideoPageController with Store implements Disposable {
     final urlItem = normalizeEpisodeUrl(
       currentPlugin.baseUrl,
       resolvedEpisode.pageUrl,
+    );
+
+    // v1.7.0（§5）：开一条新时间线——tTap 钉在换集入口（本地解析
+    // 仅零星毫秒；选源面板投机解析的更早 tap 由 markTap 单独前移）。
+    PlaybackTimelineRecorder.instance.begin(
+      label:
+          '${bangumiItem.nameCn.isNotEmpty ? bangumiItem.nameCn : bangumiItem.name} ${resolvedEpisode.displayTitle}',
+      episodeUrl: urlItem,
     );
 
     await _resolveWithVideoSourceService(
@@ -843,10 +855,11 @@ abstract class _VideoPageController with Store implements Disposable {
       // _materialize 的合并方向一致（此前两层方向相反：插件硬编码的
       // referer（常是站点首页）覆盖 webview 嗅探捕获的 CDN 真实
       // referer，防盗链 CDN 403 →「解析成功却播不出来」→ 换源循环）。
-      final mergedPlaybackHeaders = <String, String>{
-        ...playbackHeaders,
-        ...source.playbackHeaders,
-      };
+      // v1.7.0（P0-6）：合并规则收敛为纯函数 mergePlaybackHeaders——
+      // cookie 以插件侧（PluginCookieManager 实时值）优先，与 hybrid
+      // 层共用同一实现，消除两层语义漂移。
+      final mergedPlaybackHeaders =
+          mergePlaybackHeaders(playbackHeaders, source.playbackHeaders);
 
       final params = PlaybackInitParams(
         videoUrl: source.url,
@@ -894,6 +907,16 @@ abstract class _VideoPageController with Store implements Disposable {
         // 每次成功 init 后重挂同一回调；迟到通知由播放控制器侧的
         // openMedia 世代号守卫作废。
         playerController.playback.onPlaybackDead = _onPlaybackDead;
+        // v1.7.0（§5）：时间线 tOpen + 首帧钩子——首帧到达时记录
+        // 时间线、把本集解析缓存回写 verified（P0-4，下次免探测）、
+        // 并记录线路健康样本（P1-11）。钩子捕获本流 session：换集后
+        // 旧流的首帧不再污染新时间线/新缓存。
+        PlaybackTimelineRecorder.instance.recordOpen();
+        playerController.playback.onFirstFrame = () {
+          if (!session.isActive) return;
+          PlaybackTimelineRecorder.instance.recordFirstFrame();
+          unawaited(_videoSourceService?.markVerified(url));
+        };
         playingEpisode = VideoEpisodeSelection(
           episode: resolvedEpisode.listIndex,
           road: resolvedEpisode.roadIndex,

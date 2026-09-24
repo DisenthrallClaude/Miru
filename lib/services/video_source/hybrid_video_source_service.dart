@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/shared_http_client.dart';
+import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/services/video_source/cloud_video_source_resolver.dart';
 import 'package:miru/services/video_source/fast_video_source_resolver.dart';
 import 'package:miru/services/video_source/local_media_proxy.dart';
@@ -109,13 +111,22 @@ class HybridVideoSourceService implements IVideoSourceService {
     bool force = false,
   }) async {
     final headers = _mergedPlaybackHeaders(playbackHeaders);
+    // v1.7.0（§5）：时间线 tResolveStart——进入解析服务的时刻。
+    PlaybackTimelineRecorder.instance.recordResolveStart(episodeUrl);
 
     // ---- 第 1 级：本地解析缓存 ----
     final cached = await _cache.get(episodeUrl);
     if (cached != null) {
+      // v1.7.0（P0-4）：免探测直用必须同时满足 verified + fresh。
+      // 旧实现只看 fresh——预取写入的未验证首候选（可能是 HTML 中转
+      // 页）在新鲜期内被免探测直用，mpv 打开 HTML 报错走兑底链，
+      // 用户看到「下一集点开就失败，要手动重试」。
+      final cachedVerified =
+          force ? false : await _cache.isVerified(episodeUrl);
       // 刚解析成功过的直链几乎不可能已失效：跳过探测，省一个 RTT。
       // force 时重新验证（用户显式重试就是不信这个结果）。
       final verdict = !force &&
+              cachedVerified &&
               await _cache.isFresh(episodeUrl, freshEntryAge)
           ? _ProbeVerdict.alive
           // v1.6.6 修复（B1-🔴2）：缓存命中探测带上解析层确认的
@@ -128,6 +139,9 @@ class HybridVideoSourceService implements IVideoSourceService {
       if (verdict != _ProbeVerdict.dead) {
         MiruLogger().i(
             'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
+        // v1.7.0（§5）：胜出层级 cache（含免探测直用与探测存活两路）。
+        PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+            level: 'cache', host: _hostOf(cached.url));
         return _materialize(cached, offset: offset, headers: headers,
             prefetchEnabled: prefetchEnabled);
       }
@@ -155,23 +169,42 @@ class HybridVideoSourceService implements IVideoSourceService {
     final cloudCancel = CancelToken();
     final session = ResolveSession<VideoSource>(
       waves: {
-        Duration.zero: (trace) =>
-            _runFastLevel(episodeUrl, headers, force: force, trace: trace),
+        Duration.zero: (trace) => _runFastLevel(
+                episodeUrl, headers, force: force, trace: trace)
+            .then((r) {
+          // v1.7.0（§5）：胜出层级埋点（recordWinner 幂等，首个胜者生效）。
+          if (r != null) {
+            PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+                level: 'fast', host: _hostOf(r.url));
+          }
+          return r;
+        }),
         const Duration(milliseconds: 600): (trace) => _runCloudLevel(
               episodeUrl,
               headers,
               force: force,
               trace: trace,
               cancelToken: cloudCancel,
-            ),
-        const Duration(milliseconds: 1500): (trace) =>
-            _runWebViewLevel(
+            ).then((r) {
+          if (r != null) {
+            PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+                level: 'cloud', host: _hostOf(r.url));
+          }
+          return r;
+        }),
+        const Duration(milliseconds: 1500): (trace) => _runWebViewLevel(
               episodeUrl,
               useLegacyParser: useLegacyParser,
               offset: offset,
               timeout: timeout,
               trace: trace,
-            ),
+            ).then((r) {
+          if (r != null) {
+            PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+                level: 'webview', host: _hostOf(r.url));
+          }
+          return r;
+        }),
       },
       hardDeadline: hardDeadline,
       // v1.6.7（P-7）：竞速胜出即回收 WebView 波——胜出后隐藏嗅探页
@@ -373,7 +406,11 @@ class HybridVideoSourceService implements IVideoSourceService {
       offset: offset,
       timeout: timeout,
     );
-    await _cache.put(episodeUrl, source, ttl: ttlFor(source.url));
+    // v1.7.0（P2-18）：嗅探结果未经探测即写缓存（TTL 最长 6h）——
+    // 标记 verified:false，首帧确认后由 §5 回写钩子升级（未出帧的
+    // 嗅探结果下次播放仍会重新探测，不再盲信）。
+    await _cache.put(episodeUrl, source,
+        ttl: ttlFor(source.url), verified: false);
     _forgetLevelFailures(episodeUrl);
     trace.record(ResolveStage.webview, 'winner', 'sniffed');
     return source;
@@ -400,6 +437,12 @@ class HybridVideoSourceService implements IVideoSourceService {
   ///
   /// 使用场景：播放稳定后预解析下一集（换集接近秒开）。
   /// WebView 通道刻意跳过——预解析不该占用 WebView 实例。
+  ///
+  /// v1.7.0（P0-4）：预取候选必须先探测——alive 才以 verified:true
+  /// 写入。旧实现把未探测的首候选（可能是 needsPositiveConfirm 的
+  /// 解析器中转页）直接写进缓存，正式播放时条目「新鲜」→ 免探测直用
+  /// → mpv 打开 HTML 报错 → 直连兑底 → 自动恢复烧尽 →「下一集点开
+  /// 就失败，要手动重试」。探测只拉 1KB/清单，流量可接受。
   Future<void> prefetchResolve(String episodeUrl,
       {int offset = 0, Map<String, String> playbackHeaders = const {}}) async {
     if (episodeUrl.isEmpty) return;
@@ -424,8 +467,22 @@ class HybridVideoSourceService implements IVideoSourceService {
             );
       VideoSource? result;
       if (report != null && report.candidates.isNotEmpty) {
-        // 预解析用首个候选即可（探测留给正式播放，避免双倍探测流量）
-        result = report.candidates.first.toVideoSource();
+        // v1.7.0（P0-4）：逐候选探测取首个非 dead（与正式解析同款语义，
+        // 但串行即可——预取不在关键路径上）。
+        for (final candidate in report.candidates) {
+          final verdict = await _probe(
+            candidate.url,
+            {
+              ...headers,
+              if (candidate.referer.isNotEmpty) 'referer': candidate.referer,
+            },
+            needsPositiveConfirm: candidate.needsPositiveConfirm,
+          );
+          if (verdict != _ProbeVerdict.dead) {
+            result = candidate.toVideoSource();
+            break;
+          }
+        }
       }
       if (result == null &&
           _cloud.isConfigured &&
@@ -435,13 +492,28 @@ class HybridVideoSourceService implements IVideoSourceService {
           userAgent: headers['user-agent'],
           referer: headers['referer'],
         );
-        result = cloudReport.source;
+        final cloudResult = cloudReport.source;
+        if (cloudResult != null) {
+          // 云端结果同样探测后再入缓存（同 P0-4 语义）。
+          final verdict = await _probe(
+            cloudResult.url,
+            {...headers, ...cloudResult.playbackHeaders},
+            needsPositiveConfirm:
+                !FastVideoSourceResolverCandidateProbe.isLikelyMediaUrl(
+                    cloudResult.url),
+          );
+          if (verdict != _ProbeVerdict.dead) {
+            result = cloudResult;
+          }
+        }
       }
       if (result == null) return;
-      // v1.6.9（P1-5）：预取结果不得覆盖未过期的正条目——预取用的是
-      // 未探测的首候选，而缓存里可能是刚验证过可用性的播放结果；
-      // 后台预取把它顶掉会让下次播放拿到更差/未验证的直链。
-      await _cache.put(episodeUrl, result, overwrite: false);
+      // v1.6.9（P1-5）：预取结果不得覆盖未过期的正条目；
+      // v1.7.0（P0-4）：探测存活 → verified:true 写入；
+      // v1.7.0（P0-4 第 4 条）：预取结果同样执行 ttlFor（旧实现只用
+      // 默认 30min，带签名直链过期后缓存里仍是死链）。
+      await _cache.put(episodeUrl, result,
+          ttl: ttlFor(result.url), overwrite: false, verified: true);
       await _proxy.prefetch(
         result.url,
         isHls: _isHls(result),
@@ -452,6 +524,12 @@ class HybridVideoSourceService implements IVideoSourceService {
       MiruLogger()
           .d('HybridResolver: prefetch failed for $episodeUrl', error: e);
     }
+  }
+
+  /// v1.7.0（§5/P0-4）：首帧确认后回写解析缓存 verified——video_controller
+  /// 的 onFirstFrame 钩子调用（本集 url 上下文在调用方）。
+  Future<void> markVerified(String episodeUrl) async {
+    await _cache.markVerified(episodeUrl);
   }
 
   /// 播放失败后失效该集缓存（坏直链不再反复被用）。
@@ -492,10 +570,10 @@ class HybridVideoSourceService implements IVideoSourceService {
     // 覆盖错）。与 video_controller 层（v1.6.7 P-8 已翻转）两层同向，
     // 天然幂等。合并结果同时是代理 register() 的注册头，探测/回源/
     // 播放三处同头（v1.5.2 探测-播放同头原则）。
-    final mergedHeaders = <String, String>{
-      ...headers, // 插件头作为基底（补 UA/cookie 缺项）
-      ...source.playbackHeaders, // 解析层确认的 referer/cookie 覆盖其上
-    };
+    // v1.7.0（P0-6）：合并规则收敛为纯函数 mergePlaybackHeaders——
+    // referer 解析层优先、cookie 插件侧优先（PluginCookieManager 实时
+    // 值不被缓存旧值覆盖），两 cookie 并存时按 name 合并。
+    final mergedHeaders = mergePlaybackHeaders(headers, source.playbackHeaders);
 
     if (prefetchEnabled) {
       // 后台预取开头数据（不阻塞返回；计量网络下内部自动跳过）
@@ -704,15 +782,22 @@ class HybridVideoSourceService implements IVideoSourceService {
     } catch (_) {}
   }
 
-  /// HLS 探测：读全量清单（封顶 64KB）→ 校验 #EXTM3U → seed 代理。
+  /// HLS 探测：读全量清单（封顶 512KB）→ 校验 #EXTM3U → seed 代理。
+  ///
+  /// v1.7.0（P0-3）：读满上限即截断——截断文本只用于存活判定（有
+  /// #EXTM3U 即 alive），**绝不 seed**。一集 24 分钟、2 秒分片、分片
+  /// URL 带签名的清单很容易超过 100KB，截断清单缺 #EXT-X-ENDLIST 时
+  /// mpv 会当作直播流（无时长、不能拖），代理的预取/二刷/5 分钟内
+  /// 回看都直接复用这份残缺清单（长集只播一部分）。
   Future<_ProbeVerdict> _probeHls(HttpClientResponse response, String url,
       Map<String, String> headers,
       {required bool needsPositiveConfirm}) async {
     try {
-      final bytes = await _readAll(response, 64 * 1024, probeBodyTimeout);
-      if (bytes == null) {
+      final read = await _readAll(response, 512 * 1024, probeBodyTimeout);
+      if (read == null) {
         return _uncertain(needsPositiveConfirm);
       }
+      final (bytes, truncated) = read;
       var text = utf8.decode(bytes, allowMalformed: true);
       if (text.isEmpty) {
         // 空响应：无法判定 → §1.2 规则
@@ -720,12 +805,20 @@ class HybridVideoSourceService implements IVideoSourceService {
       }
       if (text.startsWith('\uFEFF')) text = text.substring(1);
       final trimmed = text.trimLeft();
-      if (!trimmed.startsWith('#EXTM3U')) {
+      // v1.7.0（P0-3）：判活与 seed 决策抽为纯函数（单测锁定）。
+      final decision = decideHlsText(trimmed, truncated: truncated);
+      if (!decision.alive) {
         // 声称是 m3u8 的 URL 回了错误页/播放器页：判死，不进缓存
         return _ProbeVerdict.dead;
       }
-      // alive：清单文本 seed 给代理（预取/播放零二次拉取）
-      unawaited(_seedProxyManifest(url, trimmed, headers));
+      // alive：完整清单才 seed 给代理（预取/播放零二次拉取）；
+      // 截断的只用于存活判定。
+      if (decision.canSeed) {
+        unawaited(_seedProxyManifest(url, trimmed, headers));
+      } else {
+        MiruLogger().d(
+            'HybridResolver: HLS manifest truncated at 512KB cap, alive-only (no seed): $url');
+      }
       return _ProbeVerdict.alive;
     } catch (_) {
       return _uncertain(needsPositiveConfirm);
@@ -733,18 +826,20 @@ class HybridVideoSourceService implements IVideoSourceService {
   }
 
   /// 非 HLS 探测：Content-Type + 首块字节魔数双重确认。
+  ///
+  /// v1.7.0（P2-8）：首块读取改为单次手动消费（读至 8KB 封顶）——
+  /// 旧实现 response.first（订阅后取消）+ response.drain()（二次
+  /// 订阅）对单订阅流抛 StateError，被 catchError 吞掉后剩余数据
+  /// 永不消费、连接不归还共享池。Range 生效时（206，1KB）流自然
+  /// 读完归还连接；服务器无视 Range 时 8KB 止损。
   Future<_ProbeVerdict> _probeNonHls(HttpClientResponse response, String url,
       {required bool needsPositiveConfirm}) async {
     try {
       final contentType = (response.headers
               .value(HttpHeaders.contentTypeHeader) ?? '')
           .toLowerCase();
-      final firstChunk = await response.first
-          .timeout(probeBodyTimeout)
-          .catchError((_) => <int>[]);
-      unawaited(response.drain<void>()
-          .timeout(probeBodyTimeout)
-          .catchError((_) {}));
+      final firstChunk =
+          await _readFirstChunk(response, probeBodyTimeout);
       final hasExtension = _hasVideoExtension(url);
       final sniffed = _sniffMediaBytes(firstChunk);
 
@@ -807,20 +902,50 @@ class HybridVideoSourceService implements IVideoSourceService {
     }
   }
 
+  /// v1.7.0（P0-3）：HLS 探测判定的纯决策部分（单测锁定）。
+  /// - 非 #EXTM3U 开头：错误页伪装 → 判死；
+  /// - 截断文本：alive（有 #EXTM3U 即可判活）但不可 seed。
+  @visibleForTesting
+  static ({bool alive, bool canSeed}) decideHlsText(String trimmedText,
+      {required bool truncated}) {
+    if (!trimmedText.startsWith('#EXTM3U')) {
+      return (alive: false, canSeed: false);
+    }
+    return (alive: true, canSeed: !truncated);
+  }
+
   /// 读取整个响应体（封顶 [maxBytes]，总限时 [timeout]）。
   /// 超时/异常返回 null（区别于空 body 的空列表）。
-  Future<List<int>?> _readAll(
+  /// v1.7.0（P0-3）：返回 (bytes, truncated)——读满上限时 truncated
+  /// 为 true，调用方据此决定「只判活、不 seed」。
+  Future<(List<int>, bool)?> _readAll(
       HttpClientResponse response, int maxBytes, Duration timeout) async {
     final bytes = <int>[];
     try {
       await for (final chunk in response.timeout(timeout)) {
         bytes.addAll(chunk);
-        if (bytes.length >= maxBytes) break;
+        if (bytes.length >= maxBytes) {
+          return (bytes, true);
+        }
       }
-      return bytes;
+      return (bytes, false);
     } catch (_) {
       return null;
     }
+  }
+
+  /// v1.7.0（P2-8）：读首块（封顶 8KB，超限止损）——单次订阅，
+  /// 流自然读完则连接归还共享池，读满 8KB 中断则销毁连接。
+  Future<List<int>> _readFirstChunk(
+      HttpClientResponse response, Duration timeout) async {
+    final bytes = <int>[];
+    try {
+      await for (final chunk in response.timeout(timeout)) {
+        bytes.addAll(chunk);
+        if (bytes.length >= 8192) break; // Range 被无视：止损
+      }
+    } catch (_) {}
+    return bytes;
   }
 
   /// 常见视频直链扩展（与 FastVideoSourceResolver 一致）。
@@ -878,4 +1003,13 @@ class HybridVideoSourceServiceProbe {
   /// 媒体字节魔数判定（ftyp / 0x47 / FLV / EBML）。
   static bool sniffMediaBytes(List<int> bytes) =>
       HybridVideoSourceService._sniffMediaBytes(bytes);
+
+  /// v1.7.0（P0-3）：HLS 探测的「判活 + 可否 seed」纯决策。
+  /// - 非 #EXTM3U 开头：判死；
+  /// - 截断（读满 512KB 上限）：alive 但不 seed（缺 ENDLIST 会被 mpv
+  ///   当直播流，代理预取/二刷复用残缺清单→长集只播一部分）。
+  static ({bool alive, bool canSeed}) decideHlsText(String trimmedText,
+          {required bool truncated}) =>
+      HybridVideoSourceService.decideHlsText(trimmedText,
+          truncated: truncated);
 }

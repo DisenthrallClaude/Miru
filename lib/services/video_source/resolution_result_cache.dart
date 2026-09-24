@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/services/video_source/video_source_service.dart';
@@ -55,11 +57,13 @@ class ResolutionResultCache {
   Future<void> _ensureLoaded() => _loadFuture ??= _doLoad();
 
   Future<void> _doLoad() async {
+    File? file;
     try {
       final dir = await getApplicationSupportDirectory();
-      _file = File('${dir.path}/resolution_cache.json');
-      if (await _file!.exists()) {
-        final raw = await _file!.readAsString();
+      file = File('${dir.path}/resolution_cache.json');
+      _file = file;
+      if (await file.exists()) {
+        final raw = await file.readAsString();
         final data = json.decode(raw);
         if (data is Map<String, dynamic>) {
           final now = DateTime.now();
@@ -74,11 +78,30 @@ class ResolutionResultCache {
           });
         }
       }
+    } on FormatException catch (e) {
+      // v1.7.0（P2-6）：内容损坏（半个 JSON——旧 flush 直接 writeAsString
+      // 被进程杀死时的产物）→ 改名 .corrupt 隔离。旧实现只置
+      // _loadFuture=null，坏文件永远留在原地，之后每次 get() 都重读
+      // 坏文件再失败，持久缓存被永久绕过。
+      await _quarantineCorrupt(file);
+      MiruLogger().w('ResolutionCache: corrupt file quarantined', error: e);
     } catch (e) {
-      // 读盘失败允许下次重试（不把失败钉死在记忆化 future 里）
+      // 读盘失败（IO 错误，瞬时性）允许下次重试（不把失败钉死在
+      // 记忆化 future 里）。
       _loadFuture = null;
       MiruLogger().w('ResolutionCache: load failed, starting empty', error: e);
     }
+  }
+
+  /// v1.7.0（P2-6）：坏文件隔离（重命名而非删除——保留现场供人工
+  /// 排查；重命名失败静默，下次启动重试）。
+  Future<void> _quarantineCorrupt(File? file) async {
+    if (file == null) return;
+    try {
+      if (await file.exists()) {
+        await file.rename('${file.path}.corrupt');
+      }
+    } catch (_) {}
   }
 
   /// 查询未过期的解析结果。命中会顺带刷新 LRU 时间戳。
@@ -109,6 +132,25 @@ class ResolutionResultCache {
     return DateTime.now().difference(entry.cachedAt) <= maxAge;
   }
 
+  /// v1.7.0（P0-4）：条目是否已验证（探测/首帧确认过可用）。
+  /// 未验证条目（预取写入的首候选）不能免探测直用。
+  Future<bool> isVerified(String episodeUrl) async {
+    await _ensureLoaded();
+    final entry = _entries[episodeUrl];
+    if (entry == null || entry.isNegative) return false;
+    return entry.verified;
+  }
+
+  /// v1.7.0（P0-4）：首帧确认后把条目升级为已验证——下次同集播放
+  /// 直接免探测（KPI：同集二刷首帧 ≤ 1s）。幂等：已验证条目跳过。
+  Future<void> markVerified(String episodeUrl) async {
+    await _ensureLoaded();
+    final entry = _entries[episodeUrl];
+    if (entry == null || entry.isNegative || entry.verified) return;
+    entry.verified = true;
+    _scheduleFlush();
+  }
+
   /// 查询负缓存标记（该 URL 近期解析失败过）。
   Future<bool> isNegative(String episodeUrl) async {
     await _ensureLoaded();
@@ -129,8 +171,11 @@ class ResolutionResultCache {
   /// 验证过可用性的播放结果，后台预取把它顶掉会让下次播放拿到更差
   /// /未验证的直链。正式解析路径保持默认覆盖（force 重解析、失效后
   /// 重写都依赖覆盖语义）。
+  ///
+  /// v1.7.0（P0-4）：[verified] 标记条目是否经过探测/首帧确认。
+  /// 预取路径写 false，正式解析（快解/云端/WebView 探测通过）写 true。
   Future<void> put(String episodeUrl, VideoSource source,
-      {Duration? ttl, bool overwrite = true}) async {
+      {Duration? ttl, bool overwrite = true, bool verified = true}) async {
     await _ensureLoaded();
     if (!overwrite) {
       final existing = _entries[episodeUrl];
@@ -151,7 +196,12 @@ class ResolutionResultCache {
       positiveTtl: ttl ?? ResolutionResultCache.ttl,
       // B10：解析层确认的播放头（防盗链 referer）一并持久化，
       // 二刷/换集回看/预解析后的播放走缓存时不再丢 referer。
-      playbackHeaders: Map.of(source.playbackHeaders),
+      // v1.7.0（P0-6）：只持久化 referer/origin——cookie 落盘既是
+      // 隐私问题（明文），也是过期问题（cf_clearance 过期后覆盖新
+      // cookie 导致 403）。cookie 每次播放时从 PluginCookieManager
+      // 实时取。
+      playbackHeaders: _persistableHeaders(source.playbackHeaders),
+      verified: verified,
       cachedAt: DateTime.now(),
       lastUsedAt: DateTime.now(),
     );
@@ -159,14 +209,29 @@ class ResolutionResultCache {
     _scheduleFlush();
   }
 
+  /// v1.7.0（P0-6）：可持久化的播放头白名单（referer/origin）。
+  static Map<String, String> _persistableHeaders(
+      Map<String, String> headers) {
+    final result = <String, String>{};
+    for (final key in const ['referer', 'origin']) {
+      final value = headers[key];
+      if (value != null && value.isNotEmpty) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
   /// 写入解析失败标记（负缓存）。
   /// [ttl]：分级 TTL（阶段 0 / §1.3）；缺省为通用 [negativeTtl]。
-  /// 已有**正条目**时拒绝覆盖（成功结果不该被失败标记顶掉；
+  /// 已有**未过期**条目时拒绝覆盖（成功结果不该被失败标记顶掉；
   /// 负条目重复标记同样跳过——TTL 从首次标记起算即可）。
+  /// v1.7.0（P2-7）：已过期的旧条目（无论正负）视同不存在——旧实现
+  /// 连过期条目也拒绝写入，负缓存永远刷新不了，只能等 LRU/重载清理。
   Future<void> putNegative(String episodeUrl, {Duration? ttl}) async {
     await _ensureLoaded();
     final existing = _entries[episodeUrl];
-    if (existing != null) return;
+    if (existing != null && !existing.isExpired(DateTime.now())) return;
     _entries[episodeUrl] = _CacheEntry(
       episodeUrl,
       videoUrl: '',
@@ -198,6 +263,17 @@ class ResolutionResultCache {
     await flush();
   }
 
+  /// v1.7.0（P2-6 测试）：重置加载状态——生产代码的[_loadFuture]
+  /// 记忆化不允许重置（单例一旦加载完成就常驻），仅供单测构造
+  /// 「磁盘上已是某个文件」的初始状态。
+  @visibleForTesting
+  Future<void> debugResetForTest() async {
+    _loadFuture = null;
+    _file = null;
+    _entries.clear();
+    _dirty = false;
+  }
+
   void _evictIfNeeded() {
     if (_entries.length <= maxEntries) return;
     final sorted = _entries.values.toList()
@@ -217,6 +293,10 @@ class ResolutionResultCache {
   }
 
   /// 立即落盘（进程退出前的最后机会由 Timer 兜底即可，不必强求）。
+  ///
+  /// v1.7.0（P2-6）：原子写——先写 .tmp 再 rename（与 road_health.dart
+  /// 同款写法）。旧实现直接 writeAsString，进程被杀时可能写出半个
+  /// JSON，下次启动解析失败后缓存被永久绕过。
   Future<void> flush() async {
     _flushTimer?.cancel();
     _flushTimer = null;
@@ -229,8 +309,12 @@ class ResolutionResultCache {
       final payload = {
         for (final entry in _entries.values) entry.key: entry.toJson(),
       };
-      await _file!.writeAsString(json.encode(payload), flush: false);
+      final tmp = File('${_file!.path}.tmp');
+      await tmp.writeAsString(json.encode(payload), flush: true);
+      await tmp.rename(_file!.path);
     } catch (e) {
+      // 写失败恢复脏标记，下一个防抖窗口重试。
+      _dirty = true;
       MiruLogger().w('ResolutionCache: flush failed', error: e);
     }
   }
@@ -246,6 +330,9 @@ class _CacheEntry {
     this.negativeTtl = ResolutionResultCache.negativeTtl,
     this.positiveTtl = ResolutionResultCache.ttl,
     this.playbackHeaders = const {},
+    // v1.7.0（P0-4）：默认 true 兼容旧文件（旧正条目都来自探测通过
+    // 或播放过的路径；预取路径显式传 false）。
+    this.verified = true,
     required this.cachedAt,
     required this.lastUsedAt,
   });
@@ -266,6 +353,11 @@ class _CacheEntry {
   /// 解析层确认的播放请求头（v1.5.2 新增持久化，B10）。
   /// 旧缓存文件没有这个字段时反序列化为空表（向后兼容）。
   final Map<String, String> playbackHeaders;
+
+  /// v1.7.0（P0-4）：条目是否经探测/首帧确认。未验证条目免探测直用
+  /// 会把「预取的首候选（可能是 HTML 中转页）」直接交给 mpv。
+  /// 可变：首帧确认后由 [ResolutionResultCache.markVerified] 回写。
+  bool verified;
 
   final DateTime cachedAt;
   DateTime lastUsedAt;
@@ -299,6 +391,8 @@ class _CacheEntry {
           'pt': positiveTtl.inSeconds,
         // 仅非空时写入，旧条目体积不变
         if (playbackHeaders.isNotEmpty) 'p': playbackHeaders,
+        // v1.7.0（P0-4）：仅未验证时写入（false），旧条目体积不变。
+        if (!negative && !verified) 'vf': 0,
         'c': cachedAt.millisecondsSinceEpoch,
         'u': lastUsedAt.millisecondsSinceEpoch,
       };
@@ -325,6 +419,9 @@ class _CacheEntry {
           ? Duration(seconds: rawPt)
           : ResolutionResultCache.ttl,
       playbackHeaders: _stringMap(json['p']),
+      // v1.7.0（P0-6）：旧缓存文件里的 cookie 丢弃——过期 cf_clearance
+      // 覆盖新 cookie 是 403 换源循环的直接根因；播放时实时重取。
+      verified: !negative && (json['vf'] as num?)?.toInt() != 0,
       cachedAt: DateTime.fromMillisecondsSinceEpoch(
           (json['c'] as num?)?.toInt() ?? 0),
       lastUsedAt: DateTime.fromMillisecondsSinceEpoch(
@@ -333,10 +430,12 @@ class _CacheEntry {
   }
 
   /// 宽松字符串表反序列化（坏数据宽容处理，别让缓存文件弄崩启动）。
+  /// v1.7.0（P0-6）：cookie 不再持久化，旧文件里的残余项在此丢弃。
   static Map<String, String> _stringMap(dynamic v) {
     if (v is! Map) return const {};
     final result = v.map((k, e) => MapEntry(k.toString(), e.toString()));
     result.removeWhere((_, e) => e.isEmpty);
+    result.removeWhere((k, _) => k.toLowerCase() == 'cookie');
     return result;
   }
 }

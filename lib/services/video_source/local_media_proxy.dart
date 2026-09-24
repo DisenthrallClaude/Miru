@@ -272,10 +272,24 @@ class LocalMediaProxy {
 
   /// 外部注入清单原文（探测阶段已拉到的 m3u8 文本）。
   /// [url] 必须是探测时的原始地址（与后续 fetch 的 key 一致）。
+  ///
+  /// v1.7.0（P0-3）：媒体清单（含 #EXTINF）必须带 #EXT-X-ENDLIST 才能
+  /// seed——被截断的清单缺 ENDLIST 会被 mpv 当直播流（无时长、不能拖），
+  /// 且代理的预取/二刷/5 分钟内回看都直接复用这份残缺清单（长集只播
+  /// 一部分）。主清单（含 #EXT-X-STREAM-INF）无此约束（它本来就没有
+  /// ENDLIST，且只有几行不会被截断）。
   Future<void> seedManifest(
       String url, String text, Map<String, String> headers) async {
     if (!url.startsWith('http') || text.trimLeft().isEmpty) return;
-    if (!text.trimLeft().startsWith('#EXTM3U')) return;
+    final trimmed = text.trimLeft();
+    if (!trimmed.startsWith('#EXTM3U')) return;
+    final isMasterPlaylist = trimmed.contains('#EXT-X-STREAM-INF');
+    final isMediaPlaylist = trimmed.contains('#EXTINF');
+    if (isMediaPlaylist &&
+        !isMasterPlaylist &&
+        !trimmed.contains('#EXT-X-ENDLIST')) {
+      return; // 截断/直播清单：拒绝 seed，代理回退自行拉取全量
+    }
     try {
       if (_manifestSeeds.length >= maxManifestSeeds) {
         _manifestSeeds.remove(_manifestSeeds.keys.first);

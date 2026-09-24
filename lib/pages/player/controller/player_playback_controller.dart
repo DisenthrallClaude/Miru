@@ -14,6 +14,7 @@ import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/proxy_utils.dart';
 import 'package:miru/services/network/system_proxy_service.dart';
 import 'package:miru/services/player/playback_cache_policy.dart';
+import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/services/player/player_screenshot_service.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
@@ -479,6 +480,14 @@ abstract class _PlayerPlaybackController with Store {
   /// toast/静默——黑屏零入口零反馈。video_controller 挂上此回调后，
   /// 终态进入与解析失败同款的错误页（重试/换线路入口现成）。
   void Function(String message)? onPlaybackDead;
+
+  /// v1.7.0（§5）：首帧到达的上行回调（每集一次）。
+  ///
+  /// video_controller 在此挂接「解析结果回写 verified / 线路健康
+  /// 记录 / 时间线记录」——播放层只负责发出信号，归因动作留给
+  /// 知道 episodeUrl 与插件上下文的调用方。软停/换集重置
+  /// hasVideoParams 后自然重新武装。
+  void Function()? onFirstFrame;
 
   /// 本集是否已发过 playbackDead 通知（错误风暴去重；openMedia 复位）。
   bool _playbackDeadNotified = false;
@@ -961,6 +970,12 @@ abstract class _PlayerPlaybackController with Store {
           if (isBuffering != value) {
             isBuffering = value;
           }
+          // v1.7.0（§5）：首帧后的首次「缓冲结束」——画面真正开始流动的
+          // 时刻（KPI 的 tFirstBufferEnd）。仅首帧已出才记录，换集过渡
+          // 期的翻转让 recorder 内部自行丢弃。
+          if (!value) {
+            PlaybackTimelineRecorder.instance.recordFirstBufferEnd();
+          }
         }),
         player.stream.playing.listen((value) {
           if (!isCurrentPlayer(player)) return;
@@ -988,6 +1003,15 @@ abstract class _PlayerPlaybackController with Store {
           if ((w ?? 0) > 0 && (h ?? 0) > 0 && !hasVideoParams) {
             hasVideoParams = true;
             _cancelAudioOnlyFallback();
+            // v1.7.0（§5）：首帧信号上行——时间线记录 + 解析结果回写
+            // verified + 线路健康记录（video_controller 挂接）。
+            // 异常隔离：回调内的失败绝不能影响播放状态机。
+            try {
+              onFirstFrame?.call();
+            } catch (e) {
+              MiruLogger()
+                  .w('PlayerController: onFirstFrame hook failed', error: e);
+            }
           }
         }),
         // v1.6.7（P-1）时长直订 + v1.6.8（F2/R-2）纯音频延迟兑底：
