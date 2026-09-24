@@ -16,7 +16,14 @@ class PlaybackCachePolicy {
     required this.currentPlayer,
   });
 
-  static const int _lowMemoryBufferSize = 2 * 1024 * 1024;
+  /// v1.7.0（P1-10）：分级缓冲。旧实现计量网络/低内存共用 2MB——
+  /// 1080p 下只够几秒，即使 cache-secs=120 也被字节上限卡住，移动
+  /// 数据用户频繁卡顿却没省下多少流量（流量由观看时长决定）。
+  /// 现在计量网络 32MB 前向 + 8MB 回看；用户手动开启的低内存模式
+  /// 16MB（回看同前向，保守）。回看与前向分开配置。
+  static const int _meteredBufferSize = 32 * 1024 * 1024;
+  static const int _meteredBackBufferSize = 8 * 1024 * 1024;
+  static const int _lowMemoryBufferSize = 16 * 1024 * 1024;
   static const int _defaultBufferSize = 1500 * 1024 * 1024;
 
   final bool Function() isLocalPlayback;
@@ -32,8 +39,18 @@ class PlaybackCachePolicy {
   bool get networkForced =>
       !_userEnabled && !isLocalPlayback() && MeteredNetworkService.isMetered;
 
-  int get bufferSize =>
-      _userEnabled || networkForced ? _lowMemoryBufferSize : _defaultBufferSize;
+  int get bufferSize {
+    if (_userEnabled) return _lowMemoryBufferSize;
+    if (networkForced) return _meteredBufferSize;
+    return _defaultBufferSize;
+  }
+
+  /// v1.7.0（P1-10）：回看缓冲独立配置——demuxer-max-back-bytes。
+  int get backBufferSize {
+    if (_userEnabled) return _lowMemoryBufferSize;
+    if (networkForced) return _meteredBackBufferSize;
+    return _defaultBufferSize;
+  }
 
   void startWatching() {
     if (_watching) {
@@ -68,7 +85,8 @@ class PlaybackCachePolicy {
         }
         final size = bufferSize.toString();
         await pp.setProperty('demuxer-max-bytes', size);
-        await pp.setProperty('demuxer-max-back-bytes', size);
+        // v1.7.0（P1-10）：回看缓冲独立下发（计量网络 8MB）。
+        await pp.setProperty('demuxer-max-back-bytes', backBufferSize.toString());
       });
     } catch (e) {
       MiruLogger().w(

@@ -58,10 +58,6 @@ class _VideoPageState extends State<VideoPage>
   bool _didInitializePlayback = false;
   bool _isClosing = false;
 
-  /// v1.6.7（P-2）：本页会话内是否真正开播过（首帧已出）。粘性标志：
-  /// 置位后换集/换源不再整体卸载 PlayerItem，避免 Video/Texture 销毁
-  /// 重建带来的 vo 拆挂与 seek 竞态；仅在页面重建（initState）时归零。
-  bool _playerEverStarted = false;
   HistoryController get historyController => widget.historyController;
   DownloadController get downloadController => widget.downloadController;
   late bool playResume;
@@ -136,6 +132,19 @@ class _VideoPageState extends State<VideoPage>
   }
 
   void _initializePlayback() {
+    // v1.7.0（P1-4）：进页即装配播放内核（幂等 ensurePlayer）——mpv
+    // 实例 + VideoController 与解析并行初始化，首集 PlayerItem 在
+    // 遮罩下提前挂载（videoControllerReady 即挂载），纹理/surface
+    // 创建与网络解析重叠，首帧不再串行等 Texture 建立。
+    // adBlocker 用当前插件配置：兜底换源后可能变化，仅影响广告过滤
+    // 开关（实例常驻本就不随集重建），可接受。
+    if (!videoPageController.isOfflineMode) {
+      unawaited(playerController.playback.ensurePlayer(
+        GStorage.getSetting(SettingsKeys.forceAdBlocker) ||
+            videoPageController.currentPlugin.adBlocker,
+        canInstall: () => mounted,
+      ));
+    }
     if (videoPageController.isOfflineMode) {
       _initOfflineMode(playerController);
     } else {
@@ -847,13 +856,6 @@ class _VideoPageState extends State<VideoPage>
       hasVideoParams: playback.hasVideoParams,
       hasAudioOnlyFallback: playback.hasAudioOnlyFallback,
     );
-    if (playerActuallyStarted) {
-      // v1.6.7（P-2）：页面会话粘性标志——一旦真正播过，换集/换源的
-      // loading 期间不再整体卸载 PlayerItem（Video 卸载会销毁 Texture →
-      // widListener 重放 vo=null→vo + seek(position)，吞帧且可能把续播
-      // 起点拽回 0）；黑屏观感由上层遮罩负责。
-      _playerEverStarted = true;
-    }
     // R-2：去掉 playback.loading 因子——装配结束→首帧之间遮罩保持覆盖。
     final bool playerLoading = !playerActuallyStarted;
     return Stack(
@@ -1019,19 +1021,20 @@ class _VideoPageState extends State<VideoPage>
           ),
         ),
         Positioned.fill(
-          // v1.6.7（P-2）+ v1.6.8（F3/R-12）：同遮罩条件的首帧语义 +
-          // 页面会话粘性标志——首次真正开播前挂 Container()（实例装配
-          // 期），开播后【本页会话内常驻】：换集/换源 loading 期间不再
-          // 卸载（Texture 销毁重建会触发 widListener 的 vo 拆挂 + seek
-          // 竞态）。唯一豁免：errorMessage 非空——错误是本集终态（mpv
-          // 已停/未起、video-params 已清、position=0），卸载 Video 无
-          // vo 竞态风险；而 PlayerItem 是本 Stack 最上层的不透明黑底，
-          // 不卸载会把错误页/重试按钮/顶栏全部遮死（v1.6.7 回归：
-          // 换集失败后黑屏永转圈零入口）。重试（changeEpisode →
-          // _beginEpisodeSwitch 清 errorMessage）与正常链路完全一致。
+          // v1.6.7（P-2）+ v1.6.8（F3/R-12）+ v1.7.0（P1-4）：挂载条件
+          // 改为「播放内核 VideoController 已就绪且无错误」。配合进页
+          // 即 ensurePlayer（解析并行装配），首集 PlayerItem 在遮罩下面
+          // 提前挂载——纹理/surface 创建与网络解析重叠，解析完成时
+          // vo 已就绪。唯一豁免：errorMessage 非空——错误是本集终态
+          // （mpv 已停/未起、video-params 已清、position=0），卸载
+          // Video 无 vo 竞态风险；而 PlayerItem 是本 Stack 最上层的
+          // 不透明黑底，不卸载会把错误页/重试按钮/顶栏全部遮死
+          // （v1.6.7 回归：换集失败后黑屏永转圈零入口）。重试
+          // （changeEpisode → _beginEpisodeSwitch 清 errorMessage）与
+          // 正常链路完全一致。
           child: playerItemMounted(
-            assemblyLoading: playerController.playback.loading,
-            everStarted: _playerEverStarted,
+            videoControllerReady:
+                playerController.playback.videoController != null,
             errorMessage: videoPageController.errorMessage,
           )
               ? PlayerItem(

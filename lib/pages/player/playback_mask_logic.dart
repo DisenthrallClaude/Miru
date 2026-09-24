@@ -39,21 +39,25 @@ bool playbackMaskVisible({
 }) =>
     pageLoading || !actuallyStarted || errorMessage != null;
 
-/// PlayerItem 挂载条件（v1.6.7 P-2 粘性 + v1.6.8 F3 错误态豁免）。
+/// PlayerItem 挂载条件（v1.6.7 P-2 粘性 → v1.7.0 P1-4 提前挂载）。
 ///
-/// [assemblyLoading] = playback.loading（装配期）；[everStarted] 为
-/// 页面会话粘性标志（首帧出现后置位，页面重建才归零）。
+/// v1.7.0（P1-4）：判定改为「[videoControllerReady]（播放内核的
+/// VideoController 已创建）且无错误」。配合进页即 ensurePlayer（解析
+/// 并行装配），首集 PlayerItem 在遮罩下面提前挂载——纹理/surface
+/// 创建与网络解析重叠，解析完成时 vo 已就绪，首帧不再串行等
+/// Texture 建立。不透明遮罩盖住它，用户看不到黑底。
 ///
-/// errorMessage 非空时豁免粘性：错误是本集终态（mpv 已停/未起、
+/// errorMessage 非空时豁免：错误是本集终态（mpv 已停/未起、
 /// video-params 已清、position=0），卸载 Video 无 vo 拆挂竞态风险；
 /// 而 PlayerItem 是 Stack 最上层的不透明黑底，不卸载会把错误页/
 /// 重试按钮/顶栏全部遮死（v1.6.7 回归：黑屏永转圈零入口）。
+/// videoController 在实例常驻期间不会归零（stop 时页面正在销毁），
+/// 「粘性」语义由实例生命周期天然承载。
 bool playerItemMounted({
-  required bool assemblyLoading,
-  required bool everStarted,
+  required bool videoControllerReady,
   String? errorMessage,
 }) =>
-    !((assemblyLoading && !everStarted) || errorMessage != null);
+    videoControllerReady && errorMessage == null;
 
 /// PlayerItem 内部 spinner 可见性（F2）：首帧前一律有「缓冲中」指示。
 ///

@@ -265,6 +265,10 @@ class PlayerController implements Disposable {
     return initialization.isActive && playback.isCurrentPlayer(player);
   }
 
+  /// v1.7.0（P1-4）：音量监听/系统 UI 隐藏的会话级 once 门——旧实现
+  /// 每集 init 都执行一次 addListener（叠加注册）+ updateShowSystemUI。
+  bool _volumeListenerInstalled = false;
+
   /// v1.6.4：open 之后的音量/播放速度装配（从 init 主流程拆出）。
   ///
   /// 全段被 init 的 try-catch 隔离——平台通道（音量服务）任何异常都
@@ -288,28 +292,38 @@ class PlayerController implements Disposable {
       if (!_ownsInitialization(initialization, player)) {
         return;
       }
-      await FlutterVolumeController.updateShowSystemUI(false);
-      if (!_ownsInitialization(initialization, player)) {
-        await FlutterVolumeController.updateShowSystemUI(true);
-        return;
-      }
-      FlutterVolumeController.addListener((volume) {
+      // v1.7.0（P1-4）：系统音量 UI 隐藏 + 监听注册只在播放器生命周期
+      // 内执行一次（解除时恢复）。旧实现每集重复：addListener 叠加
+      // 注册、updateShowSystemUI 每集白发一次。
+      if (!_volumeListenerInstalled) {
+        _volumeListenerInstalled = true;
+        await FlutterVolumeController.updateShowSystemUI(false);
         if (!_ownsInitialization(initialization, player)) {
+          await FlutterVolumeController.updateShowSystemUI(true);
           return;
         }
-        if (panel.volumeSeeking) {
-          return;
-        }
-        playback.applyExternalVolume(volume * 100);
-        if (!Platform.isAndroid && !panel.volumeSeeking) {
-          panel.showVolume = true;
-          hideVolumeUITimer?.cancel();
-          hideVolumeUITimer = Timer(const Duration(seconds: 1), () {
-            panel.showVolume = false;
-            hideVolumeUITimer = null;
-          });
-        }
-      }, category: AudioSessionCategory.playback, emitOnStart: false);
+        FlutterVolumeController.addListener((volume) {
+          // v1.7.0（P1-4）：监听器不再捕获某一集的 initialization——
+          // 旧回调在第二集起 _ownsInitialization 恒 false，外部音量
+          // 变化（硬件键/系统面板）全部失明。liveness 以播放内核
+          // 是否在位为准。
+          if (playback.mediaPlayer == null) {
+            return;
+          }
+          if (panel.volumeSeeking) {
+            return;
+          }
+          playback.applyExternalVolume(volume * 100);
+          if (!Platform.isAndroid && !panel.volumeSeeking) {
+            panel.showVolume = true;
+            hideVolumeUITimer?.cancel();
+            hideVolumeUITimer = Timer(const Duration(seconds: 1), () {
+              panel.showVolume = false;
+              hideVolumeUITimer = null;
+            });
+          }
+        }, category: AudioSessionCategory.playback, emitOnStart: false);
+      }
     }
     if (!_ownsInitialization(initialization, player)) {
       return;

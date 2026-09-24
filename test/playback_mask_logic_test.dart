@@ -100,19 +100,18 @@ void main() {
     });
   });
 
-  group('场景 2：换集（PlayerItem 粘性 + 遮罩全程）', () {
+  group('场景 2：换集（PlayerItem 常驻 + 遮罩全程）', () {
     test('换集期间 PlayerItem 常驻，遮罩从解析盖到新首帧', () {
-      // 前提：第 1 集已真正开播（页面会话粘性标志置位）。
-      const everStarted = true;
+      // 前提：播放内核已装配（VideoController 实例常驻）。
       // t0 点换集：软停使 playback.loading=true、两信号复位。
       expect(
         playerItemMounted(
-          assemblyLoading: true,
-          everStarted: everStarted,
+          videoControllerReady: true,
           errorMessage: null,
         ),
         isTrue,
-        reason: 'P-2 粘性：换集不卸载 Video（避免 vo 拆挂 + seek 竞态）',
+        reason: 'P1-4：VideoController 已就绪（实例常驻），换集不卸载 '
+            'Video（避免 vo 拆挂 + seek 竞态）',
       );
       // t1 解析完成、装配完成（loading=false）、新首帧未到：遮罩仍亮。
       expect(
@@ -129,12 +128,10 @@ void main() {
       );
     });
 
-    test('换源（自动兜底换源）同构：粘性 + 全程遮罩', () {
-      const everStarted = true;
+    test('换源（自动兜底换源）同构：常驻 + 全程遮罩', () {
       expect(
         playerItemMounted(
-          assemblyLoading: true,
-          everStarted: everStarted,
+          videoControllerReady: true,
           errorMessage: null,
         ),
         isTrue,
@@ -152,12 +149,11 @@ void main() {
       // 重试按钮/顶栏全被遮死（黑屏永转圈零入口）。v1.6.8 豁免。
       expect(
         playerItemMounted(
-          assemblyLoading: false,
-          everStarted: true,
+          videoControllerReady: true,
           errorMessage: '视频解析超时，请重试',
         ),
         isFalse,
-        reason: 'F3：errorMessage 非空时豁免粘性——错误是本集终态，'
+        reason: 'F3：errorMessage 非空时豁免——错误是本集终态，'
             '卸载 Video 无 vo 竞态风险',
       );
       expect(
@@ -175,8 +171,7 @@ void main() {
       const message = '播放失败，请尝试更换线路或视频来源';
       expect(
         playerItemMounted(
-          assemblyLoading: false,
-          everStarted: true,
+          videoControllerReady: true,
           errorMessage: message,
         ),
         isFalse,
@@ -191,12 +186,11 @@ void main() {
       );
     });
 
-    test('重试：errorMessage 清空后恢复粘性挂载（与正常链路一致）', () {
+    test('重试：errorMessage 清空后恢复挂载（与正常链路一致）', () {
       // changeEpisode → _beginEpisodeSwitch 清 errorMessage、置 loading。
       expect(
         playerItemMounted(
-          assemblyLoading: true,
-          everStarted: true,
+          videoControllerReady: true,
           errorMessage: null,
         ),
         isTrue,
@@ -207,14 +201,31 @@ void main() {
       );
     });
 
-    test('首集未开播即失败：PlayerItem 本来就未挂载（无回归）', () {
+    test('首集未装配即失败：PlayerItem 本来就未挂载（无回归）', () {
       expect(
         playerItemMounted(
-          assemblyLoading: true,
-          everStarted: false,
+          videoControllerReady: false,
           errorMessage: null,
         ),
         isFalse,
+      );
+    });
+
+    test('P1-4：首集装配中（解析并行）即可提前挂载——遮罩盖住它', () {
+      // v1.7.0：进页即 ensurePlayer，VideoController 在解析期间就绪。
+      // PlayerItem 提前挂载让纹理/surface 与解析重叠，遮罩负责观感。
+      expect(
+        playerItemMounted(
+          videoControllerReady: true,
+          errorMessage: null,
+        ),
+        isTrue,
+        reason: 'P1-4：videoController 就绪即挂载（遮罩下的预热挂载）',
+      );
+      // 遮罩语义不变：首帧前遮罩仍亮（转圈可见）。
+      expect(
+        playbackMaskVisible(pageLoading: true, actuallyStarted: false),
+        isTrue,
       );
     });
   });

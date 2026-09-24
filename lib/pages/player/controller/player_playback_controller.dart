@@ -509,6 +509,14 @@ abstract class _PlayerPlaybackController with Store {
   @visibleForTesting
   Duration playbackDeadCheckDelay = const Duration(seconds: 5);
 
+  /// v1.7.0（P1-4）：上次已生效的超分模式——模式未变时 setShader
+  /// 零下发（旧实现每集 open 前白发一次，off→off 也是一条平台通道
+  /// 往返）。实例重建（stop→新页面）时控制器随之重建，自动失效。
+  SuperResolutionMode? _lastAppliedShaderMode;
+
+  /// v1.7.0（P1-9）：position 流节流时间戳（进度条/弹幕 250ms 粒度）。
+  DateTime? _lastPositionSyncAt;
+
   bool isCurrentPlayer(Player player) {
     return identical(mediaPlayer, player);
   }
@@ -872,6 +880,16 @@ abstract class _PlayerPlaybackController with Store {
       // 十几个串行平台通道往返压成一批（典型省 50-150ms）。
       // media-kit 默认启用硬盘作为双重缓存，这可以维持大缓存的前提下
       // 减轻内存压力；demuxer-cache-dir 按平台正确启用双重缓存。
+      //
+      // v1.7.0（P1-4）：与格式无关的网络/探测/缓冲属性从 openMedia
+      // 迁移至此（实例生命周期内只设一次）——旧实现每集重下发 8 项
+      // 不变属性，纯浪费首帧前的串行平台通道时间。
+      //   - stream-lavf-o：连接层重连 + 10s 超时（timeout 微秒）；
+      //   - probe 降载：analyzeduration=1s + probesize=1MB；
+      //   - network-timeout / cache-pause-initial=no / cache-pause-wait=1
+      //     （v1.6.7 P-5：1s 是上游久经验证的默认，起播期声画起点
+      //     差最小；配合首帧遮罩用户无感）；
+      //   - video-sync=audio：音频主时钟，减少起播期丢帧重同步。
       await Future.wait([
         getPlayerTempPathCached()
             .then((path) => pp.setProperty("demuxer-cache-dir", path)),
@@ -880,6 +898,15 @@ abstract class _PlayerPlaybackController with Store {
         _applyAndroidAudioProperties(pp),
         _applyProxyProperty(pp),
         player.setAudioTrack(AudioTrack.auto()),
+        pp.setProperty('stream-lavf-o',
+            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3,'
+                'timeout=10000000'),
+        pp.setProperty('demuxer-lavf-analyzeduration', '1'),
+        pp.setProperty('demuxer-lavf-probesize', '1048576'),
+        pp.setProperty('network-timeout', '8'),
+        pp.setProperty('cache-pause-initial', 'no'),
+        pp.setProperty('cache-pause-wait', '1'),
+        pp.setProperty('video-sync', 'audio'),
       ]);
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
@@ -1030,6 +1057,23 @@ abstract class _PlayerPlaybackController with Store {
               MiruLogger()
                   .w('PlayerController: onFirstFrame hook failed', error: e);
             }
+          }
+        }),
+        // v1.7.0（P1-9）：position 流直订（节流 250ms）——进度条与弹幕
+        // 不再是 1Hz 跳变；1Hz 定时器只负责历史落盘/PiP/亮度等低频任务。
+        // 换集过渡期忽略（软停会清 position，旧集尾巴不刷新 UI）。
+        player.stream.position.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (_switchingEpisode) return;
+          final now = DateTime.now();
+          final last = _lastPositionSyncAt;
+          if (last != null &&
+              now.difference(last) < const Duration(milliseconds: 250)) {
+            return;
+          }
+          _lastPositionSyncAt = now;
+          if (currentPosition != value) {
+            currentPosition = value;
           }
         }),
         // v1.6.7（P-1）时长直订 + v1.6.8（F2/R-2）纯音频延迟兑底：
@@ -1203,70 +1247,68 @@ abstract class _PlayerPlaybackController with Store {
 
     var pp = player.platform as NativePlayer;
 
-    // 超分随集重设（off 分支负责清掉上一集的 shader）
-    await setShader(superResolutionMode, player: player);
-    if (!isCurrentPlayer(player)) {
-      return null;
-    }
+    // v1.7.0（P1-4）：超分不再阻塞 open——模式未变时零下发（旧实现
+    // 每集 await setShader，其中 waitForVideoControllerInitialization
+    // 在首集 Video 组件未挂载时额外挂起；off→off 每集白发一次
+    // change-list glsl-shaders clr）。模式变化时移到 open 之后
+    // unawaited 执行——着色器切换不是出画的前置条件。
+    // （用户中途手动切换仍走 playerController.setShader 直调。）
 
     // 起播码率判定放宽（v1.5.3 语义保留，随集重设）：
     // 未标注的 .m3u8 master playlist 会回落 mpv 默认 hls-bitrate=max，
     // 弱网下首帧要等好几秒——与 hybrid 解析服务的宽松判定对齐。
-    if (_isHlsPlayback(videoSourceFormat, videoUrl())) {
+    //
+    // v1.7.0（P0-5）：http_seekable=0 撤销（旧实现全局下发）——它会
+    // 作为 avformat 打开选项传给 http 协议，明确禁止 Range seek：
+    //   - MP4/FLV/MKV 直链：拖进度与 start 续播只能从头顺序读；
+    //   - moov box 在尾部的 MP4：直接打不开。
+    // HLS 按分片请求不受 seek 语义影响，保留连接复用与分片自愈参数。
+    //
+    // v1.7.0（P1-4）：与格式无关的属性（probe 降载/超时/缓冲等待/
+    // video-sync/stream-lavf-o）只在 ensurePlayer 设置一次；每集只
+    // 下发随集/随格式变化的四项，合并进同一个 Future.wait。
+    final isHls = _isHlsPlayback(videoSourceFormat, videoUrl());
+    if (isHls) {
       // 取首个流（站点推荐清晰度）起播最快，中途仍可手动切清晰度。
       await Future.wait([
         pp.setProperty('demuxer-lavf-format', 'hls'),
         pp.setProperty('hls-bitrate', 'no'),
+        pp.setProperty(
+            'demuxer-lavf-o',
+            'http_persistent=1,http_multiple=1,'
+                'seg_max_retry=3,max_reload=5,'
+                'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
+        // probe-info=nostreams 只对 HLS 生效（部分 FLV/MKV 在
+        // nostreams 下探测不到音轨）。
+        pp.setProperty('demuxer-lavf-probe-info', 'nostreams'),
+        if (!isLocalPlayback()) ...[
+          // 起播阶段小缓冲（§1.7）：首帧后由 _maybePromoteBuffering
+          // 提升到 120/10；每集重设（promote 换集必须回落）。
+          pp.setProperty('cache-secs', _cacheSecsStartup),
+          pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
+        ],
       ]);
       if (!isCurrentPlayer(player)) {
         return null;
       }
     } else {
-      // 上一集强制过 hls 时恢复自动探测（空值 = mpv 默认自动识别）
+      // 上一集强制过 hls 时恢复自动探测（空值 = mpv 默认自动识别）。
       try {
         await pp.setProperty('demuxer-lavf-format', '');
       } catch (_) {}
-    }
-
-    // 网络流稳定性参数（§1.7，「先快出画，稳了再拉大缓冲」）：
-    // 每集重设——promote 会把值拉高，换集必须回落到起播值。
-    // 1) demuxer-lavf-o：HTTP 持久连接 + 分片级重试（seg_max_retry/
-    //    max_reload 是 HLS 丢片自愈的核心）；
-    // 2) stream-lavf-o：连接层重连 + 10s 超时（timeout 单位微秒）；
-    // 3) 探测降载：probe-info=nostreams + analyzeduration=1s +
-    //    probesize=1MB——起播前的流识别时间大幅压缩；
-    // 4) 起播阶段小缓冲（cache-secs=10/readahead=3），首帧后由
-    //    _maybePromoteBuffering 提升到 120/10；
-    // 5) cache-pause-initial=no：缓冲未满也直接出画；
-    // 6) video-sync=audio：音频主时钟，减少起播期丢帧重同步。
-    if (!isLocalPlayback()) {
-      await Future.wait([
-        pp.setProperty(
-            'demuxer-lavf-o',
-            'http_persistent=1,http_multiple=1,http_seekable=0,'
-                'seg_max_retry=3,max_reload=5,'
-                'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
-        pp.setProperty(
-            'stream-lavf-o',
-            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3,'
-                'timeout=10000000'),
-        pp.setProperty('demuxer-lavf-probe-info', 'nostreams'),
-        pp.setProperty('demuxer-lavf-analyzeduration', '1'),
-        pp.setProperty('demuxer-lavf-probesize', '1048576'),
-        pp.setProperty('network-timeout', '8'),
-        pp.setProperty('cache-pause-initial', 'no'),
-        // v1.6.7（P-5）：0.5 → 1（mpv 默认）。0.5 让 demuxer underrun
-        // 后只攒 0.5s 数据就恢复播放——起播期音频轨先有数据（音频分段
-        // 小、先到达），mpv 以音频为主时钟开播出声、视频轨数据未到
-        // 画面维持黑，声画起点差被制度化。1s 是上游久经验证的默认，
-        // 起播更稳；配合 P-1 的首帧遮罩，用户看不到这个窗口。
-        pp.setProperty('cache-pause-wait', '1'),
-        pp.setProperty('cache-secs', _cacheSecsStartup),
-        pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
-        pp.setProperty('video-sync', 'audio'),
-      ]);
-      if (!isCurrentPlayer(player)) {
-        return null;
+      if (!isLocalPlayback()) {
+        await Future.wait([
+          // 非 HLS 直链：保留连接层重连，绝不限制 seek。
+          pp.setProperty('demuxer-lavf-o',
+              'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
+          // nostreams 对 FLV/MKV 缺音轨——非 HLS 恢复 auto。
+          pp.setProperty('demuxer-lavf-probe-info', 'auto'),
+          pp.setProperty('cache-secs', _cacheSecsStartup),
+          pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
+        ]);
+        if (!isCurrentPlayer(player)) {
+          return null;
+        }
       }
     }
     // 换集重置缓冲提升标记（§1.7）：每集都从起播值重新开始爬坡
@@ -1284,6 +1326,12 @@ abstract class _PlayerPlaybackController with Store {
     // v1.6.9（P1-4）：新一集已提交 open——解除换集过渡标志，
     // playing/buffering 流事件恢复直通 UI。
     _switchingEpisode = false;
+
+    // v1.7.0（P1-4）：超分移到 open 之后（unawaited）——着色器切换
+    // 不是出画的前置条件；模式未变时 setShader 内部零下发。
+    if (superResolutionMode != _lastAppliedShaderMode) {
+      unawaited(setShader(superResolutionMode, player: player));
+    }
 
     // v1.6.8（F5）：移动数据提示会话级去重——此前每次 openMedia（换集
     // /自动连播/换源兑底）都弹同一条，追番连播下每 24 分钟刷屏。
@@ -1318,6 +1366,16 @@ abstract class _PlayerPlaybackController with Store {
   Future<void> setShader(SuperResolutionMode mode, {Player? player}) async {
     final currentPlayer = player ?? mediaPlayer;
     if (currentPlayer == null) return;
+    // v1.7.0（P1-4）：模式未变时零下发——每集 open 前的重复设置
+    // （尤其 off→off 的 change-list glsl-shaders clr）是纯浪费的
+    // 平台通道往返。实例重建时 _lastAppliedShaderMode 随控制器重建
+    // 为 null，首集照常生效。
+    if (identical(_lastAppliedShaderMode, mode) && mode == SuperResolutionMode.off) {
+      return; // off→off：什么都不发
+    }
+    if (identical(_lastAppliedShaderMode, mode)) {
+      return; // 同模式：着色器列表已在位，无需重设
+    }
     try {
       var pp = currentPlayer.platform as NativePlayer;
       await pp.waitForPlayerInitialization;
@@ -1353,6 +1411,8 @@ abstract class _PlayerPlaybackController with Store {
           break;
       }
       superResolutionMode = mode;
+      // v1.7.0（P1-4）：记录已生效模式（同模式后续跳过）。
+      _lastAppliedShaderMode = mode;
     } catch (e) {
       MiruLogger().w('PlayerController: failed to set shader', error: e);
     }
