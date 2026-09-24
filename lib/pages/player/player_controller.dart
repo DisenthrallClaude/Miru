@@ -194,8 +194,12 @@ class PlayerController implements Disposable {
         GStorage.getSetting(SettingsKeys.arrowKeySkipTime);
     // §2.1：播放内核单例常驻——换集只软停（实例/纹理/订阅保留），
     // 全量销毁只在离开视频页（beginShutdown）。无实例时零开销。
+    // v1.7.0（P0-2）：改用 awaitPendingSoftStop——changeEpisode 入口
+    // 已 unawaited(softStop()) 发起软停，这里再发起一次会造成双发
+    // 竞态（缓存命中时第二次 softStop+openMedia 先完成，第一次的
+    // 尾部复位落在 open 之后：hasVideoParams 被清、遮罩永转圈）。
     try {
-      await playback.softStop();
+      await playback.awaitPendingSoftStop();
     } catch (_) {}
     if (initialization.isStale) {
       return false;

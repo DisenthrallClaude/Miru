@@ -474,6 +474,16 @@ abstract class _PlayerPlaybackController with Store {
   /// v1.6.8（F5）：移动数据低内存 toast 的会话级 once 门。
   final PlaybackSessionOnceFlag _meteredToastOnce = PlaybackSessionOnceFlag();
 
+  /// v1.7.0（P0-1）：mpv「播放完成」事件直通（广播流）。
+  ///
+  /// 连播判定从 1Hz 轮询拍（最坏等 1s）改为事件驱动：PlayerItem
+  /// 订阅本流，事件到达立即进入连播判定。定时器里的 completed
+  /// 判定保留作兑底。订阅随实例注册（ensurePlayer），stop() 时关闭。
+  final StreamController<void> _completedController =
+      StreamController<void>.broadcast();
+
+  Stream<void> get onCompleted => _completedController.stream;
+
   /// v1.6.8（R-12）：播放层失败终态的上行回调。
   ///
   /// mpv 打开失败链（直连兑底 + 自动恢复烧尽/被冷却挡死）此前止于
@@ -501,6 +511,14 @@ abstract class _PlayerPlaybackController with Store {
 
   bool isCurrentPlayer(Player player) {
     return identical(mediaPlayer, player);
+  }
+
+  /// v1.7.0（P0-2 测试）：注入假 Player（绕过 ensurePlayer 的平台通道
+  /// 装配），直接构造软停/openMedia 的行为测试环境。仅测试可用；
+  /// 生产代码绝不调用（真实例必须经 ensurePlayer 创建并纳入淘汰链）。
+  @visibleForTesting
+  void debugInstallPlayerForTest(Player player) {
+    _ownedPlayer = _OwnedPlayer(player);
   }
 
   Future<Player?> _discardIfNotCurrent(_OwnedPlayer candidate) async {
@@ -1029,6 +1047,19 @@ abstract class _PlayerPlaybackController with Store {
             _scheduleAudioOnlyFallback();
           }
         }),
+        // v1.7.0（P0-1）：播放完成事件直通——completed observable 即时
+        // 翻转（不再等 1Hz 轮询），同时广播给订阅方（PlayerItem 的
+        // 连播判定）。seek 到结尾等场景可能多次触发，消费方以
+        // completed 的翻转为去重依据。
+        player.stream.completed.listen((value) {
+          if (!isCurrentPlayer(player)) return;
+          if (completed != value) {
+            completed = value;
+          }
+          if (value && !_completedController.isClosed) {
+            _completedController.add(null);
+          }
+        }),
       ]);
 
       return player;
@@ -1052,7 +1083,35 @@ abstract class _PlayerPlaybackController with Store {
   /// 而新集已经开始解析（softStop 与解析并行），用户听到旧集声音
   /// 叠着「视频资源解析中」的转圈。pause 立即静止音频输出，
   /// stop 慢不慢都不再有穿帮。
-  Future<void> softStop() async {
+  ///
+  /// v1.7.0（P0-2）：单飞 + 世代号守卫。旧实现双发竞态：
+  /// video_controller.changeEpisode 的 unawaited(softStop()) 与
+  /// player_controller.init 的 await softStop() 并发执行，缓存命中时
+  /// 解析只要几毫秒，第二次 softStop + openMedia 可能先完成，而第一次
+  /// softStop 的尾部（pause/stop 之后的观察量复位）落在 open 之后：
+  ///   - hasVideoParams 被清掉，但 videoParams 事件对同一流只来一次
+  ///     → 遮罩永远不撤（有声黑屏）；
+  ///   - 第一次的 player.stop() 落在 open 之后，把新集直接停掉；
+  ///   - _switchingEpisode 迟到置位，buffering/playing 事件被永久吞掉。
+  /// 现在：同一时刻只有一个 _doSoftStop 在执行（后续调用共享同一
+  /// Future）；每个 await 之后校验世代号，过期后绝不写任何状态。
+  Future<void> softStop() =>
+      _softStopFuture ??= _doSoftStop().whenComplete(() => _softStopFuture = null);
+
+  /// 在途软停的 Future（单飞锁）。
+  Future<void>? _softStopFuture;
+
+  /// v1.7.0（P0-2）：只等待在途软停（若存在），不重复发起——
+  /// player_controller.init 在 changeEpisode 已发起软停后调用此方法，
+  /// 旧实现在这里再次发起造成双发竞态。
+  Future<void> awaitPendingSoftStop() async {
+    final pending = _softStopFuture;
+    if (pending != null) {
+      await pending;
+    }
+  }
+
+  Future<void> _doSoftStop() async {
     final player = mediaPlayer;
     if (player == null) {
       return;
@@ -1061,7 +1120,9 @@ abstract class _PlayerPlaybackController with Store {
     // 旧集的 5s playbackDead 复检若在此窗口内触发，四守卫全过会误报
     // 「播放失败」并把错误页钉死在新集上（新集照常开播=有声+错误页）。
     // openMedia 会再次 bump，计数器单调递增无副作用。
-    _openMediaGeneration++;
+    // v1.7.0（P0-2）：gen 同时是本方法的作废令牌——openMedia 接管后
+    // 本方法过期，尾部不再写任何状态。
+    final gen = ++_openMediaGeneration;
     // v1.6.9（P1-2）：软停清错误时间戳——换集后的旧集残留错误不再
     // 参与新集的假 EOF 判定。
     _lastStreamErrorAt = null;
@@ -1077,20 +1138,32 @@ abstract class _PlayerPlaybackController with Store {
       // 否则 stop 挂起类故障零观测。
       MiruLogger().w('PlayerController: softStop pause failed', error: e);
     }
+    if (gen != _openMediaGeneration) {
+      // v1.7.0（P0-2）：openMedia 已接管（新集已提交 open），本软停
+      // 过期——绝不复位观察量、绝不再 stop（旧竞态直接把新集停掉）。
+      return;
+    }
     try {
       await player.stop();
     } catch (e) {
       MiruLogger().w('PlayerController: softStop stop failed', error: e);
     }
-    playing = false;
-    loading = true;
-    isBuffering = true;
-    completed = false;
-    currentPosition = Duration.zero;
-    buffer = Duration.zero;
-    duration = Duration.zero;
-    hasVideoParams = false;
-    hasAudioOnlyFallback = false;
+    if (gen != _openMediaGeneration) {
+      return;
+    }
+    // v1.7.0（P0-2）：观察量复位包进 runInAction——消除「写 observable
+    // 却不在 action 内」的隐患（并发补检查）。
+    runInAction(() {
+      playing = false;
+      loading = true;
+      isBuffering = true;
+      completed = false;
+      currentPosition = Duration.zero;
+      buffer = Duration.zero;
+      duration = Duration.zero;
+      hasVideoParams = false;
+      hasAudioOnlyFallback = false;
+    });
     _cancelAudioOnlyFallback();
   }
 
@@ -1103,6 +1176,14 @@ abstract class _PlayerPlaybackController with Store {
     int offset = 0,
     VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
   }) async {
+    if (!isCurrentPlayer(player)) {
+      return null;
+    }
+    // v1.7.0（P0-2）：等待在途软停完成，保证顺序固定为「stop → open」。
+    // 旧实现里 changeEpisode 的 unawaited(softStop()) 与本方法并发，
+    // 缓存命中时 open 可能先于 stop 序列完成，迟到的 stop 把新集
+    // 停掉、迟到的复位把 hasVideoParams 清掉（有声黑屏残余根因）。
+    await awaitPendingSoftStop();
     if (!isCurrentPlayer(player)) {
       return null;
     }
@@ -1371,6 +1452,8 @@ abstract class _PlayerPlaybackController with Store {
     cachePolicy.stopWatching();
     _cancelAudioOnlyFallback();
     hasAudioOnlyFallback = false;
+    // v1.7.0（P0-2）：等待在途软停（pause/stop 序列与实例销毁竞态）。
+    await awaitPendingSoftStop();
     final ownedPlayer = _ownedPlayer;
     _ownedPlayer = null;
     videoController = null;
@@ -1381,6 +1464,11 @@ abstract class _PlayerPlaybackController with Store {
       unawaited(subscription.cancel());
     }
     _playbackStateSubscriptions.clear();
+    // v1.7.0（P0-1）：完成事件流随实例关闭（页面正在销毁，订阅方
+    // PlayerItem 同步在 dispose）。
+    if (!_completedController.isClosed) {
+      unawaited(_completedController.close());
+    }
     // media_kit stops playback as part of disposal before releasing native
     // resources. Debug subscriptions can be cancelled concurrently.
     await Future.wait([

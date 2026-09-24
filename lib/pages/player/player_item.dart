@@ -125,6 +125,19 @@ class _PlayerItemState extends State<PlayerItem>
   Timer? playerTimer;
   Timer? mouseScrollerTimer;
   Timer? _adjustmentHudHideTimer;
+
+  /// v1.7.0（P0-1）：自动连播防重入标志——changeEpisode 在途时
+  /// 1Hz 定时拍与 completed 事件不再重复触发。
+  bool _autoNextInFlight = false;
+
+  /// v1.7.0（P0-1）：播放完成事件订阅（事件驱动连播，不等 1Hz 拍）。
+  StreamSubscription<void>? _completedSubscription;
+
+  /// v1.7.0（P0-1）：换集即重启 1Hz 定时器——PlayerItem 在首帧出现后
+  /// 常驻挂载（v1.6.7 everStarted 粘性），initState 不会再执行，
+  /// 定时器一旦被取消就永久停止（进度条冻结/历史不写/弹幕停）。
+  mobx.ReactionDisposer? _playingEpisodeReaction;
+
   final Set<PlayerPanelHold> _playerPanelHolds = <PlayerPanelHold>{};
   int _openPlayerMenuCount = 0;
   PlayerPanelHold? _progressBarDragHold;
@@ -1120,42 +1133,65 @@ class _PlayerItemState extends State<PlayerItem>
         _persistPlaybackHistory(force: true);
       }
       _wasPlayingForHistory = isPlayingNow;
-      final playingSelection = videoPageController.playbackEpisode;
-      final playingRoadData =
-          videoPageController.roadList[playingSelection.road];
-      if (playerController.playback.completed && !videoPageController.loading) {
-        if (playerController.playback.isAbnormalEnd) {
-          // 流错误造成的假 EOF：直接连播会变成「莫名跳集」。
-          // 优先原地恢复当前集；恢复用尽则等错误窗口过期，
-          // 由下方原有连播逻辑兜底（历史记录已保存，可回看）。
-          if (playerController.playback.canAutoRecover) {
-            unawaited(playerController.playback.recoverForAbnormalEnd());
-          }
-        } else if (playerController.playback.resumedNearEnd) {
-          // Completion of a stale near-end resume is not a real watch;
-          // replay from the beginning instead of advancing.
-          unawaited(playerController.playback.restartFromBeginning());
-        } else if (playingSelection.episode < playingRoadData.data.length &&
-            autoPlayNext) {
-          final nextSelection = VideoEpisodeSelection(
-            episode: playingSelection.episode + 1,
-            road: playingSelection.road,
-          );
-          // Resolution failures surface through the controller's failed state
-          // instead of silently retrying here every second.
-          final nextRef = videoPageController.resolveEpisode(nextSelection);
-          if (nextRef != null) {
-            MiruDialog.showToast(message: '正在加载${nextRef.displayTitle}');
-          }
-          try {
-            playerTimer!.cancel();
-          } catch (_) {}
-          widget.changeEpisode(playingSelection.episode + 1,
-              currentRoad: playingSelection.road);
-        }
-      }
+      // v1.7.0（P0-1）：连播判定抽为 _maybeAutoAdvance——completed
+      // 事件直通调用（即时），1Hz 定时拍作兑底。判定本身不再取消
+      // playerTimer（旧实现取消后因 PlayerItem 常驻挂载、initState
+      // 不再执行而永久停止：进度条冻结、历史不写、弹幕停、下一次
+      // 连播不触发）。
+      _maybeAutoAdvance();
       playerController.setSyncPlayCurrentPosition();
     });
+  }
+
+  /// v1.7.0（P0-1）：播放完成后的连播判定（completed 事件与 1Hz 兜底
+  /// 共用）。
+  ///
+  /// 防重入：changeEpisode 在途期间（解析+装配可能数百毫秒到数秒）
+  /// 事件与定时拍不再重复触发；换集完成后标志复位，下一集结束时
+  /// 连播照常。
+  void _maybeAutoAdvance() {
+    if (_autoNextInFlight) return;
+    final playingSelection = videoPageController.playingEpisode;
+    if (playingSelection == null) return;
+    // v1.7.0（P0-1）：roadList 边界检查——兜底换源 _applyFallbackContext
+    // 会替换 roadList，旧 selection.road 可能越界（RangeError 打死定时拍）。
+    final roadList = videoPageController.roadList;
+    if (playingSelection.road >= roadList.length) return;
+    final playingRoadData = roadList[playingSelection.road];
+    if (!playerController.playback.completed || videoPageController.loading) {
+      return;
+    }
+    if (playerController.playback.isAbnormalEnd) {
+      // 流错误造成的假 EOF：直接连播会变成「莫名跳集」。
+      // 优先原地恢复当前集；恢复用尽则等错误窗口过期，
+      // 由下方原有连播逻辑兜底（历史记录已保存，可回看）。
+      if (playerController.playback.canAutoRecover) {
+        unawaited(playerController.playback.recoverForAbnormalEnd());
+      }
+    } else if (playerController.playback.resumedNearEnd) {
+      // Completion of a stale near-end resume is not a real watch;
+      // replay from the beginning instead of advancing.
+      unawaited(playerController.playback.restartFromBeginning());
+    } else if (playingSelection.episode < playingRoadData.data.length &&
+        autoPlayNext) {
+      final nextSelection = VideoEpisodeSelection(
+        episode: playingSelection.episode + 1,
+        road: playingSelection.road,
+      );
+      // Resolution failures surface through the controller's failed state
+      // instead of silently retrying here every second.
+      final nextRef = videoPageController.resolveEpisode(nextSelection);
+      if (nextRef != null) {
+        MiruDialog.showToast(message: '正在加载${nextRef.displayTitle}');
+      }
+      _autoNextInFlight = true;
+      widget
+          .changeEpisode(playingSelection.episode + 1,
+              currentRoad: playingSelection.road)
+          .whenComplete(() {
+        _autoNextInFlight = false;
+      });
+    }
   }
 
   void showDanmakuSearchDialog(String keyword) async {
@@ -1443,6 +1479,22 @@ class _PlayerItemState extends State<PlayerItem>
         GStorage.getSetting(SettingsKeys.defaultShortcutForwardPlaySpeed);
     unawaited(_bindAudioService());
     playerTimer = getPlayerTimer();
+    // v1.7.0（P0-1）：完成事件直通——事件到达立即进入连播判定，
+    // 不再等最多 1s 的轮询拍。定时器里的判定保留作兑底。
+    _completedSubscription =
+        playerController.playback.onCompleted.listen((_) {
+      _maybeAutoAdvance();
+    });
+    // v1.7.0（P0-1）：换集即重启定时器（保险丝：任何路径取消了
+    // 定时器，换集都会重新拉起）。
+    _playingEpisodeReaction = mobx.reaction<VideoEpisodeSelection?>(
+      (_) => videoPageController.playingEpisode,
+      (selection) {
+        if (selection != null) {
+          _restartPlayerTimer();
+        }
+      },
+    );
     windowManager.addListener(this);
     displayVideoController();
   }
@@ -1459,6 +1511,9 @@ class _PlayerItemState extends State<PlayerItem>
     windowManager.removeListener(this);
     playerController.seeking.invalidateInteractiveSeek();
     playerTimer?.cancel();
+    // v1.7.0（P0-1）：事件订阅与 reaction 随 widget 销毁。
+    unawaited(_completedSubscription?.cancel() ?? Future<void>.value());
+    _playingEpisodeReaction?.call();
     hideTimer?.cancel();
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
