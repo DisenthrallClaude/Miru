@@ -125,6 +125,80 @@ void main() {
     expect(exported.contains('e1'), isFalse);
   });
 
+  // -------------------------------------------------------------------------
+  // v1.7.0（P1-3）
+  // -------------------------------------------------------------------------
+
+  test('P1-3: 失败即晋级——wave0 在 50ms 返回 null，wave1 立即启动（不等 600ms）',
+      () async {
+    final wave1LaunchAt = Completer<DateTime>();
+    final session = ResolveSession<String>(
+      waves: {
+        Duration.zero: (trace) async {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          return null; // 快解 50ms 就失败
+        },
+        const Duration(milliseconds: 600): (trace) async {
+          if (!wave1LaunchAt.isCompleted) {
+            wave1LaunchAt.complete(DateTime.now());
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          return 'cloud';
+        },
+        const Duration(milliseconds: 1500): (trace) async {
+          fail('webview 波次不应启动：cloud 已胜出');
+        },
+      },
+      hardDeadline: const Duration(seconds: 2),
+    );
+    final startAt = DateTime.now();
+    final result = await session.run();
+    expect(result, 'cloud');
+    // 验收（工单原文）：wave1 在大约 50ms 时启动，而不是 600ms。
+    final launchDelay =
+        wave1LaunchAt.future.then((at) => at.difference(startAt).inMilliseconds);
+    final ms = await launchDelay;
+    expect(ms, lessThan(400),
+        reason: '失败即晋级：wave0 落定后 wave1 应立即启动，'
+            '实测 ${ms}ms（旧实现要等满 600ms）');
+  });
+
+  test('P1-3: 层级抛异常同样触发晋级', () async {
+    var webviewLaunched = false;
+    final session = ResolveSession<String>(
+      waves: {
+        Duration.zero: (trace) async => throw Exception('fast crashed'),
+        const Duration(milliseconds: 600): (trace) async => null,
+        const Duration(milliseconds: 1500): (trace) async {
+          webviewLaunched = true;
+          return 'webview';
+        },
+      },
+      hardDeadline: const Duration(seconds: 2),
+    );
+    final result = await session.run();
+    expect(result, 'webview');
+    expect(webviewLaunched, isTrue);
+  });
+
+  test('P1-3: 胜出后待触发的波次定时器全部取消（无迟到启动）', () async {
+    var lateLaunched = false;
+    final session = ResolveSession<String>(
+      waves: {
+        Duration.zero: (trace) async => 'fast',
+        const Duration(milliseconds: 80): (trace) async {
+          lateLaunched = true;
+          return 'cloud';
+        },
+      },
+      hardDeadline: const Duration(seconds: 2),
+    );
+    expect(await session.run(), 'fast');
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(lateLaunched, isFalse,
+        reason: '胜出后未触发的波次定时器必须取消');
+  });
+
   group('ttlFor：URL 签名寿命提取（§2.4）', () {
     test('秒级 exp', () {
       final future = (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 1800;

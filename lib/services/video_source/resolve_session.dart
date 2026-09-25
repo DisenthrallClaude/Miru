@@ -115,6 +115,11 @@ typedef ResolveLevelTask<T> = Future<T?> Function(ResolveTrace trace);
 ///
 /// 「产出」的语义由调用方定义：层级任务返回的对象即视为已验证
 /// （hybrid 层把探测放在各层级任务内部，首个通过探测的候选即产出）。
+///
+/// v1.7.0（P1-3）：「失败即晋级」——任一波次落定（返回 null/抛异常）
+/// 且无胜者时，立即启动下一个尚未启动的波次（取消其定时器直接
+/// launch）。旧实现固定延迟：快解 200ms 就失败了，云端仍要等到
+/// 600ms、WebView 仍要等到 1500ms。
 class ResolveSession<T> {
   ResolveSession({
     required this.waves,
@@ -157,7 +162,11 @@ class ResolveSession<T> {
 
   Completer<T>? _completer;
   Timer? _deadlineTimer;
-  final List<Timer> _waveTimers = [];
+
+  /// v1.7.0（P1-3）：尚未触发的波次定时器（升序）——失败即晋级时
+  /// 从头部取消并立即 launch。
+  final List<MapEntry<Duration, Timer>> _pendingWaveTimers = [];
+
   final List<Future<void>> _inflight = [];
   bool _cancelled = false;
 
@@ -191,10 +200,14 @@ class ResolveSession<T> {
       if (entry.key == Duration.zero) {
         _launch(entry.key, entry.value);
       } else {
-        _waveTimers.add(Timer(entry.key, () {
-          if (_won || _cancelled || completer.isCompleted) return;
-          _launch(entry.key, entry.value);
-        }));
+        _pendingWaveTimers.add(MapEntry(
+          entry.key,
+          Timer(entry.key, () {
+            _pendingWaveTimers.removeWhere((e) => e.key == entry.key);
+            if (_won || _cancelled || completer.isCompleted) return;
+            _launch(entry.key, entry.value);
+          }),
+        ));
       }
     }
 
@@ -250,7 +263,12 @@ class ResolveSession<T> {
     final completer = _completer;
     if (completer == null || completer.isCompleted) return;
     if (_won || _cancelled) return;
-    if (_settledWaves < waves.length) return;
+    if (_settledWaves < waves.length) {
+      // v1.7.0（P1-3）：失败即晋级——本波落定且无胜者，下一个
+      // 尚未启动的波次立即起跑（不再等固定延迟）。
+      _promoteNextWave();
+      return;
+    }
     _cancelTimers();
     trace.record(ResolveStage.fast, 'all-levels-failed',
         '$_settledWaves/${waves.length} waves settled without winner');
@@ -259,6 +277,19 @@ class ResolveSession<T> {
       _timeoutErrorFactory?.call() ??
           TimeoutException('all resolve levels failed', hardDeadline),
     );
+  }
+
+  /// v1.7.0（P1-3）：提前启动下一个未触发的波次（失败即晋级）。
+  void _promoteNextWave() {
+    if (_pendingWaveTimers.isEmpty) return;
+    final next = _pendingWaveTimers.removeAt(0);
+    next.value.cancel();
+    final task = waves[next.key];
+    if (task == null) return;
+    trace.record(_stageFor(next.key), 'wave-promoted',
+        'launched early after previous wave failed');
+    onTrace?.call(trace);
+    _launch(next.key, task);
   }
 
   ResolveStage _stageFor(Duration delay) {
@@ -303,10 +334,10 @@ class ResolveSession<T> {
   void _cancelTimers() {
     _deadlineTimer?.cancel();
     _deadlineTimer = null;
-    for (final timer in _waveTimers) {
-      timer.cancel();
+    for (final entry in _pendingWaveTimers) {
+      entry.value.cancel();
     }
-    _waveTimers.clear();
+    _pendingWaveTimers.clear();
   }
 
   /// 取消在途层级任务：这里只能「不再等待」（层级任务是普通 Future），

@@ -14,6 +14,7 @@ import 'package:miru/plugins/plugins_controller.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/pages/collect/collect_controller.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/webview/video/webview_pool.dart';
 import 'package:miru/services/network/metered_network_service.dart';
 import 'package:miru/services/shaders/shader_asset_service.dart';
 import 'package:miru/services/startup/startup_gate.dart';
@@ -106,6 +107,11 @@ class _InitPageState extends State<InitPage> {
       // 云同步错峰启动：计时从 init 完成后起算（4s 后触发），
       // 避免慢机上 Hive 写锁与插件 init 竞争；导航已先行，不影响玻璃页。
       unawaited(_delayedCloudSyncInit());
+      // v1.7.0（P1-1）：首帧后延迟 3s 空闲预热常驻 WebView 池——
+      // 用户点进播放页时 Chromium 已就绪，WebView 兜底路径免冷启动。
+      scheduleWebViewPoolPreheat();
+      // v1.7.0（P1-1）：初始化完成后预热常驻 WebView 池（空闲时）。
+      scheduleWebViewPoolPreheat();
       StartupGate.markPluginsReady();
       // 后续动作（更新检查/公告）由 OnboardingPage 的进入动作接管。
       return;

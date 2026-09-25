@@ -11,6 +11,7 @@ import 'package:miru/bean/widget/collect_button.dart';
 import 'package:miru/bean/widget/embedded_native_control_area.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/pages/info/info_controller.dart';
+import 'package:miru/webview/video/webview_pool.dart';
 import 'package:miru/bean/card/bangumi_info_card.dart';
 import 'package:miru/pages/info/source_sheet.dart';
 import 'package:miru/plugins/plugins_controller.dart';
@@ -235,6 +236,9 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     infoTabController.addListener(onInfoTabChanged);
     infoTabController.addListener(_syncFabTabIndex);
     infoTabController.animation?.addListener(_syncFabTabIndex);
+    // v1.7.0（P1-1）：进详情页即预热常驻 WebView 池——从详情页点进
+    // 播放页的概率极高，Chromium 提前就绪（幂等，已预热则零开销）。
+    unawaited(WebViewPool.instance.preheat());
     // 并行预热吐槽/角色/制作人员：进入详情页即拉取，切 Tab 时数据已就绪。
     // 各加载函数自带 isLoading 门闸，后续 Tab 切换不会重复请求。
     WidgetsBinding.instance.addPostFrameCallback((_) {

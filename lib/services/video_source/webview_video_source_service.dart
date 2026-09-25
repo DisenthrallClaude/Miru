@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:miru/webview/video/video_webview_controller.dart';
+import 'package:miru/webview/video/webview_pool.dart';
 import 'package:miru/services/video_source/video_source_service.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -13,7 +14,15 @@ import 'package:miru/utils/http_headers.dart';
 /// 使用 WebView 解析视频页面，提取视频源 URL。
 /// WebView 实例在服务生命周期内复用，切换集数时调用 unloadPage 释放页面资源，
 /// 仅在 [dispose] 时才真正销毁 WebView。
+///
+/// v1.7.0（P1-1）：[usePool] 为 true 时从 [WebViewPool]（进程级常驻）
+/// 借还实例——每次解析 acquire/release，release 只清页面不销毁
+/// Chromium，第二次进播放页嗅探免 300~1500ms 冷启动。下载路径保持
+/// 默认（独占新实例），与池互不干扰。
 class WebViewVideoSourceService implements IVideoSourceService {
+  WebViewVideoSourceService({bool usePool = false}) : _usePool = usePool;
+
+  final bool _usePool;
   VideoWebviewController? _webview;
   StreamSubscription? _logSubscription;
 
@@ -69,7 +78,29 @@ class WebViewVideoSourceService implements IVideoSourceService {
   }) async {
     request.throwIfNotCurrent(_activeRequest);
 
-    if (_webview == null) {
+    // v1.7.0（P1-1）：池模式——从进程级常驻池借实例（已 init 已注入
+    // 脚本，零冷启动）；每次解析独立借还，日志订阅随借随挂。
+    VideoWebviewController? pooled;
+    StreamSubscription<String>? pooledLogSub;
+    if (_usePool) {
+      // 等待借出期间可能已被取消（换集竞态）：借到也要立即归还。
+      try {
+        pooled = await WebViewPool.instance
+            .acquire()
+            .timeout(const Duration(seconds: 10));
+        request.throwIfNotCurrent(_activeRequest);
+      } catch (_) {
+        if (pooled != null) {
+          unawaited(WebViewPool.instance.release(pooled));
+        }
+        rethrow;
+      }
+      pooledLogSub = pooled.onLog.listen((log) {
+        if (!_logController.isClosed) {
+          _logController.add(log);
+        }
+      });
+    } else if (_webview == null) {
       final webview = VideoWebviewControllerFactory.getController();
       try {
         // 初始化必须有硬超时（P8 余项）：headless WebView 创建挂起时
@@ -92,6 +123,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
         }
       });
     }
+    final webview = pooled ?? _webview!;
 
     var didStartLoad = false;
     try {
@@ -102,7 +134,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
       // 永不完成，串行队列卡死、dispose 悬挂、实例泄漏。
       // 超时抛 VideoSourceTimeoutException，走既有 finally 的
       // unloadPage 清理与上层降级链路。
-      await _webview!.loadUrl(
+      await webview.loadUrl(
         episodeUrl,
         useLegacyParser,
         offset: offset,
@@ -114,6 +146,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
       final event = await _waitForParserEventWithReload(
         request,
+        webview,
         timeout: timeout,
         episodeUrl: episodeUrl,
         useLegacyParser: useLegacyParser,
@@ -169,7 +202,9 @@ class WebViewVideoSourceService implements IVideoSourceService {
       request.throwIfNotCurrent(_activeRequest);
       rethrow;
     } finally {
-      if (didStartLoad) {
+      // v1.7.0（P1-1 条4）：池模式只在 release 时清一次页面
+      //（loadUrl 开头的那次保留——防上一轮残页干扰本轮脚本注入）。
+      if (didStartLoad && pooled == null) {
         try {
           await _webview?.unloadPage();
         } catch (e) {
@@ -177,6 +212,10 @@ class WebViewVideoSourceService implements IVideoSourceService {
           MiruLogger().w('WebViewVideoSourceService: unloadPage failed',
               error: e);
         }
+      }
+      await pooledLogSub?.cancel();
+      if (pooled != null) {
+        unawaited(WebViewPool.instance.release(pooled));
       }
       if (identical(_activeRequest, request)) {
         _activeRequest = null;
@@ -197,7 +236,8 @@ class WebViewVideoSourceService implements IVideoSourceService {
   /// 重载间隙到达的嗅探事件不丢失；超时/取消路径下广播流订阅会被
   /// 立即释放，避免悬挂订阅泄漏。
   Future<VideoParserEvent> _waitForParserEventWithReload(
-    _ResolveRequest request, {
+    _ResolveRequest request,
+    VideoWebviewController webview, {
     required Duration timeout,
     required String episodeUrl,
     required bool useLegacyParser,
@@ -213,12 +253,12 @@ class WebViewVideoSourceService implements IVideoSourceService {
     var pageLoadCompleted = false;
     StreamSubscription<String>? logSubscription;
 
-    subscription = _webview!.onVideoURLParser.listen((event) {
+    subscription = webview.onVideoURLParser.listen((event) {
       if (!completer.isCompleted) {
         completer.complete(event);
       }
     });
-    logSubscription = _webview!.onLog.listen((log) {
+    logSubscription = webview.onLog.listen((log) {
       if (log.startsWith('loading completed')) {
         pageLoadCompleted = true;
       }
@@ -261,7 +301,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
           'reloading once for a fresh session',
         );
         try {
-          await _webview!.loadUrl(
+          await webview.loadUrl(
             episodeUrl,
             useLegacyParser,
             offset: offset,
@@ -304,8 +344,12 @@ class WebViewVideoSourceService implements IVideoSourceService {
     if (!_logController.isClosed) {
       await _logController.close();
     }
-    await _webview?.dispose();
-    _webview = null;
+    // v1.7.0（P1-1）：池模式不销毁实例——归还发生在每次 resolve 的
+    // finally（release 只清页面）；dispose 只关服务自身的流。
+    if (!_usePool) {
+      await _webview?.dispose();
+      _webview = null;
+    }
   }
 }
 

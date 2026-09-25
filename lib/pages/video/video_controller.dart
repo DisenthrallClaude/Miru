@@ -14,6 +14,7 @@ import 'package:miru/services/download/download_manager.dart';
 import 'package:miru/services/video_source/services.dart';
 import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/webview/video/webview_header_intercept_policy.dart';
+import 'package:miru/services/video_source/level_win_memory.dart';
 import 'package:mobx/mobx.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
@@ -816,7 +817,9 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    _videoSourceService ??= HybridVideoSourceService();
+    // v1.7.0（P1-1/P1-6）：进程级共享单例——WebView 由常驻池提供
+    //（冷启动只付一次），解析单飞共享；页面路由进出不再销毁重建。
+    _videoSourceService ??= HybridVideoSourceService.shared;
 
     await _logSubscription?.cancel();
     _logSubscription = _videoSourceService!.onLog.listen((log) {
@@ -933,6 +936,14 @@ abstract class _VideoPageController with Store implements Disposable {
           if (!session.isActive) return;
           PlaybackTimelineRecorder.instance.recordFirstFrame();
           unawaited(_videoSourceService?.markVerified(url));
+          // v1.7.0（P1-3/§5）：胜出层级记忆——连续 N 次同层胜出的
+          // host，下次解析把该层级波次提前到 t=0（JS 站不再白等
+          // 1.5s 才启动 WebView）。
+          final timeline = PlaybackTimelineRecorder.instance.current;
+          if (timeline?.winnerHost != null) {
+            unawaited(LevelWinMemory.instance
+                .recordWin(timeline!.winnerHost, timeline.winnerLevel));
+          }
         };
         playingEpisode = VideoEpisodeSelection(
           episode: resolvedEpisode.listIndex,
@@ -1168,7 +1179,10 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     final videoSourceService = _videoSourceService;
     _videoSourceService = null;
-    if (videoSourceService != null) {
+    // v1.7.0（P1-1/P1-6）：shared 是进程级单例（WebView 池常驻），
+    // 页面退出只取消在途会话，不销毁。
+    if (videoSourceService != null &&
+        !identical(videoSourceService, HybridVideoSourceService.shared)) {
       unawaited(videoSourceService.dispose());
     }
   }

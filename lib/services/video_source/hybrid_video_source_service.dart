@@ -10,6 +10,7 @@ import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/services/video_source/cloud_video_source_resolver.dart';
 import 'package:miru/services/video_source/fast_video_source_resolver.dart';
+import 'package:miru/services/video_source/level_win_memory.dart';
 import 'package:miru/services/video_source/local_media_proxy.dart';
 import 'package:miru/services/video_source/resolve_session.dart';
 import 'package:miru/services/video_source/resolution_result_cache.dart';
@@ -41,9 +42,25 @@ import 'package:miru/utils/http_headers.dart';
 ///   预取/播放不再二次拉取同一 URL。
 class HybridVideoSourceService implements IVideoSourceService {
   HybridVideoSourceService({WebViewVideoSourceService? webviewService})
-      : _webviewService = webviewService ?? WebViewVideoSourceService();
+      : _isShared = false,
+        _webviewService = webviewService ?? WebViewVideoSourceService();
 
+  /// v1.7.0（P1-1/P1-6）：进程级单例——播放页路由进出不再销毁重建。
+  /// WebView 由常驻池提供（冷启动只付一次），解析结果单飞共享。
+  HybridVideoSourceService._pooled()
+      : _isShared = true,
+        _webviewService = WebViewVideoSourceService(usePool: true);
+
+  /// 进程级共享实例（video_controller 播放路径用）。
+  static final HybridVideoSourceService shared =
+      HybridVideoSourceService._pooled();
+
+  final bool _isShared;
   final WebViewVideoSourceService _webviewService;
+
+  /// v1.7.0（P1-6）：解析单飞——同集在途解析共享同一 Future（重复
+  /// 点击 / 投机解析与正式解析重叠 / 预取撞车）只跑一次。
+  final Map<String, Future<VideoSource>> _inflight = {};
 
   final ResolutionResultCache _cache = ResolutionResultCache.instance;
   final CloudVideoSourceResolver _cloud = CloudVideoSourceResolver.instance;
@@ -109,53 +126,98 @@ class HybridVideoSourceService implements IVideoSourceService {
     Map<String, String> playbackHeaders = const {},
     bool prefetchEnabled = true,
     bool force = false,
+  }) {
+    // v1.7.0（P1-6）：解析单飞——同集在途解析共享同一 Future
+    //（重复点击 / 投机解析与正式解析重叠 / 预取撞车只跑一次）。
+    // 被取消的共享任务（换集竞态杀掉了发起它的会话）由后来者重新
+    // 发起，绝不把「取消」传染给新调用方。
+    return _singleFlight(episodeUrl, () {
+      return _resolveWithHeadersLocked(
+        episodeUrl,
+        useLegacyParser: useLegacyParser,
+        offset: offset,
+        timeout: timeout,
+        playbackHeaders: playbackHeaders,
+        prefetchEnabled: prefetchEnabled,
+        force: force,
+      );
+    });
+  }
+
+  /// v1.7.0（P1-6）：单飞包装——在途任务直接共享；取消任务重发起
+  /// （最多一次重试，避免病态循环）。
+  Future<VideoSource> _singleFlight(
+      String episodeUrl, Future<VideoSource> Function() start) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final existing = _inflight[episodeUrl];
+      if (existing != null) {
+        try {
+          return await existing;
+        } on VideoSourceCancelledException {
+          // 共享任务被取消（换集竞态）：清理后重新发起。
+          if (identical(_inflight[episodeUrl], existing)) {
+            _inflight.remove(episodeUrl);
+          }
+          continue;
+        }
+      }
+      final future = start();
+      _inflight[episodeUrl] = future;
+      // 无人等待时也吞掉错误（防 zone 未处理异常）；等待方各自拿到
+      // 原始结果。
+      future.then<void>((_) {}, onError: (Object _) {});
+      try {
+        return await future;
+      } finally {
+        if (identical(_inflight[episodeUrl], future)) {
+          _inflight.remove(episodeUrl);
+        }
+      }
+    }
+    throw const VideoSourceCancelledException();
+  }
+
+  Future<VideoSource> _resolveWithHeadersLocked(
+    String episodeUrl, {
+    required bool useLegacyParser,
+    required int offset,
+    required Duration timeout,
+    required Map<String, String> playbackHeaders,
+    required bool prefetchEnabled,
+    required bool force,
   }) async {
     final headers = _mergedPlaybackHeaders(playbackHeaders);
     // v1.7.0（§5）：时间线 tResolveStart——进入解析服务的时刻。
     PlaybackTimelineRecorder.instance.recordResolveStart(episodeUrl);
 
-    // ---- 第 1 级：本地解析缓存 ----
+    // ---- 第 1 级：本地解析缓存（免探测直用）----
     final cached = await _cache.get(episodeUrl);
-    if (cached != null) {
-      // v1.7.0（P0-4）：免探测直用必须同时满足 verified + fresh。
-      // 旧实现只看 fresh——预取写入的未验证首候选（可能是 HTML 中转
-      // 页）在新鲜期内被免探测直用，mpv 打开 HTML 报错走兑底链，
-      // 用户看到「下一集点开就失败，要手动重试」。
-      final cachedVerified =
-          force ? false : await _cache.isVerified(episodeUrl);
-      // 刚解析成功过的直链几乎不可能已失效：跳过探测，省一个 RTT。
-      // force 时重新验证（用户显式重试就是不信这个结果）。
-      final verdict = !force &&
-              cachedVerified &&
-              await _cache.isFresh(episodeUrl, freshEntryAge)
-          ? _ProbeVerdict.alive
-          // v1.6.6 修复（B1-🔴2）：缓存命中探测带上解析层确认的
-          // referer（与 fast 层 _firstAliveCandidate 同款写法）——
-          // 否则防盗链 CDN 探测 403 判死，好缓存被误清。
-          : await _probe(cached.url, {
-              ...headers,
-              ...cached.playbackHeaders,
-            });
-      if (verdict != _ProbeVerdict.dead) {
-        MiruLogger().i(
-            'HybridResolver: cache hit for $episodeUrl (${verdict.name})');
-        // v1.7.0（§5）：胜出层级 cache（含免探测直用与探测存活两路）。
-        PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
-            level: 'cache', host: _hostOf(cached.url));
-        return _materialize(cached, offset: offset, headers: headers,
-            prefetchEnabled: prefetchEnabled);
-      }
-
-      // 明确的 4xx：直链已死（签名过期/防盗链），清除并继续走解析
-      await _cache.invalidate(episodeUrl);
-      MiruLogger()
-          .w('HybridResolver: cached url is dead, re-resolving $episodeUrl');
+    // v1.7.0（P0-4）：免探测直用必须同时满足 verified + fresh。
+    // 旧实现只看 fresh——预取写入的未验证首候选（可能是 HTML 中转
+    // 页）在新鲜期内被免探测直用，mpv 打开 HTML 报错走兑底链，
+    // 用户看到「下一集点开就失败，要手动重试」。
+    final cachedVerified = force ? false : await _cache.isVerified(episodeUrl);
+    final canSkipProbe = cached != null &&
+        !force &&
+        cachedVerified &&
+        await _cache.isFresh(episodeUrl, freshEntryAge);
+    if (canSkipProbe) {
+      MiruLogger().i('HybridResolver: fresh cache hit for $episodeUrl');
+      // v1.7.0（§5）：胜出层级 cache（免探测直用）。
+      PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+          level: 'cache', host: _hostOf(cached.url));
+      return _materialize(cached,
+          offset: offset, headers: headers, prefetchEnabled: prefetchEnabled);
     }
 
     // ---- 第 2/3/4 级：对冲竞速（阶段 2 / §2.2）----
     // 串行漏斗→波次竞速：t=0 fast（层内候选并发 3 探测）、
     // t=600ms cloud、t=1500ms webview；首个通过探测的产出者胜出，
     // 其余波次不再启动。
+    //
+    // v1.7.0（P1-3）：缓存命中但不新鲜/未验证时，「探测缓存直链」
+    // 作为 t=0 的并行子任务参与竞速（与快解同时起跑），不再在竞速前
+    // 串行等待（最坏 1.5+1.5+3s 白等）。
     //
     // v1.6.7（P-3）：硬上限 = 调用方 timeout（默认 20s，用户可调
     // 5~120s），不再内部钉死 12s。旧实现 min(timeout, 12s) 把慢 JS 站
@@ -167,19 +229,36 @@ class HybridVideoSourceService implements IVideoSourceService {
     // 取消时立即止损在途的云端 HTTP 请求（旧实现里它们会跑到自身
     // 超时，占用带宽拖慢新集解析）。
     final cloudCancel = CancelToken();
+    // v1.7.0（P1-3）：快解层的中止令牌——竞速胜出后未完成的页面
+    // 拉取立即 abort（旧实现会跑到自身超时，占带宽拖慢新集解析）。
+    final fastAbort = FastResolveAbortToken();
+    // v1.7.0（P1-3）：按 host 记住的胜出层级提前起跑——连续 3 次
+    // WebView 胜出的站，WebView 波与快解同时起跑（不再白等 1.5s）。
+    final dominant = await LevelWinMemory.instance.dominantLevelFor(episodeUrl);
+    final cloudDelay = dominant == 'cloud'
+        ? Duration.zero
+        : const Duration(milliseconds: 600);
+    final webviewDelay = dominant == 'webview'
+        ? Duration.zero
+        : const Duration(milliseconds: 1500);
     final session = ResolveSession<VideoSource>(
       waves: {
-        Duration.zero: (trace) => _runFastLevel(
-                episodeUrl, headers, force: force, trace: trace)
-            .then((r) {
-          // v1.7.0（§5）：胜出层级埋点（recordWinner 幂等，首个胜者生效）。
-          if (r != null) {
-            PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
-                level: 'fast', host: _hostOf(r.url));
-          }
-          return r;
-        }),
-        const Duration(milliseconds: 600): (trace) => _runCloudLevel(
+        Duration.zero: (trace) => _runFirstOf([
+              if (cached != null)
+                () => _probeCachedAsLevel(
+                    episodeUrl, cached, headers, trace),
+              () => _runFastLevel(episodeUrl, headers,
+                      force: force, trace: trace, abortToken: fastAbort)
+                  .then((r) {
+                // v1.7.0（§5）：胜出层级埋点（recordWinner 幂等）。
+                if (r != null) {
+                  PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+                      level: 'fast', host: _hostOf(r.url));
+                }
+                return r;
+              }),
+            ]),
+        cloudDelay: (trace) => _runCloudLevel(
               episodeUrl,
               headers,
               force: force,
@@ -192,7 +271,7 @@ class HybridVideoSourceService implements IVideoSourceService {
           }
           return r;
         }),
-        const Duration(milliseconds: 1500): (trace) => _runWebViewLevel(
+        webviewDelay: (trace) => _runWebViewLevel(
               episodeUrl,
               useLegacyParser: useLegacyParser,
               offset: offset,
@@ -212,9 +291,11 @@ class HybridVideoSourceService implements IVideoSourceService {
       // 这里止损流量与 CPU），其结果也不再有机会覆盖已写入的缓存。
       // cancel() 本身是同步 fire-and-forget，直接调用即可。
       // v1.6.9（P1-1）：云端波的在途请求一并取消。
+      // v1.7.0（P1-3）：快解波在途请求一并 abort。
       onWin: () {
         _webviewService.cancel();
         cloudCancel.cancel();
+        fastAbort.abort();
       },
       // v1.6.6 修复（B1-🟡9）：硬上限/取消抛上层异常体系（而非裸
       // TimeoutException），video_controller/download_controller 的
@@ -239,12 +320,63 @@ class HybridVideoSourceService implements IVideoSourceService {
       if (!cloudCancel.isCancelled) {
         cloudCancel.cancel();
       }
+      fastAbort.abort();
     }
   }
 
-  /// v1.6.7（P-3）：旧竞速硬上限 12s 已删除——硬上限改为调用方传入的
-  /// [timeout]（见 resolveWithHeaders 内注释）。「快站别拖太久」的
-  /// 语义由波次延迟（0ms/600ms/1500ms）天然保证。
+  /// v1.7.0（P1-3）：t=0 并行子任务——首个非空产出即胜（缓存直链探测
+  /// 与快解层同时起跑）。
+  Future<VideoSource?> _runFirstOf(
+      List<Future<VideoSource?> Function()> tasks) async {
+    if (tasks.length == 1) {
+      return tasks.first();
+    }
+    final completer = Completer<VideoSource?>();
+    var remaining = tasks.length;
+    void settle(VideoSource? result) {
+      if (completer.isCompleted) return;
+      if (result != null) {
+        completer.complete(result);
+      } else {
+        remaining--;
+        if (remaining == 0) {
+          completer.complete(null);
+        }
+      }
+    }
+
+    for (final task in tasks) {
+      unawaited(task().then(settle, onError: (Object _) => settle(null)));
+    }
+    return completer.future;
+  }
+
+  /// v1.7.0（P1-3）：缓存直链探测作为竞速子任务（未验证/不新鲜条目）。
+  /// 探测存活即以 cache 层胜出；判死则清缓存继续竞速。
+  Future<VideoSource?> _probeCachedAsLevel(String episodeUrl,
+      VideoSource cached, Map<String, String> headers, ResolveTrace trace) async {
+    // v1.6.6 修复（B1-🔴2）：缓存命中探测带上解析层确认的
+    // referer（与 fast 层 _firstAliveCandidate 同款写法）——
+    // 否则防盗链 CDN 探测 403 判死，好缓存被误清。
+    final verdict = await _probe(cached.url, {
+      ...headers,
+      ...cached.playbackHeaders,
+    });
+    if (verdict == _ProbeVerdict.dead) {
+      // 明确的 4xx：直链已死（签名过期/防盗链），清除并继续竞速。
+      await _cache.invalidate(episodeUrl);
+      trace.record(ResolveStage.fast, 'cache-dead', 'probe rejected');
+      MiruLogger()
+          .w('HybridResolver: cached url is dead, re-resolving $episodeUrl');
+      return null;
+    }
+    trace.record(ResolveStage.fast, 'cache-winner', verdict.name);
+    MiruLogger()
+        .i('HybridResolver: cache hit for $episodeUrl (${verdict.name})');
+    PlaybackTimelineRecorder.instance.recordWinner(episodeUrl,
+        level: 'cache', host: _hostOf(cached.url));
+    return cached;
+  }
 
   /// 进行中的竞速会话（cancel 用）。
   final Set<ResolveSession<VideoSource>> _activeSessions = {};
@@ -257,6 +389,7 @@ class HybridVideoSourceService implements IVideoSourceService {
     Map<String, String> headers, {
     required bool force,
     required ResolveTrace trace,
+    FastResolveAbortToken? abortToken,
   }) async {
     if (!force && await _shouldSkipLevel(episodeUrl, _fastLevelSuffix)) {
       trace.record(ResolveStage.fast, 'skipped', 'short-window failure');
@@ -270,6 +403,8 @@ class HybridVideoSourceService implements IVideoSourceService {
       //（Cloudflare 等）的播放页裸奔必 403，快解 100% 失败后白等
       // 600ms 才起云端、白等 1.5s 才进 WebView。
       extraHeaders: _cookieOnlyHeaders(headers),
+      // v1.7.0（P1-3）：竞速胜出后未完成的快解请求立即 abort。
+      abortToken: abortToken,
     );
     if (report.candidates.isEmpty) {
       trace.record(ResolveStage.fast, 'no-candidates',
@@ -422,7 +557,7 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   /// 云端失败分类 → 负缓存分级（§1.3）：
   /// 传输层/服务器 5xx → network（不写）；提取类 → extractFailed
-  /// （host 级）；429/取消 → network 语义（不写持久负缓存：配额是
+  ///（host 级）；429/取消 → network 语义（不写持久负缓存：配额是
   /// 全局的、取消是用户主动的，负缓存都帮不上忙）。
   LevelFailureKind _cloudFailureKind(String? failureClass) {
     switch (failureClass) {
@@ -450,6 +585,15 @@ class HybridVideoSourceService implements IVideoSourceService {
   Future<void> prefetchResolve(String episodeUrl,
       {int offset = 0, Map<String, String> playbackHeaders = const {}}) async {
     if (episodeUrl.isEmpty) return;
+    // v1.7.0（P1-6）：命中在途解析直接共享（投机解析与正式解析重叠、
+    // 预取撞车去重）——共享结果落地后本方法的预取/缓存路径自然短路。
+    final inflight = _inflight[episodeUrl];
+    if (inflight != null) {
+      try {
+        await inflight;
+      } catch (_) {}
+      return;
+    }
     final headers = _mergedPlaybackHeaders(playbackHeaders);
     try {
       final cached = await _cache.get(episodeUrl);
@@ -994,6 +1138,11 @@ class HybridVideoSourceService implements IVideoSourceService {
 
   @override
   Future<void> dispose() async {
+    cancel();
+    // v1.7.0（P1-1/P1-6）：进程级单例不销毁——WebView 实例由池
+    //（每次 resolve 后归还，只清页面不杀 Chromium）持有；下载等
+    // 独立创建的服务实例照旧销毁。
+    if (_isShared) return;
     await _webviewService.dispose();
   }
 }

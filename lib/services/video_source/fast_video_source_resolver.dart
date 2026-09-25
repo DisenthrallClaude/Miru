@@ -228,6 +228,7 @@ class FastVideoSourceResolver {
     String? userAgent,
     String? referer,
     Map<String, String>? extraHeaders,
+    FastResolveAbortToken? abortToken,
   }) async {
     if (episodeUrl.isEmpty) {
       return const FastResolveReport(
@@ -241,6 +242,7 @@ class FastVideoSourceResolver {
         referer ?? episodeUrl,
         0,
         extraHeaders: extraHeaders,
+        abortToken: abortToken,
       );
       final elapsed = DateTime.now().difference(started).inMilliseconds;
       MiruLogger().i('FastResolver: ${candidates.length} candidate(s) in '
@@ -288,9 +290,10 @@ class FastVideoSourceResolver {
 
   Future<List<FastCandidate>> _extractCandidates(
       String pageUrl, String ua, String referer, int depth,
-      {Map<String, String>? extraHeaders}) async {
+      {Map<String, String>? extraHeaders,
+      FastResolveAbortToken? abortToken}) async {
     final html = await _fetchText(pageUrl, ua, referer,
-        extraHeaders: extraHeaders);
+        extraHeaders: extraHeaders, abortToken: abortToken);
     if (html.isEmpty) return const [];
 
     final candidates = <FastCandidate>[];
@@ -313,6 +316,7 @@ class FastVideoSourceResolver {
           ua,
           depth,
           extraHeaders: extraHeaders,
+          abortToken: abortToken,
         );
         for (final url in hopped) {
           candidates.add(FastCandidate(
@@ -366,6 +370,7 @@ class FastVideoSourceResolver {
               extraHeaders: _sameRegistrableDomain(iframeUrl, pageUrl)
                   ? extraHeaders
                   : null,
+              abortToken: abortToken,
             );
             candidates.addAll(nested.map((c) => FastCandidate(
                   url: c.url,
@@ -466,11 +471,12 @@ class FastVideoSourceResolver {
     String ua,
     int depth, {
     Map<String, String>? extraHeaders,
+    FastResolveAbortToken? abortToken,
   }) async {
     if (from.isEmpty || depth >= 2) return const [];
     try {
       final parserAddr = await _locateParserEndpoint(pageUrl, from, ua,
-          extraHeaders: extraHeaders);
+          extraHeaders: extraHeaders, abortToken: abortToken);
       if (parserAddr == null) return const [];
       final hopUrl = _composeParserRequest(parserAddr, rawUrl);
       if (hopUrl == null) return const [];
@@ -479,7 +485,8 @@ class FastVideoSourceResolver {
           // 本站 cookie；同域解析器（站点自建）透传。
           extraHeaders: _sameRegistrableDomain(hopUrl, pageUrl)
               ? extraHeaders
-              : null);
+              : null,
+          abortToken: abortToken);
     } catch (e) {
       MiruLogger()
           .d('FastResolver: parser hop failed (from=$from)', error: e);
@@ -491,7 +498,8 @@ class FastVideoSourceResolver {
   /// v1.7.0（P0-8）：脚本与页面同域，cookie 直接透传。
   Future<String?> _locateParserEndpoint(
       String pageUrl, String from, String ua,
-      {Map<String, String>? extraHeaders}) async {
+      {Map<String, String>? extraHeaders,
+      FastResolveAbortToken? abortToken}) async {
     final base = Uri.tryParse(pageUrl);
     if (base == null) return null;
     final scriptUrl =
@@ -500,7 +508,8 @@ class FastVideoSourceResolver {
     final js = await _fetchText(scriptUrl, ua, pageUrl,
         timeout: parserScriptTimeout,
         maxBytes: 256 * 1024,
-        extraHeaders: extraHeaders);
+        extraHeaders: extraHeaders,
+        abortToken: abortToken);
     if (js.isEmpty) return null;
 
     // MacCMS 播放器 JS 的解析地址写法族：
@@ -538,11 +547,13 @@ class FastVideoSourceResolver {
   /// data.m3u8）优先，HTML 时重跑策略 1/2/3（深度 +1，上限 2）。
   Future<List<String>> _extractFromParserResponse(
       String hopUrl, String ua, String referer, int depth,
-      {Map<String, String>? extraHeaders}) async {
+      {Map<String, String>? extraHeaders,
+      FastResolveAbortToken? abortToken}) async {
     final text = await _fetchText(hopUrl, ua, referer,
         timeout: parserHopTimeout,
         accept: 'application/json,text/html,*/*;q=0.8',
-        extraHeaders: extraHeaders);
+        extraHeaders: extraHeaders,
+        abortToken: abortToken);
     if (text.isEmpty) return const [];
     final trimmed = text.trimLeft();
     if (trimmed.startsWith('{')) {
@@ -825,10 +836,15 @@ class FastVideoSourceResolver {
     int maxBytes = 1024 * 1024,
     String accept = 'text/html,application/xhtml+xml,*/*;q=0.8',
     Map<String, String>? extraHeaders,
+    FastResolveAbortToken? abortToken,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
       throw const VideoSourceNotFoundException('invalid url');
+    }
+    // v1.7.0（P1-3）：已被中止则不再发起。
+    if (abortToken?.isAborted ?? false) {
+      throw const FastResolveAbortedException();
     }
     // SharedHttpClient.io 已带 5s 连接超时；这里只包响应头与整体读取。
     final request = await SharedHttpClient.io
@@ -836,6 +852,8 @@ class FastVideoSourceResolver {
         .timeout(timeout, onTimeout: () {
       throw TimeoutException('connect: $url', timeout);
     });
+    // v1.7.0（P1-3）：登记在途请求——竞速胜出后统一 abort 止损。
+    abortToken?.track(request);
     request.headers.set(HttpHeaders.userAgentHeader, ua);
     request.headers.set(HttpHeaders.refererHeader, referer);
     request.headers.set(HttpHeaders.acceptHeader, accept);
@@ -850,8 +868,10 @@ class FastVideoSourceResolver {
       // v1.6.6 修复（B1-🟡4）：超时必须 abort 底层请求——否则「连接已
       // 建立但响应头永不到达」的源站留下永久悬挂 socket（FD 泄漏）。
       request.abort();
+      abortToken?.untrack(request);
       throw TimeoutException('head: $url', timeout);
     });
+    abortToken?.untrack(request);
     if (response.statusCode >= 400) {
       // v1.6.6 修复（B3-D13）：非 2xx 响应体不消费则连接不归还共享池
       //（maxConnectionsPerHost=6 被打满后同 host 请求假死）。
@@ -1021,4 +1041,51 @@ class FastVideoSourceResolverCandidateProbe {
   /// v1.7.0（P0-8）：同可注册域判定（cookie 二跳透传的门控）。
   static bool sameRegistrableDomain(String a, String b) =>
       FastVideoSourceResolver._sameRegistrableDomain(a, b);
+}
+
+
+/// v1.7.0（P1-3）：快解层的协作式中止令牌（CancelToken 风格）。
+///
+/// 竞速胜出后，快解层尚未完成的 HTTP 请求立即 abort（旧实现会跑到
+/// 自身超时，占用带宽拖慢新集解析）。abort 后新发起的请求直接抛
+/// [FastResolveAbortedException]，在途请求被底层 abort。
+class FastResolveAbortToken {
+  final List<HttpClientRequest> _requests = [];
+  bool _aborted = false;
+
+  bool get isAborted => _aborted;
+
+  void abort() {
+    if (_aborted) return;
+    _aborted = true;
+    final requests = List<HttpClientRequest>.of(_requests);
+    _requests.clear();
+    for (final request in requests) {
+      try {
+        request.abort();
+      } catch (_) {}
+    }
+  }
+
+  void track(HttpClientRequest request) {
+    if (_aborted) {
+      try {
+        request.abort();
+      } catch (_) {}
+      throw const FastResolveAbortedException();
+    }
+    _requests.add(request);
+  }
+
+  void untrack(HttpClientRequest request) {
+    _requests.remove(request);
+  }
+}
+
+/// v1.7.0（P1-3）：快解层被中止（竞速已胜出，止损）。
+class FastResolveAbortedException implements Exception {
+  const FastResolveAbortedException();
+
+  @override
+  String toString() => 'FastResolveAbortedException: race already won';
 }
