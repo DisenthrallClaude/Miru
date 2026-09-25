@@ -1,0 +1,31 @@
+{
+    "api": "7",
+    "type": "anime",
+    "name": "LMM",
+    "version": "2.2",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "usePost": false,
+    "useLegacyParser": false,
+    "adBlocker": false,
+    "userAgent": "",
+    "baseURL": "https://www.lmm85.com/",
+    "searchURL": "https://www.lmm85.com/vod/search.html?wd=@keyword",
+    "searchList": "//div[@id='mdym']//div[contains(@class,'video-img-box')]",
+    "searchName": ".//h6/a",
+    "searchResult": ".//h6/a",
+    "chapterRoads": "//div[contains(@class,'module-player-list')]",
+    "chapterResult": ".//a",
+    "referer": "https://www.lmm85.com/",
+    "antiCrawlerConfig": {
+        "enabled": true,
+        "captchaType": 2,
+        "captchaDetectType": 2,
+        "captchaDetectValue": "身份验证",
+        "captchaImage": "",
+        "captchaInput": "",
+        "captchaButton": "//button[contains(text(),'立即验证')]",
+        "captchaScript": ""
+    }
+}
