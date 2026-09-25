@@ -247,21 +247,21 @@ class WebViewVideoSourceService implements IVideoSourceService {
     final completer = Completer<VideoParserEvent>();
     StreamSubscription<VideoParserEvent>? subscription;
 
-    // 页面加载完成标记：onLoadStop 的日志行（「loading completed: …」）。
-    // 任意子文档（播放器 iframe 等）完成也算——主文档未完成而子文档
-    // 完成的场景几乎不存在，宁可多触发一次重载也不放过卡死握手。
+    // v1.7.0（P2-17）：页面加载完成标记改用结构化的 onPageFinished
+    // 事件（旧实现匹配日志字符串 'loading completed'，文案改动/等级
+    // 裁剪都会静默弄死重载判定）。任意子文档（播放器 iframe 等）
+    // 完成也算——主文档未完成而子文档完成的场景几乎不存在，宁可
+    // 多触发一次重载也不放过卡死握手。
     var pageLoadCompleted = false;
-    StreamSubscription<String>? logSubscription;
+    StreamSubscription<String>? pageFinishedSubscription;
 
     subscription = webview.onVideoURLParser.listen((event) {
       if (!completer.isCompleted) {
         completer.complete(event);
       }
     });
-    logSubscription = webview.onLog.listen((log) {
-      if (log.startsWith('loading completed')) {
-        pageLoadCompleted = true;
-      }
+    pageFinishedSubscription = webview.onPageFinished.listen((_) {
+      pageLoadCompleted = true;
     });
     request.cancelled.then((_) {
       if (!completer.isCompleted) {
@@ -275,7 +275,7 @@ class WebViewVideoSourceService implements IVideoSourceService {
 
     Future<void> release() async {
       await subscription?.cancel();
-      await logSubscription?.cancel();
+      await pageFinishedSubscription?.cancel();
     }
 
     return () async {

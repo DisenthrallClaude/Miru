@@ -1,19 +1,19 @@
-{
-  "name": "miru-resolver",
-  "main": "src/worker.js",
-  "compatibility_date": "2024-12-01",
-  "kv_namespaces": [
-    {
-      "binding": "RESOLVE_CACHE",
-      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
-    }
-  ],
-  "vars": {
-    "CACHE_TTL_SECONDS": "2700",
-    "ALLOWED_ORIGINS": "*",
-    "DAILY_RESOLVE_BUDGET": "4000",
-    "MIN_PER_USER": "30",
-    "MAX_PER_USER": "800",
-    "GLOBAL_DAILY_HARD_CAP": "60000"
-  }
-}
+name = "miru-resolver"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+
+[[kv_namespaces]]
+binding = "RESOLVE_CACHE"
+id = "370123c740b848ef8d14df7967b91ccd"
+
+[vars]
+CACHE_TTL_SECONDS = "2700"
+# v1.7.0（P2-14）：host 白名单——空 = 使用 worker.js 内置默认名单
+#（APP 内置规则站点）。逗号分隔自定义后缀；"*" 显式全放行（仅私有部署）。
+ALLOWED_HOSTS = ""
+# v1.7.0（P2-14）：CORS 不再默认全开——APP 无 Origin 头；网页调试需显式设置。
+ALLOWED_ORIGINS = ""
+DAILY_RESOLVE_BUDGET = "4000"
+MIN_PER_USER = "30"
+MAX_PER_USER = "800"
+GLOBAL_DAILY_HARD_CAP = "60000"

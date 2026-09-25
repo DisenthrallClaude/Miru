@@ -71,6 +71,84 @@ const MAX_PAGE_BYTES = 2 * 1024 * 1024; // 单页体积上限（超过即截断�
 function cacheTtlSeconds(env) {
   return parseInt(env.CACHE_TTL_SECONDS || '2700', 10);
 }
+
+// ---------------------------------------------------------------------------
+// v1.7.0（P2-14）：host 白名单——/resolve 不再是开放抓取器
+// ---------------------------------------------------------------------------
+// 旧实现可抓取任意 URL：任何人拿到 Worker 地址都能把它当免费代理
+// 消耗配额、充当跳板。默认白名单 = APP 内置规则站点的可注册域；
+// ALLOWED_HOSTS 覆盖（逗号分隔的后缀匹配；'*' 显式全放行，仅建议
+// 私有部署使用）。用户自建规则的站点不在名单内 → 云端层返回
+// host-not-allowed，APP 侧按 network 语义降级（不写持久负缓存），
+// WebView 兜底照常可用。
+const DEFAULT_ALLOWED_HOSTS = [
+  '7sefun.top',
+  'agedm.io',
+  'dmbus.cc',
+  'dcc3.com',
+  'bmmdmm.com',
+  'blbl.tv',
+  'dalvdm.cc',
+  'dmghg1.com',
+  'fcdm.org.cn',
+  'fqdm.cc',
+  'jcydm1.com',
+  'lblb.tv',
+  'olevod.com',
+  'chn.ci',
+];
+
+function allowedHosts(env) {
+  const raw = env.ALLOWED_HOSTS;
+  if (raw && raw.trim() === '*') return null; // 显式全放行
+  if (raw && raw.trim()) {
+    return raw.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  }
+  return DEFAULT_ALLOWED_HOSTS;
+}
+
+/** host 是否被允许（后缀匹配，含子域）。allowlist 为 null 时全放行。 */
+function isHostAllowed(env, episodeUrl) {
+  const allowlist = allowedHosts(env);
+  if (allowlist === null) return true;
+  let host;
+  try {
+    host = new URL(episodeUrl).hostname.toLowerCase();
+  } catch (_) {
+    return false;
+  }
+  return allowlist.some(
+    (suffix) => host === suffix || host.endsWith('.' + suffix),
+  );
+}
+
+/**
+ * v1.7.0（P2-14）：签名感知 TTL——直链 URL 里的过期时间戳
+ *（exp/expire/expires/e/x-oss-expires，秒或毫秒）决定 KV 条目的
+ * expirationTtl：即将过期的直链不再缓存满 45 分钟。
+ * 与 APP 侧 ttlFor 同款逻辑（'t' 键不参与：大量站点的 t 是生成时间）。
+ */
+function signatureAwareTtlSeconds(url, fallbackSeconds) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch (_) {
+    return fallbackSeconds;
+  }
+  const keys = ['exp', 'expire', 'expires', 'e', 'x-oss-expires'];
+  const now = Date.now();
+  for (const key of keys) {
+    const raw = u.searchParams.get(key);
+    if (!raw) continue;
+    const value = parseInt(raw, 10);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    const ms = value > 1e12 ? value : value * 1000;
+    const remaining = Math.floor((ms - now) / 1000);
+    if (remaining <= 0) return 60; // 已过期：仍给 60s 由探测纠偏
+    return Math.max(60, Math.min(remaining, fallbackSeconds));
+  }
+  return fallbackSeconds;
+}
 function dailyResolveBudget(env) {
   return parseInt(env.DAILY_RESOLVE_BUDGET || '4000', 10);
 }
@@ -112,12 +190,15 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS：默认全开（APP 无 Origin 头，浏览器调试也放行）
-    const cors = {
-      'Access-Control-Allow-Origin': env.ALLOWED_ORIGINS || '*',
-      'Access-Control-Allow-Methods': 'GET,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
+    // v1.7.0（P2-14）：CORS 不默认全开——APP 请求不带 Origin，
+    // 默认 '*' 只服务浏览器调试，却让 Worker 可被任意网页当代理。
+    // 需要网页调试时在 vars 里显式设置 ALLOWED_ORIGINS。
+    const cors = {};
+    if (env.ALLOWED_ORIGINS && env.ALLOWED_ORIGINS.trim()) {
+      cors['Access-Control-Allow-Origin'] = env.ALLOWED_ORIGINS.trim();
+      cors['Access-Control-Allow-Methods'] = 'GET,OPTIONS';
+      cors['Access-Control-Allow-Headers'] = 'Content-Type';
+    }
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: cors });
@@ -139,6 +220,15 @@ export default {
       const episodeUrl = url.searchParams.get('url');
       if (!episodeUrl || !/^https?:\/\//i.test(episodeUrl)) {
         return jsonResponse({ ok: false, error: 'missing or invalid "url" param' }, cors, 400);
+      }
+      // v1.7.0（P2-14）：host 白名单——不在名单内的站点明确拒绝，
+      // 不再当开放抓取器（配额耗尽/被当跳板）。
+      if (!isHostAllowed(env, episodeUrl)) {
+        return jsonResponse(
+          { ok: false, error: 'host-not-allowed', elapsedMs: 0 },
+          cors,
+          403,
+        );
       }
       const ua = url.searchParams.get('ua') || undefined;
       const referer = url.searchParams.get('referer') || undefined;
@@ -291,9 +381,15 @@ async function resolveEpisode(episodeUrl, ua, referer, uid, env, ctx) {
   // KV 命中率受损；随机写补上这条长尾。
   if (popularityOf(key) >= POPULARITY_THRESHOLD || Math.random() < 0.1) {
     const record = { ok: true, ...result, at: Date.now() };
+    // v1.7.0（P2-14）：签名感知 TTL——带过期时间戳的直链按剩余寿命
+    // 存，不再把即将失效的直链缓存满 45 分钟。
+    const ttl = signatureAwareTtlSeconds(
+      String(result.url || ''),
+      cacheTtlSeconds(env),
+    );
     ctx.waitUntil(
       env.RESOLVE_CACHE.put(key, JSON.stringify(record), {
-        expirationTtl: cacheTtlSeconds(env),
+        expirationTtl: ttl,
       }),
     );
   }

@@ -69,7 +69,10 @@ final class _OwnedPlayer {
       );
       try {
         await player.stop();
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('PlayerController: swallowed error', error: e);
+    }
     }
   }
 }
@@ -540,7 +543,10 @@ abstract class _PlayerPlaybackController with Store {
   Future<void> _cancelDebugInfo() async {
     try {
       await debug.cancel();
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('PlayerController: swallowed error', error: e);
+    }
   }
 
   /// 当前阶段应使用的 cache-secs（§1.7）。
@@ -1295,7 +1301,10 @@ abstract class _PlayerPlaybackController with Store {
       // 上一集强制过 hls 时恢复自动探测（空值 = mpv 默认自动识别）。
       try {
         await pp.setProperty('demuxer-lavf-format', '');
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('PlayerController: swallowed error', error: e);
+    }
       if (!isLocalPlayback()) {
         await Future.wait([
           // 非 HLS 直链：保留连接层重连，绝不限制 seek。
@@ -1463,7 +1472,10 @@ abstract class _PlayerPlaybackController with Store {
       } else {
         await FlutterVolumeController.setVolume(vol / 100);
       }
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('PlayerController: swallowed error', error: e);
+    }
   }
 
   @action

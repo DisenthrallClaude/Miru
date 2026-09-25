@@ -591,7 +591,10 @@ class HybridVideoSourceService implements IVideoSourceService {
     if (inflight != null) {
       try {
         await inflight;
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('HybridResolver: swallowed error', error: e);
+    }
       return;
     }
     final headers = _mergedPlaybackHeaders(playbackHeaders);
@@ -700,7 +703,10 @@ class HybridVideoSourceService implements IVideoSourceService {
         isHls: _isHls(cached),
         headers: _mergedPlaybackHeaders(playbackHeaders),
       );
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('HybridResolver: swallowed error', error: e);
+    }
   }
 
   /// 为已解析好的直链补预取（缓存命中但数据未预取时）。
@@ -952,7 +958,10 @@ class HybridVideoSourceService implements IVideoSourceService {
   Future<void> _discardResponse(HttpClientResponse response) async {
     try {
       await response.drain<void>().timeout(const Duration(seconds: 3));
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('HybridResolver: swallowed error', error: e);
+    }
   }
 
   /// HLS 探测：读全量清单（封顶 512KB）→ 校验 #EXTM3U → seed 代理。
@@ -1117,7 +1126,10 @@ class HybridVideoSourceService implements IVideoSourceService {
         bytes.addAll(chunk);
         if (bytes.length >= 8192) break; // Range 被无视：止损
       }
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('HybridResolver: swallowed error', error: e);
+    }
     return bytes;
   }
 

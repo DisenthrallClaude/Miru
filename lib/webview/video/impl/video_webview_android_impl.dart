@@ -74,6 +74,8 @@ class VideoWebviewAndroidImpl
         },
         onLoadStop: (controller, url) {
           logEventController.add('loading completed: $url');
+          // v1.7.0（P2-17）：结构化事件直通（不再让上层匹配日志文案）。
+          notifyPageFinished(url?.toString());
         },
         // 网络层嗅探（§1.5）：任何资源请求都过一遍 URL 判定。
         onLoadResource: (controller, resource) {

@@ -299,7 +299,10 @@ class LocalMediaProxy {
         headers: Map.of(headers),
         at: DateTime.now(),
       );
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
   }
 
   /// 清单 seed 是否仍新鲜（超过 [seedTtl] 的探测文本不再复用，
@@ -533,7 +536,10 @@ class LocalMediaProxy {
       try {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
     }
   }
 
@@ -633,7 +639,10 @@ class LocalMediaProxy {
         // 写了一半的分片不能当完整缓存用：删掉
         try {
           if (await segFile.exists()) await segFile.delete();
-        } catch (_) {}
+        } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
         rethrow;
       } finally {
         _writing.remove(segToken);
@@ -723,7 +732,10 @@ class LocalMediaProxy {
         // 半截分片不能当完整缓存用：删掉，下次请求重新回源
         try {
           if (await segFile.exists()) await segFile.delete();
-        } catch (_) {}
+        } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
       }
       _emitEvent(token, ProxyEventKind.timeout);
       rethrow;
@@ -783,7 +795,10 @@ class LocalMediaProxy {
       try {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
     }
   }
 
@@ -1313,7 +1328,12 @@ class LocalMediaProxy {
       headers.forEach(request.headers.set);
       final response =
           await request.close().timeout(originHeaderTimeout);
-      if (response.statusCode != 200) return null;
+      // v1.7.0（P2-9）：接受全部 2xx——部分 CDN 对 seed 回源返回
+      // 203（透明代理改写）或 206（Range 语境），旧实现只认 200，
+      // 这类源站永远拉不到清单。
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
       final builder = BytesBuilder(copy: false);
       // 清单只有几 KB，但同样要有停表：慢滴流源站不得挂死清单请求
       await for (final chunk in response.timeout(originChunkTimeout)) {
@@ -1492,7 +1512,10 @@ class LocalMediaProxy {
         final f = File('${_cacheDir!.path}/$name');
         if (await f.exists()) await f.delete();
       }
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
   }
 
   /// LRU 清理：meta 条目数超限删最旧条目；目录总大小超限删最旧文件。
@@ -1561,7 +1584,10 @@ class LocalMediaProxy {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
   }
 
   /// 清空全部代理缓存（设置页入口）。
@@ -1573,7 +1599,10 @@ class LocalMediaProxy {
         await entity.delete(recursive: true);
       }
       _rewrittenManifests.clear();
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('LocalMediaProxy: swallowed error', error: e);
+    }
   }
 
   // ---------------------------------------------------------------------------

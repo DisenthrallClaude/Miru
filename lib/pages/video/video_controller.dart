@@ -553,7 +553,9 @@ abstract class _VideoPageController with Store implements Disposable {
       if (_autoFallbackCount >= _maxAutoFallback) {
         break;
       }
-      _autoFallbackCount++;
+      // v1.7.0（P2-16）：熔断名额只在「真正切换过去并开始解析」时消耗
+      // ——旧实现先 ++ 后拉取，queryChapterRoads 抛异常/空线路的候选
+      // 也占用名额，几个坏候选就能把熔断烧光。
       final candidate = _playbackFallbacks.removeAt(0);
       // v1.6.7（P-12 精简版）：换源 toast 全局冷却 5s——换源风暴期
       //（多源连环失败）每轮一条 toast 连发刷屏，「死循环」观感的直接
@@ -592,6 +594,7 @@ abstract class _VideoPageController with Store implements Disposable {
             PluginHealthTracker.instance.recordFailure(candidate.plugin.name));
         continue;
       }
+      _autoFallbackCount++;
       _applyFallbackContext(candidate, roads);
       // 目标集号沿用当前播放位置；优先在全部线路里查找同集号，
       // 新源任何线路都没有该集时才回落到第一集。
@@ -1041,7 +1044,11 @@ abstract class _VideoPageController with Store implements Disposable {
       if (switched || session.isStale) {
         return;
       }
-      _failLoading('视频解析失败：${e.toString()}');
+      // v1.7.0（P2-10）：原始异常只写日志，用户看到的是可操作的
+      // 文案（旧实现把 TimeoutException/HandshakeException 的原始
+      // toString 直接怼在错误页上）。
+      MiruLogger().w('VideoPageController: resolve failed', error: e);
+      _failLoading(friendlyResolveError(e));
     }
   }
 
@@ -1261,29 +1268,68 @@ abstract class _VideoPageController with Store implements Disposable {
     }
   }
 
+  // v1.7.0（P2-12）：isFullscreen 是 @observable，写入统一包进
+  // @action——action 外写 observable 在并发补检查下会告警，且批量
+  // 通知的合并语义（全屏三字段联动）依赖 action 边界。
+  @action
   void enterFullScreen() {
     isFullscreen = true;
     DisplayModeService.enterFullScreen(lockOrientation: false);
   }
 
+  @action
   void exitFullScreen() {
     isFullscreen = false;
     DisplayModeService.exitFullScreen();
   }
 
+  @action
   void isDesktopFullscreen() async {
     if (isDesktop()) {
       isFullscreen = await windowManager.isFullScreen();
     }
   }
 
+  @action
   void handleOnEnterFullScreen() async {
     isFullscreen = true;
   }
 
+  @action
   void handleOnExitFullScreen() async {
     isFullscreen = false;
   }
+}
+
+/// v1.7.0（P2-10）：解析异常 → 用户可操作的文案。
+///
+/// 原始异常（TimeoutException/HandshakeException/SocketException…）
+/// 只写日志；错误页展示按错误族映射的中文指引。
+String friendlyResolveError(Object e) {
+  final text = e.toString().toLowerCase();
+  if (e is TimeoutException || text.contains('timeout') || text.contains('timed out')) {
+    return '视频解析超时，请重试或换个线路';
+  }
+  if (text.contains('handshake') || text.contains('certificate') ||
+      text.contains('ssl') || text.contains('tls')) {
+    return '与源站的安全连接失败，请稍后重试';
+  }
+  if (text.contains('403') || text.contains('forbidden')) {
+    return '源站拒绝了本次请求（可能需要验证），请重试或换个来源';
+  }
+  if (text.contains('failed hostnotfound') || text.contains('nodata') ||
+      text.contains('no address associated with hostname') ||
+      text.contains('dns')) {
+    return '无法解析源站地址，请检查网络后重试';
+  }
+  if (text.contains('connection refused') || text.contains('reset') ||
+      text.contains('network unreachable') || text.contains('broken pipe')) {
+    return '网络连接中断，请检查网络后重试';
+  }
+  if (text.contains('captcha') || text.contains('验证')) {
+    return '该源要求先完成人机验证';
+  }
+  return '视频解析失败，请重试或换个线路';
 }
 
 class OfflineRoadListSnapshot {

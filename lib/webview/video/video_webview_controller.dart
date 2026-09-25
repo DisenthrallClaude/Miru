@@ -51,6 +51,21 @@ abstract class VideoWebviewController<T> {
   Stream<VideoParserEvent> get onVideoURLParser =>
       _videoParserEventController.stream;
 
+  /// v1.7.0（P2-17）：页面加载完成事件（onLoadStop 直通）。
+  /// 取代「匹配日志字符串 'loading completed'」的脆弱判定——日志
+  /// 文案改动/等级裁剪都会静默弄死重载判定。
+  final StreamController<String> _pageFinishedController =
+      StreamController<String>.broadcast();
+
+  Stream<String> get onPageFinished => _pageFinishedController.stream;
+
+  @protected
+  void notifyPageFinished(String? url) {
+    if (!_pageFinishedController.isClosed && url != null) {
+      _pageFinishedController.add(url);
+    }
+  }
+
   @protected
   void notifyVideoSourceResolved(
     String url, {
@@ -74,6 +89,9 @@ abstract class VideoWebviewController<T> {
     }
     if (!_videoParserEventController.isClosed) {
       _videoParserEventController.close();
+    }
+    if (!_pageFinishedController.isClosed) {
+      _pageFinishedController.close();
     }
   }
 

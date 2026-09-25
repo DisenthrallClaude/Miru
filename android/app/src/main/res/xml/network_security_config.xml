@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.7.0（P2-15）：默认禁止明文流量——旧的全局
+     usesCleartextTraffic="true" 把整个应用暴露在中间人注入面前。
+     明文放行白名单：
+     - 127.0.0.1 / localhost：本地媒体代理（LocalMediaProxy 必须经
+       http 回环服务 mpv 分片/Range 代理）。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

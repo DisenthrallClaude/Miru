@@ -116,6 +116,10 @@ class FastVideoSourceResolver {
   /// MacCMS 第三方解析器 `from` 名单（1.1(b)）：命中者 player_aaaa.url
   /// 是「喂给解析器的 token/中转地址」，不是直链——直接返回会被探测
   /// 放行（unknown），最终 mpv 打开 HTML 报 Failed to open。
+  ///
+  /// v1.7.0（P2-1）：匹配从 `contains` 改为「按 [\W_] 分词后精确
+  /// 匹配」——'le'/'jx'/'qq'/'parse' 这类短词的 contains 会误伤正常的
+  /// from 名（如 'player' 含 'play'、'qqmusic' 含 'qq'）。
   static const List<String> thirdPartyParserHints = [
     'xxjx',
     'jsonjx',
@@ -190,7 +194,10 @@ class FastVideoSourceResolver {
       final box = await _hints();
       final v = box?.get(host);
       if (v is Map && v['s'] is String) return v['s'] as String;
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
     return null;
   }
 
@@ -210,7 +217,10 @@ class FastVideoSourceResolver {
         'h': (prevHits + 1).clamp(0, 99),
         't': DateTime.now().millisecondsSinceEpoch,
       });
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -395,6 +405,19 @@ class FastVideoSourceResolver {
           rawUrl: rawUrl,
           varReferer: varReferer,
         );
+        // v1.7.0（P2-1）：url 本身就是直链形态时同时加入 direct 候选
+        // ——旧实现只走二跳，解析器挂了这条明明可播的直链也丢了。
+        if (resolved != null &&
+            resolved.startsWith('http') &&
+            _isLikelyMediaUrl(resolved)) {
+          direct.add(FastCandidate(
+            url: resolved,
+            referer: varReferer.isNotEmpty ? varReferer : referer,
+            strategy: FastResolveStrategy.direct,
+            needsPositiveConfirm: false,
+            format: _formatOf(resolved),
+          ));
+        }
       } else {
         direct.add(FastCandidate(
           url: resolved,
@@ -495,9 +518,15 @@ class FastVideoSourceResolver {
   static bool _isThirdPartyParser(String? from, String url) {
     final f = (from ?? '').toLowerCase();
     if (f.isNotEmpty) {
-      for (final hint in thirdPartyParserHints) {
-        if (f.contains(hint)) return true;
+      // v1.7.0（P2-1）：分词后精确匹配（from 名按非字母数字下划线
+      // 切分；名单里的纯数字段如 '1905' 同样参与比对）。
+      final tokens =
+          f.split(RegExp(r'[\W_]+')).where((t) => t.isNotEmpty);
+      for (final token in tokens) {
+        if (thirdPartyParserHints.contains(token)) return true;
       }
+      // 完整名本身在名单里（如 'qqmusic' 这类含缀写法不再靠 contains）。
+      if (thirdPartyParserHints.contains(f)) return true;
     }
     final lower = url.toLowerCase();
     final noExt = !lower.contains('.m3u8') && !lower.contains('.mp4');
@@ -638,7 +667,10 @@ class FastVideoSourceResolver {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
     return const [];
   }
 
@@ -734,15 +766,54 @@ class FastVideoSourceResolver {
   }
 
   /// JSON 解析：先严格解析，再宽松修复（单引号/尾逗号）。
+  /// v1.7.0（P2-4）：只替换「作为定界符的单引号」——旧实现的
+  /// `replaceAll("'", '"')` 会破坏字符串值里的撇号
+  ///（如 {"title": "It's a trap"} 直接解析失败）。
+  /// 状态机：仅在「紧邻 , : [ { 之一之后」或「紧邻 , ] } 之一之前」
+  /// 的单引号视为定界符；引号内部与转义序列原样保留。
+  static String _replaceSingleQuoteDelimiters(String raw) {
+    final out = StringBuffer();
+    final n = raw.length;
+    for (var i = 0; i < n; i++) {
+      final ch = raw[i];
+      if (ch != "'") {
+        out.write(ch);
+        continue;
+      }
+      // 向前找最近的非空白字符（跳过空白）。
+      var j = i - 1;
+      while (j >= 0 && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r')) {
+        j--;
+      }
+      final prev = j >= 0 ? raw[j] : '';
+      // 向后找最近的非空白字符。
+      var k = i + 1;
+      while (k < n && (raw[k] == ' ' || raw[k] == '\t' || raw[k] == '\n' || raw[k] == '\r')) {
+        k++;
+      }
+      final next = k < n ? raw[k] : '';
+      final prevIsDelimiter = prev == ',' || prev == ':' || prev == '[' || prev == '{' || prev.isEmpty;
+      final nextIsDelimiter = next == ',' || next == ']' || next == '}' || next.isEmpty;
+      if (prevIsDelimiter || nextIsDelimiter) {
+        out.write('"');
+      } else {
+        out.write("'"); // 值内部的撇号：原样保留
+      }
+    }
+    return out.toString();
+  }
+
   static Map<String, dynamic>? _tryParseJson(String raw) {
     try {
       final v = jsonDecode(raw);
       if (v is Map<String, dynamic>) return v;
       return null;
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
     try {
-      final fixed = raw
-          .replaceAll("'", '"')
+      final fixed = _replaceSingleQuoteDelimiters(raw)
           .replaceAll(RegExp(r',(\s*[}\]])'), r'$1');
       final v = jsonDecode(fixed);
       if (v is Map<String, dynamic>) return v;
@@ -767,7 +838,10 @@ class FastVideoSourceResolver {
         try {
           final decoded = Uri.decodeFull(result);
           if (decoded.startsWith('http')) result = decoded;
-        } catch (_) {}
+        } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
       }
     } catch (_) {
       return null;
@@ -856,14 +930,18 @@ class FastVideoSourceResolver {
     final query = (uri.query).toLowerCase();
     if (query.contains('m3u8') || query.contains('mp4')) return true;
     final host = uri.host.toLowerCase();
+    // v1.7.0（P2-2）：'play' 移出弱信号——player.xxx.com/share/abc 这类
+    // 主机名太普遍；host 提示只在路径带 /hls/ 或 /vod/ 时生效。
     final hasCdnHint = host.contains('cdn') ||
         host.contains('vod') ||
-        host.contains('stream') ||
-        host.contains('play');
+        host.contains('stream');
     if (hasCdnHint) {
       final segments =
           path.split('/').where((s) => s.isNotEmpty).length;
       if (segments >= 2) return true;
+    }
+    if (path.contains('/hls/') || path.contains('/vod/')) {
+      return true;
     }
     return false;
   }
@@ -931,7 +1009,10 @@ class FastVideoSourceResolver {
   static Future<void> _discardResponse(HttpClientResponse response) async {
     try {
       await response.drain<void>().timeout(const Duration(seconds: 3));
-    } catch (_) {}
+    } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
   }
 
   /// 读取响应体（封顶 [maxBytes]）。总耗时超过 [timeout] 时取消订阅
@@ -990,7 +1071,13 @@ class FastVideoSourceResolver {
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       return trimmed;
     }
-    if (trimmed.startsWith('//')) return 'https:$trimmed';
+    // v1.7.0（P2-3）：协议相对地址跟随 base 的 scheme——固定补 https
+    // 会把 http 源站的 //cdn/x 变成 https，混布站点直接拒连。
+    if (trimmed.startsWith('//')) {
+      final b = Uri.tryParse(base);
+      final scheme = (b != null && b.scheme.isNotEmpty) ? b.scheme : 'https';
+      return '$scheme:$trimmed';
+    }
     if (trimmed.startsWith('/')) {
       final b = Uri.tryParse(base);
       if (b == null) return null;
@@ -1107,7 +1194,10 @@ class FastResolveAbortToken {
     for (final request in requests) {
       try {
         request.abort();
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
     }
   }
 
@@ -1115,7 +1205,10 @@ class FastResolveAbortToken {
     if (_aborted) {
       try {
         request.abort();
-      } catch (_) {}
+      } catch (e) {
+      // v1.7.0（P2-13）：静默吞异常零观测——线上问题无法定位。
+      MiruLogger().d('FastResolver: swallowed error', error: e);
+    }
       throw const FastResolveAbortedException();
     }
     _requests.add(request);
