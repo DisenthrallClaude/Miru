@@ -41,11 +41,11 @@ void main() {
       expect(s.contains('ValueNotifier<List<String>> webviewLogLines'), isTrue);
       expect(s.contains('ValueListenableBuilder<List<String>>'), isTrue,
           reason: '调试控制台用订阅重建，日志更新不触发整页 setState');
-      // 日志监听里不再有 setState。
+      // 日志监听里不再有 setState 调用（匹配调用语法，注释不算）。
       final listenerStart = s.indexOf('logStream.listen');
       final listenerEnd = s.indexOf('});', listenerStart);
       final listenerBody = s.substring(listenerStart, listenerEnd);
-      expect(listenerBody.contains('setState'), isFalse,
+      expect(listenerBody.contains('setState(()'), isFalse,
           reason: '每行日志一次整页 setState（含播放器子树重建几十次/秒）'
               '必须移除');
     });
