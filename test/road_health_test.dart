@@ -5,6 +5,7 @@
 // 3. probeAll 打真实回环 HttpServer：活站 ok、死端口 fail、
 //    新鲜期内不重复探测；
 // 4. 持久化往返（写入 → 新实例读取）。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -101,6 +102,75 @@ void main() {
         .bestRoadIndex(['slow', 'best'], 'pluginY', fallback: 0);
     // 两条都死：分值都为 0，保持 fallback。
     expect(best, 0);
+  });
+
+  // -----------------------------------------------------------------------
+  // v1.7.0（P1-11）
+  // -----------------------------------------------------------------------
+
+  test('P1-11: recordOutcome 真实播放结果回填（ok + ttffMs）', () async {
+    await RoadHealthTracker.instance.resetForTest();
+    await RoadHealthTracker.instance.recordOutcome(
+      'pluginP17',
+      '线路一',
+      ok: true,
+      ttffMs: 850,
+    );
+    final health = await RoadHealthTracker.instance.healthOf('pluginP17', '线路一');
+    expect(health, isNotNull);
+    expect(health!.ok, isTrue);
+    expect(health.latencyMs, 850);
+  });
+
+  test('P1-11: recordOutcome 失败回填（dead）', () async {
+    await RoadHealthTracker.instance.resetForTest();
+    await RoadHealthTracker.instance.recordOutcome('pluginP17', '线路二',
+        ok: false);
+    final health =
+        await RoadHealthTracker.instance.healthOf('pluginP17', '线路二');
+    expect(health, isNotNull);
+    expect(health!.ok, isFalse);
+  });
+
+  test('P1-11: cachedBestRoadIndex 同步读取（未加载返回 fallback）', () async {
+    await RoadHealthTracker.instance.resetForTest();
+    // 未加载（reset 后首次访问前）→ fallback，绝不等待。
+    expect(
+        RoadHealthTracker.instance
+            .cachedBestRoadIndex(['a', 'b'], 'pluginP17', fallback: 1),
+        1);
+    // 写入真实结果后（已加载）→ 同步可读。
+    await RoadHealthTracker.instance
+        .recordOutcome('pluginP17', 'a', ok: true, ttffMs: 100);
+    expect(
+        RoadHealthTracker.instance.cachedBestRoadIndex(['a', 'b'], 'pluginP17'),
+        0,
+        reason: 'a 有 ok 记录，同步分应胜出默认 0 之外的选项');
+  });
+
+  test('P1-11: 不同插件的探测互不阻塞（per-plugin 标志）', () async {
+    await RoadHealthTracker.instance.resetForTest();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final gate = Completer<void>();
+    server.listen((request) async {
+      await gate.future;
+      request.response.statusCode = HttpStatus.ok;
+      await request.response.close();
+    });
+    final roads = <(String, List<String>)>[
+      ('r0', ['http://127.0.0.1:${server.port}/x']),
+    ];
+    // pluginA 探测挂起（gate 未开）。
+    final probeA = RoadHealthTracker.instance.probeAll(roads, 'pluginA');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // pluginB 的探测不应被 pluginA 的在途探测挡掉（旧全局布尔会跳过）。
+    gate.complete();
+    await probeA;
+    await RoadHealthTracker.instance.probeAll(roads, 'pluginB');
+    final healthB =
+        await RoadHealthTracker.instance.healthOf('pluginB', 'r0');
+    expect(healthB, isNotNull, reason: 'per-plugin 探测标志互不阻塞');
+    await server.close(force: true);
   });
 
   test('新鲜期内不重复探测（源站零二次请求）', () async {

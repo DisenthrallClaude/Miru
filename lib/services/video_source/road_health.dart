@@ -65,8 +65,11 @@ class RoadHealthTracker {
   /// 单条线路探测超时（§3.3：3s）。
   static const Duration probeTimeout = Duration(seconds: 3);
 
-  /// 并发（§3.3：4 路）。
-  static const int concurrency = 4;
+  /// 并发。v1.7.0（P1-11）：4 → 2——页面级探测与首播的解析/快解打
+  /// 同一个源站（SharedHttpClient 每 host 最多 6 连接），4 路并发
+  /// 会挤占首播关键路径的连接配额；且探测已改在首帧后 5s 才启动，
+  /// 不再抢首播时序。
+  static const int concurrency = 2;
 
   /// 总预算（§3.3：4s——并发 4 时所有线路都应在预算内完成）。
   static const Duration totalBudget = Duration(seconds: 4);
@@ -75,7 +78,10 @@ class RoadHealthTracker {
   Future<void>? _loadFuture;
   Future<void>? _saveQueue;
   bool _loaded = false;
-  bool _probing = false;
+
+  /// v1.7.0（P1-11）：按 pluginName 区分的探测中标志——旧的全局
+  /// `_probing` 布尔会让另一个插件的探测被整轮跳过。
+  final Set<String> _probingPlugins = {};
 
   Future<void> _ensureLoaded() {
     return _loadFuture ??= _load();
@@ -144,7 +150,7 @@ class RoadHealthTracker {
   ) async {
     try {
       await _ensureLoaded();
-      if (_probing) return;
+      if (_probingPlugins.contains(pluginName)) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       final stale = <(String, List<String>)>[];
       for (final (name, data) in roads) {
@@ -154,11 +160,11 @@ class RoadHealthTracker {
         if (!fresh) stale.add((name, data));
       }
       if (stale.isEmpty) return;
-      _probing = true;
+      _probingPlugins.add(pluginName);
       try {
         await _probeStale(stale, pluginName);
       } finally {
-        _probing = false;
+        _probingPlugins.remove(pluginName);
       }
     } catch (error, stackTrace) {
       MiruLogger().w('[RoadHealth] probeAll failed',
@@ -246,6 +252,51 @@ class RoadHealthTracker {
     return record;
   }
 
+  /// v1.7.0（P1-11）：真实播放结果回填——解析成功且首帧出现的线路
+  /// 直接记 ok（ttffMs 即延迟），解析失败/超时的线路记 dead。
+  /// 页面级探测降级为「没有真实数据时的兜底」：真实结果的时间戳
+  /// 更新（同一 key 覆盖），探测的 fresh 判定自然让位。
+  Future<void> recordOutcome(
+    String pluginName,
+    String roadName, {
+    required bool ok,
+    int? ttffMs,
+  }) async {
+    if (roadName.isEmpty) return;
+    try {
+      await _ensureLoaded();
+      _records[_key(pluginName, roadName)] = RoadHealth(
+        ok: ok,
+        latencyMs: ttffMs ?? (ok ? 800 : probeTimeout.inMilliseconds),
+        probedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      unawaited(_persist());
+    } catch (_) {
+      // 健康回填失败零影响。
+    }
+  }
+
+  /// v1.7.0（P1-5）：同步版自动选路——读取内存中已加载的健康分，
+  /// 不做任何 IO/等待（首播绝不阻塞）；未加载时返回 fallback。
+  int cachedBestRoadIndex(
+    List<String> roadNames,
+    String pluginName, {
+    int fallback = 0,
+  }) {
+    if (!_loaded) return fallback;
+    var best = fallback;
+    var bestScore = -1;
+    for (var i = 0; i < roadNames.length; i++) {
+      final health = _healthOfSync(pluginName, roadNames[i]);
+      if (health == null) continue;
+      if (health.score > bestScore) {
+        bestScore = health.score;
+        best = i;
+      }
+    }
+    return bestScore >= 0 ? best : fallback;
+  }
+
   /// 自动选路建议（§3.3）：健康分最高的线路下标；全部未知返回
   /// [fallback]（保持既有行为——默认第 0 条）。
   Future<int> bestRoadIndex(
@@ -270,7 +321,7 @@ class RoadHealthTracker {
   /// 供测试：清空内存与持久化记录。
   Future<void> resetForTest() async {
     _records.clear();
-    _probing = false;
+    _probingPlugins.clear();
     try {
       final file = await _healthFile();
       if (await file.exists()) await file.delete();

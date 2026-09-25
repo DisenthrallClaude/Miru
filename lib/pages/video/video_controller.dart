@@ -12,6 +12,7 @@ import 'package:miru/modules/history/history_module.dart';
 import 'package:miru/repositories/download_repository.dart';
 import 'package:miru/services/download/download_manager.dart';
 import 'package:miru/services/video_source/services.dart';
+import 'package:miru/services/video_source/road_health.dart';
 import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/webview/video/webview_header_intercept_policy.dart';
 import 'package:miru/services/video_source/level_win_memory.dart';
@@ -177,6 +178,9 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 下一集预解析的延迟触发器：8 秒后若当前集仍在缓冲则顺延
   /// （不与起播/拉流抢带宽），缓冲稳定后才真正发起。
   Timer? _nextEpisodePrefetchTimer;
+
+  /// v1.7.0（P1-12）：下一集预解析的触发 reaction（首帧+缓冲余粮）。
+  ReactionDisposer? _nextEpisodePrefetchReaction;
 
   /// v1.6.9（P1-3）：预取专用会话——换集/退出播放时使旧预取回调过期。
   /// Timer 只能取消未触发的排程，已触发但还在 await Cookie/解析中的
@@ -513,6 +517,22 @@ abstract class _VideoPageController with Store implements Disposable {
   /// v1.7.0（P1-2）：最近一次成功解析的播放页 URL（嗅探 403 归因用）。
   String? _lastResolvedEpisodeUrl;
 
+  /// v1.7.0（P1-11）：当前播放线路名（健康回填用；越界返回 null）。
+  String? _currentRoadName() {
+    final road = playingEpisode?.road ?? selectedEpisode.road;
+    if (road < 0 || road >= roadList.length) return null;
+    return roadList[road].name;
+  }
+
+  /// v1.7.0（P1-11）：解析失败回填线路健康（dead）。
+  void _recordRoadFailureOutcome() {
+    final roadName = _currentRoadName();
+    if (roadName != null) {
+      unawaited(RoadHealthTracker.instance
+          .recordOutcome(currentPlugin.name, roadName, ok: false));
+    }
+  }
+
   /// 解析失败后的自动换源兜底。
   ///
   /// 按候选顺序尝试拉取备选源的线路；拉到可用线路即替换当前源上下文，
@@ -548,7 +568,17 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       final List<Road> roads;
       try {
-        roads = await candidate.plugin.queryChapterRoads(candidate.src);
+        // v1.7.0（P0-9）：兜底换源的选集拉取同样 12s 硬超时——源站
+        // 挂起时熔断名额不被无限占用，超时算一次失败继续下一候选。
+        roads = await candidate.plugin
+            .queryChapterRoads(candidate.src)
+            .timeout(const Duration(seconds: 12));
+      } on TimeoutException {
+        MiruLogger().w(
+            'VideoPageController: fallback source ${candidate.plugin.name} timed out');
+        unawaited(
+            PluginHealthTracker.instance.recordFailure(candidate.plugin.name));
+        continue;
       } catch (e) {
         MiruLogger().w(
             'VideoPageController: fallback source ${candidate.plugin.name} failed',
@@ -626,6 +656,8 @@ abstract class _VideoPageController with Store implements Disposable {
     // 才会重排），窗口内触发只会用旧线路 pageUrl 拼出错误 URL 白耗一次解析。
     _nextEpisodePrefetchTimer?.cancel();
     _nextEpisodePrefetchTimer = null;
+    _nextEpisodePrefetchReaction?.call();
+    _nextEpisodePrefetchReaction = null;
     // v1.6.9（P1-3）：连带使已触发但仍在途的预取回调过期。
     _prefetchSessions.cancel();
     playerController.danmaku.finishDanmakuLoad();
@@ -944,6 +976,17 @@ abstract class _VideoPageController with Store implements Disposable {
             unawaited(LevelWinMemory.instance
                 .recordWin(timeline!.winnerHost, timeline.winnerLevel));
           }
+          // v1.7.0（P1-11）：真实播放结果回填线路健康——首帧出现的
+          // 线路直接记 ok（ttff 即延迟），页面级探测降级为兜底。
+          final roadName = _currentRoadName();
+          if (roadName != null) {
+            unawaited(RoadHealthTracker.instance.recordOutcome(
+              currentPlugin.name,
+              roadName,
+              ok: true,
+              ttffMs: timeline?.tapToFirstFrame?.inMilliseconds,
+            ));
+          }
         };
         playingEpisode = VideoEpisodeSelection(
           episode: resolvedEpisode.listIndex,
@@ -965,6 +1008,8 @@ abstract class _VideoPageController with Store implements Disposable {
       // 翻转解析器重试已删除（阶段 0）：超时健康度在这层记录（此前由
       // 内层翻转分支负责，避免双计数——现在只有这一处）。
       unawaited(PluginHealthTracker.instance.recordFailure(currentPlugin.name));
+      // v1.7.0（P1-11）：超时也是真实失败样本，回填线路健康。
+      _recordRoadFailureOutcome();
       if (session.isStale) {
         return;
       }
@@ -982,6 +1027,8 @@ abstract class _VideoPageController with Store implements Disposable {
       MiruLogger().i('VideoPageController: video URL resolution cancelled');
     } catch (e) {
       unawaited(PluginHealthTracker.instance.recordFailure(currentPlugin.name));
+      // v1.7.0（P1-11）：解析异常回填线路健康（dead）。
+      _recordRoadFailureOutcome();
       if (session.isStale) {
         return;
       }
@@ -1035,13 +1082,20 @@ abstract class _VideoPageController with Store implements Disposable {
   ///
   /// 触发时机（v1.5.3）：8 秒后若当前集仍在缓冲则顺延重试——预取会
   /// 与本集拉流抢同一上游带宽/单 IP 并发配额，恰是最糟时刻；缓冲
-  /// 稳定（首帧已出、demuxer 有余粮）才真正发起。最多顺延三轮。
+  /// 稳定（首帧已出、demuxer 有余粮）才真正发起。
+  ///
+  /// v1.7.0（P1-12）：触发条件从「init 成功后固定 8s」改为
+  /// 「首帧已出且 buffer - position ≥ 20s」（MobX when）——旧时机
+  /// 通常还没出首帧，预取与首播关键路径抢带宽/连接配额。预解析
+  /// 走 P1-6 单飞（与投机解析共享），P0-4 语义下先探测再入缓存。
+  /// 剩余时长 < 3 分钟时预取下一集开头的分片（LocalMediaProxy）。
   void _scheduleNextEpisodePrefetch(
     EpisodeRef currentEpisode, {
     required PlayerController playerController,
-    int deferrals = 3,
   }) {
     _nextEpisodePrefetchTimer?.cancel();
+    _nextEpisodePrefetchReaction?.call();
+    _nextEpisodePrefetchReaction = null;
     final service = _videoSourceService;
     if (service == null || isOfflineMode) {
       return;
@@ -1057,49 +1111,64 @@ abstract class _VideoPageController with Store implements Disposable {
     // isStale 拦截，防止已触发的回调继续为过时的「下一集」发起解析
     // +预取（Cookie await 期间换集即触发）。
     final session = _prefetchSessions.begin();
-    _nextEpisodePrefetchTimer = Timer(const Duration(seconds: 8), () {
-      if (session.isStale) return;
-      final prefetchService = _videoSourceService;
-      if (prefetchService == null || isOfflineMode) {
-        return;
-      }
-      // 当前集仍在缓冲：预取会让本集拉流雪上加霜，顺延 8 秒重试。
-      if (playerController.playback.playerBuffering && deferrals > 0) {
-        if (!session.isStale) {
-          _scheduleNextEpisodePrefetch(
-            currentEpisode,
-            playerController: playerController,
-            deferrals: deferrals - 1,
-          );
+    // v1.7.0（P1-12）：等「首帧 + 20s 缓冲余粮」再发起。
+    _nextEpisodePrefetchReaction = when(
+      (_) =>
+          playerController.playback.hasVideoParams &&
+          playerController.playback.buffer -
+                  playerController.playback.currentPosition >=
+              const Duration(seconds: 20),
+      () {
+        if (session.isStale) return;
+        _nextEpisodePrefetchReaction?.call();
+        _nextEpisodePrefetchReaction = null;
+        final prefetchService = _videoSourceService;
+        if (prefetchService == null || isOfflineMode) {
+          return;
         }
-        return;
-      }
-      final url = normalizeEpisodeUrl(
-        currentPlugin.baseUrl,
-        nextEpisode.pageUrl,
-      );
-      final cookieHeader = _playbackCookieHeader(url);
-      unawaited(
-        cookieHeader.then((cookies) async {
-          // Cookie 请求期间用户可能已换集/退出：旧会话过期即放弃。
-          if (session.isStale) return;
-          await prefetchService.prefetchResolve(
-            url,
-            playbackHeaders: {
-              'user-agent': currentPlugin.userAgent.isEmpty
-                  ? getSessionUA()
-                  : currentPlugin.userAgent,
-              if (currentPlugin.referer.isNotEmpty)
-                'referer': currentPlugin.referer,
-              ...cookies,
-            },
-          );
-        }).catchError((_) {
-          // v1.6.6 修复：预取链路异常不再逃逸成 unhandled zone error
-          // （prefetchResolve 自身有全量 catch，这里兜住 Cookie 段）。
-        }),
-      );
-    });
+        final url = normalizeEpisodeUrl(
+          currentPlugin.baseUrl,
+          nextEpisode.pageUrl,
+        );
+        final cookieHeader = _playbackCookieHeader(url);
+        unawaited(
+          cookieHeader.then((cookies) async {
+            // Cookie 请求期间用户可能已换集/退出：旧会话过期即放弃。
+            if (session.isStale) return;
+            await prefetchService.prefetchResolve(
+              url,
+              playbackHeaders: {
+                'user-agent': currentPlugin.userAgent.isEmpty
+                    ? getSessionUA()
+                    : currentPlugin.userAgent,
+                if (currentPlugin.referer.isNotEmpty)
+                  'referer': currentPlugin.referer,
+                ...cookies,
+              },
+            );
+            // v1.7.0（P1-12）：本集临近结束（剩 < 3 分钟）时预取下一集
+            // 开头的分片——换集首帧从磁盘秒出。
+            final playback = playerController.playback;
+            final remaining = playback.playerDuration - playback.currentPosition;
+            if (!session.isStale &&
+                playback.hasVideoParams &&
+                remaining < const Duration(minutes: 3)) {
+              unawaited(service.prefetchDataForNextEpisode(url, playbackHeaders: {
+                'user-agent': currentPlugin.userAgent.isEmpty
+                    ? getSessionUA()
+                    : currentPlugin.userAgent,
+                if (currentPlugin.referer.isNotEmpty)
+                  'referer': currentPlugin.referer,
+                ...cookies,
+              }));
+            }
+          }).catchError((_) {
+            // v1.6.6 修复：预取链路异常不再逃逸成 unhandled zone error
+            // （prefetchResolve 自身有全量 catch，这里兜住 Cookie 段）。
+          }),
+        );
+      },
+    );
   }
 
   Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
@@ -1170,8 +1239,13 @@ abstract class _VideoPageController with Store implements Disposable {
     _playbackSessions.cancel();
     _danmakuSessions.cancel();
     _commentSessions.cancel();
+    // v1.7.0（P1-12）：补上预取会话与 reaction 的清理（此前遗漏，
+    // 退出播放页后仍在途的预取回调会继续解析+下载）。
+    _prefetchSessions.cancel();
     _nextEpisodePrefetchTimer?.cancel();
     _nextEpisodePrefetchTimer = null;
+    _nextEpisodePrefetchReaction?.call();
+    _nextEpisodePrefetchReaction = null;
     _logSubscription?.cancel();
     _logSubscription = null;
     if (!_logStreamController.isClosed) {

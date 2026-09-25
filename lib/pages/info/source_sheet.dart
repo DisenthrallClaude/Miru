@@ -23,7 +23,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:miru/services/plugin/captcha_verification_service.dart';
 import 'package:miru/plugins/anti_crawler_config.dart';
-import 'package:miru/utils/device.dart';
+import 'package:miru/utils/episode_url.dart';
+import 'package:miru/utils/http_headers.dart';
+import 'package:miru/pages/history/history_controller.dart';
+import 'package:miru/modules/roads/road_module.dart';
+import 'package:miru/services/plugin/plugin_cookie_manager.dart';
+import 'package:miru/services/player/playback_timeline.dart';
+import 'package:miru/services/video_source/hybrid_video_source_service.dart';
 
 class SourceSheet extends StatefulWidget {
   const SourceSheet({
@@ -408,17 +414,31 @@ class _SourceSheetState extends State<SourceSheet> {
     final cancelToken = RuleCancelToken();
     MiruDialog.showLoading(
       msg: '获取中',
-      barrierDismissible: isDesktop(),
+      // v1.7.0（P0-9）：移动端也允许取消（点遮罩/返回键）——源站挂起
+      // 时用户不再被困在「获取中」。
+      barrierDismissible: true,
       onDismiss: cancelToken.cancel,
     );
     try {
-      final roads = await plugin.queryChapterRoads(
-        searchItem.src,
-        cancelToken: cancelToken,
-      );
+      // v1.7.0（P0-9）：选集拉取 12s 硬超时——queryChapterRoads 自身
+      // 无超时，源站挂起时 loading 永不结束；超时即取消令牌止损。
+      final roads = await plugin
+          .queryChapterRoads(
+            searchItem.src,
+            cancelToken: cancelToken,
+          )
+          .timeout(const Duration(seconds: 12), onTimeout: () {
+            cancelToken.cancel();
+            throw TimeoutException(
+                '获取选集超时', const Duration(seconds: 12));
+          });
       if (roads.isEmpty) {
         throw ChapterErrorException(plugin.name);
       }
+      // v1.7.0（P1-5）：投机解析——用户点下去的这一刻就开始解析目标
+      // 集（历史进度集或第 1 集），解析与页面路由/装配并行，进播放
+      // 页直接命中在途任务（单飞）或解析缓存。
+      unawaited(_speculativelyResolveTarget(plugin, roads, searchItem));
       MiruDialog.dismiss();
       if (!mounted) return;
       context.pushNamed(
@@ -486,6 +506,61 @@ class _SourceSheetState extends State<SourceSheet> {
           ],
         ),
       );
+    }
+  }
+
+  /// v1.7.0（P1-5）：投机解析——选源面板点下即预解析目标集。
+  ///
+  /// 目标集 = 历史进度（同番剧同源）或第 1 集；时间线 tTap 前移到
+  /// 真实点击时刻。失败静默——正式解析会重做。
+  Future<void> _speculativelyResolveTarget(
+      Plugin plugin, List<Road> roads, SearchItem searchItem) async {
+    try {
+      final bangumiItem = widget.infoController.bangumiItem;
+      final history =
+          inject<HistoryController>().lastWatching(bangumiItem, plugin.name);
+      var episode = 1;
+      var road = 0;
+      if (history != null && history.road >= 0 && history.road < roads.length) {
+        final data = roads[history.road].data;
+        if (data.isNotEmpty && data.length >= history.episode) {
+          episode = history.episode;
+          road = history.road;
+        }
+      }
+      final roadData = roads[road].data;
+      if (roadData.isEmpty || episode - 1 >= roadData.length) return;
+      final pageUrl = roadData[episode - 1];
+      if (pageUrl.isEmpty) return;
+      final url = normalizeEpisodeUrl(plugin.baseUrl, pageUrl);
+      // 时间线 tTap 前移到真实点击时刻（KPI 从这里起算）。
+      PlaybackTimelineRecorder.instance.markTap(
+        label: '${searchItem.name} 第$episode集',
+        episodeUrl: url,
+      );
+      // 与 video_controller._playbackCookieHeader 同构的 Cookie 单头。
+      final uri = Uri.tryParse(url);
+      final cookies = uri == null
+          ? const <String, String>{}
+          : {
+              'cookie': (await PluginCookieManager.instance.cookieHeaderFor(
+                      plugin.name, uri))
+                  .entries
+                  .map((e) => '\${e.key}=\${e.value}')
+                  .join('; '),
+            };
+      await HybridVideoSourceService.shared.prefetchResolve(
+        url,
+        playbackHeaders: {
+          'user-agent': plugin.userAgent.isEmpty
+              ? getSessionUA()
+              : plugin.userAgent,
+          if (plugin.referer.isNotEmpty) 'referer': plugin.referer,
+          if ((cookies['cookie'] ?? '').isNotEmpty) ...cookies,
+        },
+      );
+    } catch (_) {
+      // 投机解析失败静默——正式解析会重做。
     }
   }
 

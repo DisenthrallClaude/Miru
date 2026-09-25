@@ -687,6 +687,22 @@ class HybridVideoSourceService implements IVideoSourceService {
     await _cache.invalidate(episodeUrl);
   }
 
+  /// v1.7.0（P1-12）：为「下一集」补分片预取——解析结果已在缓存时
+  /// 直接预取开头数据（换集首帧从磁盘秒出）；无缓存静默跳过
+  /// （prefetchResolve 已在正常路径预取过）。
+  Future<void> prefetchDataForNextEpisode(String episodeUrl,
+      {Map<String, String> playbackHeaders = const {}}) async {
+    try {
+      final cached = await _cache.get(episodeUrl);
+      if (cached == null) return;
+      await _proxy.prefetch(
+        cached.url,
+        isHls: _isHls(cached),
+        headers: _mergedPlaybackHeaders(playbackHeaders),
+      );
+    } catch (_) {}
+  }
+
   /// 为已解析好的直链补预取（缓存命中但数据未预取时）。
   Future<void> prefetchDataFor(VideoSource source,
       {Map<String, String> playbackHeaders = const {}}) async {

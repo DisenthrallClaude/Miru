@@ -12,6 +12,7 @@ import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/video_source/road_health.dart';
 import 'package:miru/pages/player/player_item.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:mobx/mobx.dart' as mobx;
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/player/pip_utils.dart';
 import 'package:miru/bean/appbar/drag_to_move_bar.dart' as dtb;
@@ -218,9 +219,9 @@ class _VideoPageState extends State<VideoPage>
     }
     visibleRoad = videoPageController.selectedEpisode.road;
 
-    // 阶段 3 / §3.3：进页后台摸线路健康（徽标 + 自动选路用）。
-    // fire-and-forget，永不阻塞首播。
-    _probeRoadHealth();
+    // v1.7.0（P1-11）：线路探测改在首帧后 5s——不再与首播的解析/
+    // 快解抢同一源站带宽与连接配额（SharedHttpClient 每 host 6 连接）。
+    _scheduleRoadHealthProbeAfterFirstFrame(playerController);
 
     _logSubscription = videoPageController.logStream.listen((log) {
       if (mounted) {
@@ -233,18 +234,21 @@ class _VideoPageState extends State<VideoPage>
       }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // v1.7.0（P1-5 条3）：changeEpisode 不再等 postFrame——微任务即刻
+    // 触发，首播路径再省一帧；自动选路（条2）改为同步内存分，绝不
+    // 阻塞首播。
+    scheduleMicrotask(() {
       if (!mounted) {
         return;
       }
-      // 阶段 3 / §3.3 自动选路：仅「无播放历史」时依据已持久化的健康分
-      // 换线路（有历史尊重历史；无新鲜数据时保持默认——不等待本次
-      // 探测，首播永远优先）。
+      // 阶段 3 / §3.3 + v1.7.0（P1-5 条2）：仅「无播放历史」时依据
+      // 内存中已加载的健康分换线路（同步读取，未加载/无数据保持
+      // 默认——首播永远优先）。
       if (!videoPageController.isOfflineMode &&
           widget.args is OnlineVideoPlaybackArgs &&
           videoPageController.roadList.length > 1) {
         final names = videoPageController.roadList.map((r) => r.name).toList();
-        final best = await RoadHealthTracker.instance.bestRoadIndex(
+        final best = RoadHealthTracker.instance.cachedBestRoadIndex(
           names,
           videoPageController.currentPlugin.name,
         );
@@ -256,13 +260,33 @@ class _VideoPageState extends State<VideoPage>
           );
           visibleRoad = best;
           MiruLogger().i('VideoPage: auto-selected road $best'
-              ' (${names[best]}) by health score');
+              ' (${names[best]}) by cached health score');
         }
       }
       changeEpisode(videoPageController.selectedEpisode.episode,
           currentRoad: videoPageController.selectedEpisode.road,
           offset: videoPageController.historyOffset);
     });
+  }
+
+  /// v1.7.0（P1-11）：首帧出现后延迟 5s 再探测线路健康。
+  mobx.ReactionDisposer? _roadHealthProbeReaction;
+
+  void _scheduleRoadHealthProbeAfterFirstFrame(PlayerController pc) {
+    _roadHealthProbeReaction?.call();
+    _roadHealthProbeReaction = mobx.reaction<bool>(
+      (_) => pc.playback.hasVideoParams,
+      (started) {
+        if (!started || !mounted) return;
+        _roadHealthProbeReaction?.call();
+        _roadHealthProbeReaction = null;
+        Future<void>.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            _probeRoadHealth();
+          }
+        });
+      },
+    );
   }
 
   /// 阶段 3 / §3.3：后台探测线路健康，刷新菜单徽标。
@@ -294,6 +318,8 @@ class _VideoPageState extends State<VideoPage>
 
   @override
   void dispose() {
+    _roadHealthProbeReaction?.call();
+    _roadHealthProbeReaction = null;
     try {
       windowManager.removeListener(this);
     } catch (_) {}

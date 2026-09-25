@@ -12,6 +12,7 @@ import 'package:miru/bean/widget/embedded_native_control_area.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/pages/info/info_controller.dart';
 import 'package:miru/webview/video/webview_pool.dart';
+import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/bean/card/bangumi_info_card.dart';
 import 'package:miru/pages/info/source_sheet.dart';
 import 'package:miru/plugins/plugins_controller.dart';
@@ -239,6 +240,11 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
     // v1.7.0（P1-1）：进详情页即预热常驻 WebView 池——从详情页点进
     // 播放页的概率极高，Chromium 提前就绪（幂等，已预热则零开销）。
     unawaited(WebViewPool.instance.preheat());
+    // v1.7.0（P1-5 条4）：对启用插件的 baseUrl 做 DNS 预解析 + TLS
+    // 预连接（HEAD，1s 超时，失败忽略）——后续搜索/选集/解析请求
+    // 复用共享池连接（SharedHttpClient），省去冷握手。
+    unawaited(_preConnectPluginHosts());
+
     // 并行预热吐槽/角色/制作人员：进入详情页即拉取，切 Tab 时数据已就绪。
     // 各加载函数自带 isLoading 门闸，后续 Tab 切换不会重复请求。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -247,6 +253,29 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
       unawaited(loadCharacters());
       unawaited(loadStaff());
     });
+  }
+
+  /// v1.7.0（P1-5 条4）：插件站点预连接（DNS + TLS 握手提前）。
+  Future<void> _preConnectPluginHosts() async {
+    try {
+      final plugins = inject<PluginsController>().pluginList;
+      for (final plugin in plugins) {
+        final base = plugin.baseUrl;
+        if (base.isEmpty || !base.startsWith('http')) continue;
+        final uri = Uri.tryParse(base);
+        if (uri == null) continue;
+        unawaited(() async {
+          try {
+            final request = await SharedHttpClient.io
+                .openUrl('HEAD', uri)
+                .timeout(const Duration(seconds: 1));
+            await request.close().timeout(const Duration(seconds: 1));
+          } catch (_) {
+            // 预连接失败忽略（站点慢/不可达不影响正常流程）。
+          }
+        }());
+      }
+    } catch (_) {}
   }
 
   void onInfoTabChanged() {
