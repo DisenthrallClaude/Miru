@@ -1,4 +1,7 @@
-// v1.6.8（R-1）回归锁：hybrid 层 _materialize 的播放头合并方向。
+// v1.6.8（R-1）+ v1.7.0（P0-6）回归锁：hybrid 层 _materialize 的播放头合并。
+//
+// P0-6（v1.7.0 语义更新）：cookie 优先级反转——插件侧
+//（PluginCookieManager 实时值）优先；缓存不再持久化 cookie。
 //
 // 病灶（reviews/v168-agent-P2.md R-1）：`{...source.playbackHeaders,
 // ...headers}`（插件头在后展开获胜）——嗅探捕获的 CDN 真实 referer/
@@ -47,7 +50,7 @@ void main() {
     await GStorage.init();
   });
 
-  test('R-1: 插件 referer/cookie 与嗅探值冲突时，嗅探值必须获胜', () async {
+  test('R-1+P0-6: referer 冲突时嗅探值获胜；cookie 来自插件实时值', () async {
     final cache = ResolutionResultCache.instance;
     // 模拟 webview 波胜出后写入缓存的嗅探结果：
     // playbackHeaders = 嗅探捕获的 CDN 侧真实 referer/cookie。
@@ -77,8 +80,15 @@ void main() {
       );
       expect(result.playbackHeaders['referer'], 'https://cdn.example.com/',
           reason: '嗅探 referer 被插件 referer 覆盖（R-1 病灶回归）');
-      expect(result.playbackHeaders['cookie'], 'cdn_sess=sniffed',
-          reason: '嗅探 cookie 被插件 cookie 覆盖（R-1 病灶回归）');
+      // P0-6：缓存里的 cookie 已被过滤（不持久化），播放 cookie
+      // 完全来自插件侧实时值——用户重过 Cloudflare 后新 cf_clearance
+      // 在插件头里，绝不能被缓存旧值覆盖（403 换源循环根因）。
+      expect(result.playbackHeaders['cookie'], 'page_cookie=plugin',
+          reason: 'P0-6：cookie 以插件实时值为准（缓存值不落盘）');
+      // 缓存条目本身不含 cookie。
+      final cached = await cache.get(episodeUrl);
+      expect(cached!.playbackHeaders.containsKey('cookie'), isFalse,
+          reason: 'P0-6：缓存不得持久化 cookie');
     } finally {
       await cache.invalidate(episodeUrl);
     }

@@ -13,6 +13,7 @@ import 'package:miru/repositories/download_repository.dart';
 import 'package:miru/services/download/download_manager.dart';
 import 'package:miru/services/video_source/services.dart';
 import 'package:miru/services/player/playback_timeline.dart';
+import 'package:miru/webview/video/webview_header_intercept_policy.dart';
 import 'package:mobx/mobx.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:window_manager/window_manager.dart';
@@ -495,7 +496,21 @@ abstract class _VideoPageController with Store implements Disposable {
   /// openMedia 世代号守卫保证通知只落在发起它的那一集。
   void _onPlaybackDead(String message) {
     _failLoading(message);
+    // v1.7.0（P1-2）：嗅探胜出却播放失败——大概率是播放头缺失
+    //（shouldInterceptRequest 关闭后 Referer/Cookie 捕不到）。为该
+    // 站点开启请求头拦截记忆，下次嗅探恢复捕获。
+    final timeline = PlaybackTimelineRecorder.instance.current;
+    if (timeline?.winnerLevel == 'webview') {
+      final episodeUrl = _lastResolvedEpisodeUrl;
+      if (episodeUrl != null && episodeUrl.isNotEmpty) {
+        unawaited(WebviewHeaderInterceptPolicy.instance
+            .recordInterceptNeeded(episodeUrl));
+      }
+    }
   }
+
+  /// v1.7.0（P1-2）：最近一次成功解析的播放页 URL（嗅探 403 归因用）。
+  String? _lastResolvedEpisodeUrl;
 
   /// 解析失败后的自动换源兜底。
   ///
@@ -843,6 +858,8 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       // 解析成功即记一次健康样本：连续失败的源会在选源界面被排后。
       unawaited(PluginHealthTracker.instance.recordSuccess(currentPlugin.name));
+      // v1.7.0（P1-2）：记录本集 URL（播放失败时归因嗅探层）。
+      _lastResolvedEpisodeUrl = url;
       _finishLoading();
       MiruLogger().i('VideoPageController: resolved video URL: ${source.url}');
 

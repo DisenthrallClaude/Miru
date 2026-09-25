@@ -218,10 +218,16 @@ class FastVideoSourceResolver {
 
   /// 解析播放页，返回候选报告（≤4 个候选、去重、按优先级排序 +
   /// 失败分级）。失败/无候选返回空候选 + 失败原因（不抛异常）。
+  ///
+  /// v1.7.0（P0-8）：[extraHeaders] 携带插件 Cookie（PluginCookieManager
+  /// 的实时值）——Cloudflare/验证类站点的播放页裸奔必 403，快解层
+  /// 100% 失败后白等 1.5s 才进 WebView。iframe 二跳与解析器二跳仅在
+  /// 同一可注册域下透传 cookie（跨域泄漏 cookie 既无效又危险）。
   Future<FastResolveReport> resolveCandidates(
     String episodeUrl, {
     String? userAgent,
     String? referer,
+    Map<String, String>? extraHeaders,
   }) async {
     if (episodeUrl.isEmpty) {
       return const FastResolveReport(
@@ -234,6 +240,7 @@ class FastVideoSourceResolver {
         userAgent ?? _defaultUA,
         referer ?? episodeUrl,
         0,
+        extraHeaders: extraHeaders,
       );
       final elapsed = DateTime.now().difference(started).inMilliseconds;
       MiruLogger().i('FastResolver: ${candidates.length} candidate(s) in '
@@ -280,8 +287,10 @@ class FastVideoSourceResolver {
   // ---------------------------------------------------------------------------
 
   Future<List<FastCandidate>> _extractCandidates(
-      String pageUrl, String ua, String referer, int depth) async {
-    final html = await _fetchText(pageUrl, ua, referer);
+      String pageUrl, String ua, String referer, int depth,
+      {Map<String, String>? extraHeaders}) async {
+    final html = await _fetchText(pageUrl, ua, referer,
+        extraHeaders: extraHeaders);
     if (html.isEmpty) return const [];
 
     final candidates = <FastCandidate>[];
@@ -303,6 +312,7 @@ class FastVideoSourceResolver {
           rawUrl,
           ua,
           depth,
+          extraHeaders: extraHeaders,
         );
         for (final url in hopped) {
           candidates.add(FastCandidate(
@@ -351,6 +361,11 @@ class FastVideoSourceResolver {
               ua,
               pageUrl,
               depth + 1,
+              // v1.7.0（P0-8）：cookie 仅在同一可注册域下随 iframe
+              // 二跳透传（跨域 iframe 拿站点 cookie 无效且属泄漏）。
+              extraHeaders: _sameRegistrableDomain(iframeUrl, pageUrl)
+                  ? extraHeaders
+                  : null,
             );
             candidates.addAll(nested.map((c) => FastCandidate(
                   url: c.url,
@@ -449,15 +464,22 @@ class FastVideoSourceResolver {
     String from,
     String rawUrl,
     String ua,
-    int depth,
-  ) async {
+    int depth, {
+    Map<String, String>? extraHeaders,
+  }) async {
     if (from.isEmpty || depth >= 2) return const [];
     try {
-      final parserAddr = await _locateParserEndpoint(pageUrl, from, ua);
+      final parserAddr = await _locateParserEndpoint(pageUrl, from, ua,
+          extraHeaders: extraHeaders);
       if (parserAddr == null) return const [];
       final hopUrl = _composeParserRequest(parserAddr, rawUrl);
       if (hopUrl == null) return const [];
-      return await _extractFromParserResponse(hopUrl, ua, pageUrl, depth);
+      return await _extractFromParserResponse(hopUrl, ua, pageUrl, depth,
+          // v1.7.0（P0-8）：跨域解析器（from 名下第三方 jx 站）不带
+          // 本站 cookie；同域解析器（站点自建）透传。
+          extraHeaders: _sameRegistrableDomain(hopUrl, pageUrl)
+              ? extraHeaders
+              : null);
     } catch (e) {
       MiruLogger()
           .d('FastResolver: parser hop failed (from=$from)', error: e);
@@ -466,15 +488,19 @@ class FastVideoSourceResolver {
   }
 
   /// 拉取 `/static/player/{from}.js`（≤256KB），正则提取解析地址。
+  /// v1.7.0（P0-8）：脚本与页面同域，cookie 直接透传。
   Future<String?> _locateParserEndpoint(
-      String pageUrl, String from, String ua) async {
+      String pageUrl, String from, String ua,
+      {Map<String, String>? extraHeaders}) async {
     final base = Uri.tryParse(pageUrl);
     if (base == null) return null;
     final scriptUrl =
         '${base.scheme}://${base.host}${base.port == 80 || base.port == 443 ? '' : ':${base.port}'}'
         '/static/player/$from.js';
     final js = await _fetchText(scriptUrl, ua, pageUrl,
-        timeout: parserScriptTimeout, maxBytes: 256 * 1024);
+        timeout: parserScriptTimeout,
+        maxBytes: 256 * 1024,
+        extraHeaders: extraHeaders);
     if (js.isEmpty) return null;
 
     // MacCMS 播放器 JS 的解析地址写法族：
@@ -511,10 +537,12 @@ class FastVideoSourceResolver {
   /// 请求解析接口并从响应提取直链：JSON（url|m3u8|link|data.url|
   /// data.m3u8）优先，HTML 时重跑策略 1/2/3（深度 +1，上限 2）。
   Future<List<String>> _extractFromParserResponse(
-      String hopUrl, String ua, String referer, int depth) async {
+      String hopUrl, String ua, String referer, int depth,
+      {Map<String, String>? extraHeaders}) async {
     final text = await _fetchText(hopUrl, ua, referer,
         timeout: parserHopTimeout,
-        accept: 'application/json,text/html,*/*;q=0.8');
+        accept: 'application/json,text/html,*/*;q=0.8',
+        extraHeaders: extraHeaders);
     if (text.isEmpty) return const [];
     final trimmed = text.trimLeft();
     if (trimmed.startsWith('{')) {
@@ -796,6 +824,7 @@ class FastVideoSourceResolver {
     Duration timeout = pageTimeout,
     int maxBytes = 1024 * 1024,
     String accept = 'text/html,application/xhtml+xml,*/*;q=0.8',
+    Map<String, String>? extraHeaders,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
@@ -811,6 +840,12 @@ class FastVideoSourceResolver {
     request.headers.set(HttpHeaders.refererHeader, referer);
     request.headers.set(HttpHeaders.acceptHeader, accept);
     request.headers.set(HttpHeaders.acceptLanguageHeader, 'zh-CN,zh;q=0.9');
+    // v1.7.0（P0-8）：插件 Cookie 透传——WebView 会话里有 cf_clearance
+    // 而 Dart HttpClient 裸奔，是验证类站点快解 100% 失败的主因。
+    final cookie = extraHeaders?['cookie'];
+    if (cookie != null && cookie.isNotEmpty) {
+      request.headers.set(HttpHeaders.cookieHeader, cookie);
+    }
     final response = await request.close().timeout(timeout, onTimeout: () {
       // v1.6.6 修复（B1-🟡4）：超时必须 abort 底层请求——否则「连接已
       // 建立但响应头永不到达」的源站留下永久悬挂 socket（FD 泄漏）。
@@ -918,6 +953,22 @@ class FastVideoSourceResolver {
     return Uri.tryParse(url)?.host ?? url;
   }
 
+  /// v1.7.0（P0-8）：两个 URL 是否同可注册域（末两段；朴素启发式，
+  /// .com.cn 等二级后缀按第三段算——只影响 cookie 透传的保守性）。
+  /// iframe/解析器二跳仅在同域下透传 cookie，跨域不泄漏。
+  static bool _sameRegistrableDomain(String a, String b) {
+    final ha = Uri.tryParse(a)?.host.toLowerCase();
+    final hb = Uri.tryParse(b)?.host.toLowerCase();
+    if (ha == null || hb == null || ha.isEmpty || hb.isEmpty) return false;
+    if (ha == hb) return true;
+    String reg(String h) {
+      final parts = h.split('.');
+      return parts.length <= 2 ? h : parts.sublist(parts.length - 2).join('.');
+    }
+
+    return reg(ha) == reg(hb);
+  }
+
   static bool isAdUrl(String url) {
     final lower = url.toLowerCase();
     for (final hint in _adHostHints) {
@@ -966,4 +1017,8 @@ class FastVideoSourceResolverCandidateProbe {
       FastVideoSourceResolver._extractFromParserJson(text);
 
   static bool isAdPath(String url) => FastVideoSourceResolver._isAdPath(url);
+
+  /// v1.7.0（P0-8）：同可注册域判定（cookie 二跳透传的门控）。
+  static bool sameRegistrableDomain(String a, String b) =>
+      FastVideoSourceResolver._sameRegistrableDomain(a, b);
 }

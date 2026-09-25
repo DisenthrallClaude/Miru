@@ -10,6 +10,7 @@ import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
 import 'package:miru/utils/media.dart';
 import 'package:miru/utils/http_headers.dart';
 import 'package:miru/webview/video/sniffed_url_filter.dart';
+import 'package:miru/webview/video/webview_header_intercept_policy.dart';
 
 /// Android WebView 视频嗅探实现（阶段 0 / §1.5 全面升级）。
 ///
@@ -36,6 +37,22 @@ class VideoWebviewAndroidImpl
   /// 间隙里进入了新一轮 loadUrl」的竞态，防止迟到的 pauseTimers
   /// 冻死新页面的 JS 定时器。
   int _loadSeq = 0;
+
+  /// v1.7.0（P1-2）：本轮是否开启 shouldInterceptRequest（按 host
+  /// 记忆：嗅探成功但播放 403 的站点才开）。
+  bool _useIntercept = false;
+
+  /// v1.7.0（P1-13）：嗅探候选收集窗口（首个命中后 400ms 内收集，
+  /// 打分选优——片头广告的 m3u8/mp4 常比正片先到）。
+  Timer? _sniffCollectTimer;
+  final List<_SniffCandidate> _sniffCandidates = [];
+
+  /// v1.7.0（P1-13）：当前正在嗅探的页面 URL（同域加分用）。
+  String? _sniffPageUrl;
+
+  /// v1.7.0（P1-13）：嗅探候选项（URL + 网络层捕获的请求头 + 发起
+  /// 请求的文档 URL（JS 上报，作为无拦截时的 Referer 来源））。
+  static const Duration sniffCollectWindow = Duration(milliseconds: 400);
 
   // ---------------------------------------------------------------------------
   // 初始化
@@ -77,7 +94,14 @@ class VideoWebviewAndroidImpl
   }
 
   /// WebView 设置（§1.5 全套）。
-  InAppWebViewSettings _buildSettings() {
+  ///
+  /// v1.7.0（P1-2）：[useIntercept] 默认 false——shouldInterceptRequest
+  /// 在 Android 上同步阻塞 WebView IO 线程等 Dart 回调，页面每个
+  /// 请求都过一次平台通道，UI isolate 一忙全部排队（JS 站嗅探慢的
+  /// 主因之一）。默认走 onLoadResource（异步不阻塞）+ JS
+  /// PerformanceObserver（JS 侧先过滤）；仅「嗅探成功但播放 403」
+  /// 的 host（WebviewHeaderInterceptPolicy 记忆）重新打开。
+  InAppWebViewSettings _buildSettings({bool useIntercept = false}) {
     return InAppWebViewSettings(
       // 与 mpv 播放共用会话 UA：解析与播放必须同源，否则防盗链 CDN 拒播
       userAgent: getSessionUA(),
@@ -95,7 +119,9 @@ class VideoWebviewAndroidImpl
       blockNetworkImage: true,
       loadsImagesAutomatically: false,
       useOnLoadResource: true,
-      useShouldInterceptRequest: true,
+      // v1.7.0（P1-2）：默认关闭（同步阻塞 WebView IO 线程）；仅
+      // 播放 403 记忆中的 host 在 loadUrl 时经 setSettings 打开。
+      useShouldInterceptRequest: useIntercept,
       allowsInlineMediaPlayback: true,
       thirdPartyCookiesEnabled: true,
       domStorageEnabled: true,
@@ -161,6 +187,20 @@ class VideoWebviewAndroidImpl
     // v1.6.7（P-20）：新的一轮加载从入口即生效——在途的旧冻结任务
     // 看到 seq 不一致会自行放弃，不会把新页面冻死。
     _loadSeq++;
+    // v1.7.0（P1-13）：新的一轮嗅探——旧候选与收集窗口全部作废。
+    _cancelSniffCollection();
+    _sniffPageUrl = url;
+    // v1.7.0（P1-2）：按 host 记忆决定是否开启请求头拦截
+    //（「嗅探成功但播放 403」的站点需要从拦截层捕获 Referer/Cookie）。
+    try {
+      final intercept =
+          await WebviewHeaderInterceptPolicy.instance.shouldIntercept(url);
+      if (intercept != _useIntercept && webviewController != null) {
+        _useIntercept = intercept;
+        await webviewController!.setSettings(
+            settings: _buildSettings(useIntercept: intercept));
+      }
+    } catch (_) {}
     await unloadPage();
     // 两套脚本一次性全量注入（§1.5）——不再按 useLegacyParser 翻换注入。
     // 首次注入后常驻；useLegacyParser 仅影响 JSBridgeDebug(iframe) 结果
@@ -505,6 +545,46 @@ class VideoWebviewAndroidImpl
       forMainFrameOnly: false,
     ));
 
+    // ---- 4c) PerformanceObserver 媒体嗅探（v1.7.0 P1-2）----
+    // shouldInterceptRequest 默认关闭后，XHR/fetch 发起的媒体请求
+    // onLoadResource 可能拿不到；用 PerformanceObserver 的 resource
+    // 条目在 JS 侧捕获（buffered:true 含历史条目），JS 先按扩展名
+    // 过滤再上报（大幅减少平台通道流量）。跨域 iframe 同样注入
+    //（forMainFrameOnly:false），各自上报自己的 location.href 作为
+    // Referer 来源。
+    const String perfObserverSniffScript = """
+      (function() {
+        if (window.__miruPerfObsInstalled) return;
+        window.__miruPerfObsInstalled = true;
+        try {
+          var mediaRe = /(?:\\.m3u8|\\.mp4|\\.flv)(?:\\?|#|\$)/i;
+          var report = function(url) {
+            try {
+              if (!url) return;
+              if (url.indexOf('127.0.0.1') !== -1) return;
+              if (url.indexOf('//') === 0) url = 'https:' + url;
+              if (!/^https?:/i.test(url)) return;
+              if (!mediaRe.test(url)) return;
+              window.flutter_inappwebview.callHandler(
+                  'MiruPerfSniff', url, window.location.href);
+            } catch (e) {}
+          };
+          var obs = new PerformanceObserver(function(list) {
+            var entries = list.getEntries();
+            for (var i = 0; i < entries.length; i++) {
+              report(entries[i].name);
+            }
+          });
+          obs.observe({ type: 'resource', buffered: true });
+        } catch (e) {}
+      })();
+    """;
+    scripts.add(UserScript(
+      source: perfObserverSniffScript,
+      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      forMainFrameOnly: false,
+    ));
+
     return scripts;
   }
 
@@ -562,6 +642,8 @@ class VideoWebviewAndroidImpl
               !isVideoSourceLoaded &&
               !SniffedUrlFilter.isAdUrl(message)) {
             logEventController.add('Loading video source: $message');
+            // v1.7.0（P1-13）：桥接直报优先——取消收集窗口，丢弃候选。
+            _cancelSniffCollection();
             isIframeLoaded = true;
             isVideoSourceLoaded = true;
             _freezeAfterSniffSuccess();
@@ -575,16 +657,31 @@ class VideoWebviewAndroidImpl
             );
           }
         });
+
+    // v1.7.0（P1-2）：JS 侧 PerformanceObserver 上报的媒体请求
+    //（JS 先按扩展名过滤，只上报命中 \.(m3u8|mp4|flv) 的 URL——
+    // 跨域 iframe 同样注入，带上各自的 document.location.href 作
+    // Referer 来源）。
+    logEventController.add('Adding MiruPerfSniff handler');
+    webviewController?.addJavaScriptHandler(
+        handlerName: 'MiruPerfSniff',
+        callback: (args) {
+          if (args.length < 2) return;
+          final url = args[0].toString();
+          final docUrl = args[1].toString();
+          _maybeSniffNetworkUrl(url, documentUrl: docUrl);
+        });
   }
 
   // ---------------------------------------------------------------------------
   // 网络层嗅探（§1.5，Dart 侧）
   // ---------------------------------------------------------------------------
 
-  /// onLoadResource / shouldInterceptRequest 共用的 URL 判定：
-  /// 路径带视频扩展、或 playlist 型 m3u8 路径、或 query 含 .m3u8；
-  /// 排除广告/统计域。命中即上报（带网络层捕获的请求头）。
-  void _maybeSniffNetworkUrl(String url, {Map<String, String>? requestHeaders}) {
+  /// onLoadResource / shouldInterceptRequest / JS PerformanceObserver
+  /// 共用的 URL 判定：路径带视频扩展、或 playlist 型 m3u8 路径、或
+  /// query 含 .m3u8；排除广告/统计域。命中进入收集窗口（P1-13）。
+  void _maybeSniffNetworkUrl(String url,
+      {Map<String, String>? requestHeaders, String? documentUrl}) {
     if (isVideoSourceLoaded) return;
     if (url.isEmpty || !url.startsWith('http')) return;
     if (SniffedUrlFilter.isAdUrl(url)) return;
@@ -610,27 +707,196 @@ class VideoWebviewAndroidImpl
     }
 
     logEventController.add('Network sniff: $reportedUrl');
+    // v1.7.0（P1-2）：播放头收集——拦截模式下取请求头（P0-7 分离
+    // Referer/Origin）；非拦截模式用 JS 上报的文档 URL 作 Referer。
+    final headers = collectPlaybackHeaders(
+      requestHeaders: requestHeaders,
+      documentUrl: documentUrl,
+    );
+    _recordSniffCandidate(_SniffCandidate(
+      url: reportedUrl,
+      headers: headers,
+      documentUrl: documentUrl,
+    ));
+  }
+
+  /// v1.7.0（P1-13）：候选入队；首个命中开 400ms 收集窗口，窗口关闭
+  /// 时打分选优上报——「第一个命中就上报并冻结」会让片头广告抢先。
+  void _recordSniffCandidate(_SniffCandidate candidate) {
+    if (isVideoSourceLoaded) return;
+    // 去重（同 URL 只留首个——首个的头信息最可靠）。
+    if (_sniffCandidates.any((c) => c.url == candidate.url)) return;
+    _sniffCandidates.add(candidate);
+    // 首个命中：桥接超时判定不再等待（isIframeLoaded 置位），
+    // 但上报延后到窗口关闭。
     isIframeLoaded = true;
+    _sniffCollectTimer ??= Timer(sniffCollectWindow, () {
+      _sniffCollectTimer = null;
+      _flushSniffCandidates();
+    });
+  }
+
+  /// 窗口关闭：选优上报并冻结。
+  void _flushSniffCandidates() {
+    if (isVideoSourceLoaded || _sniffCandidates.isEmpty) return;
+    final best = pickBestSniffCandidate(
+      _sniffCandidates.map((c) => c.url).toList(growable: false),
+      pageUrl: _sniffPageUrl,
+    );
+    final candidate = _sniffCandidates.firstWhere(
+      (c) => c.url == best,
+      orElse: () => _sniffCandidates.first,
+    );
+    _sniffCandidates.clear();
     isVideoSourceLoaded = true;
     _freezeAfterSniffSuccess();
+    unawaited(_completeSniffNotify(candidate));
+  }
 
-    // 网络层捕获的请求头：Referer 是防盗链的关键（源站要求播放请求带
-    // 同一 Referer），Origin/Cookie 备用。键名统一小写。
-    final headers = <String, String>{};
-    requestHeaders?.forEach((k, v) {
-      final lower = k.toLowerCase();
-      if (lower == 'referer' || lower == 'origin' || lower == 'cookie') {
-        headers[lower == 'origin' ? 'referer' : lower] = v;
-      }
-    });
-
+  /// v1.7.0（P1-2）：上报前补齐 Cookie——非拦截模式请求头里没有
+  /// cookie，从 CookieManager 按媒体 URL 取一次（冻结跳转 about:blank
+  /// 不影响 cookie 存储）。测试环境（无 WebView 平台实现）静默跳过。
+  Future<void> _completeSniffNotify(_SniffCandidate candidate) async {
+    final headers = Map<String, String>.of(candidate.headers);
+    if (!headers.containsKey('cookie')) {
+      try {
+        final cookies = await PlatformCookieManager(
+                PlatformCookieManagerCreationParams())
+            .getCookies(url: WebUri(candidate.url));
+        final cookieHeader = cookies
+            .map((c) => '${c.name}=${c.value}')
+            .join('; ');
+        if (cookieHeader.isNotEmpty) {
+          headers['cookie'] = cookieHeader;
+        }
+      } catch (_) {}
+    }
     notifyVideoSourceResolved(
-      reportedUrl,
-      format: _isHlsUrl(reportedUrl)
+      candidate.url,
+      format: _isHlsUrl(candidate.url)
           ? VideoSourceFormat.hls
           : VideoSourceFormat.auto,
       headers: headers.isEmpty ? null : headers,
     );
+  }
+
+  /// 取消收集窗口（新 loadUrl / 桥接直报 / dispose）。
+  void _cancelSniffCollection() {
+    _sniffCollectTimer?.cancel();
+    _sniffCollectTimer = null;
+    _sniffCandidates.clear();
+  }
+
+  /// v1.7.0（P0-7）：网络层请求头 → 播放头的收集规则（纯函数，
+  /// 遍历顺序无关）。
+  ///
+  /// - Referer 优先（带路径的真实来源）；
+  /// - 无 Referer 时用 `Origin + '/'` 兜底（只有 scheme+host，好过
+  ///   没有）；
+  /// - Origin 另以 `origin` 键透传给 mpv；
+  /// - 非拦截模式（P1-2）：JS 上报的 [documentUrl]（发起请求的文档
+  ///   URL）作为 Referer；
+  /// - Cookie 拦截模式捕获；非拦截模式由 [_completeSniffNotify]
+  ///   从 CookieManager 补齐。
+  ///
+  /// 旧病灶：请求头 Map 遍历顺序不确定，Origin 排在 Referer 后面时
+  /// 把带路径的真实 Referer 覆盖成只有 scheme+host 的 Origin，严格
+  /// 校验 Referer 的 CDN 直接拒绝。
+  static Map<String, String> collectPlaybackHeaders({
+    Map<String, String>? requestHeaders,
+    String? documentUrl,
+  }) {
+    final headers = <String, String>{};
+    String? referer;
+    String? origin;
+    String? cookie;
+    requestHeaders?.forEach((k, v) {
+      if (v.isEmpty) return;
+      switch (k.toLowerCase()) {
+        case 'referer':
+          referer ??= v;
+          break;
+        case 'origin':
+          origin ??= v;
+          break;
+        case 'cookie':
+          cookie ??= v;
+          break;
+      }
+    });
+    if (referer != null && referer!.isNotEmpty) {
+      headers['referer'] = referer!;
+    } else if (origin != null && origin!.isNotEmpty) {
+      headers['referer'] = '$origin/';
+    } else if (documentUrl != null &&
+        documentUrl.isNotEmpty &&
+        documentUrl.startsWith('http')) {
+      headers['referer'] = documentUrl;
+    }
+    if (origin != null && origin!.isNotEmpty) {
+      headers['origin'] = origin!;
+    }
+    if (cookie != null && cookie!.isNotEmpty) {
+      headers['cookie'] = cookie!;
+    }
+    return headers;
+  }
+
+  /// v1.7.0（P1-13）：嗅探候选打分（纯函数）。
+  ///
+  /// - m3u8 +3（可分片缓存/广告过滤/换集预取）；
+  /// - mp4/flv 等其余媒体 +1；
+  /// - 路径命中广告特征（preroll/ads/promo/tips/loading…）-5；
+  /// - 与页面同可注册域 +1（正片通常与站点同域，广告常在第三方域）。
+  static int sniffCandidateScore(String url, String? pageUrl) {
+    var score = 0;
+    final lower = url.toLowerCase();
+    if (_isHlsUrl(url)) {
+      score += 3;
+    } else {
+      score += 1;
+    }
+    if (_sniffAdPathRe.hasMatch(lower)) {
+      score -= 5;
+    }
+    if (pageUrl != null && _sameSniffRegistrableDomain(url, pageUrl)) {
+      score += 1;
+    }
+    return score;
+  }
+
+  /// v1.7.0（P1-13）：选出最高分候选（并列取先到者）。
+  static String pickBestSniffCandidate(List<String> urls, {String? pageUrl}) {
+    assert(urls.isNotEmpty);
+    String best = urls.first;
+    var bestScore = sniffCandidateScore(best, pageUrl);
+    for (final url in urls.skip(1)) {
+      final score = sniffCandidateScore(url, pageUrl);
+      if (score > bestScore) {
+        best = url;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  /// 广告路径特征（P1-13）：片头广告常驻路径段。
+  static final RegExp _sniffAdPathRe = RegExp(
+      r'/(preroll|ads?|adv|advertisement|promo|tips|loading|vip)(?=[/-_.])',
+      caseSensitive: false);
+
+  /// 同可注册域（末两段朴素启发式，与 fast resolver 一致）。
+  static bool _sameSniffRegistrableDomain(String a, String b) {
+    final ha = Uri.tryParse(a)?.host.toLowerCase();
+    final hb = Uri.tryParse(b)?.host.toLowerCase();
+    if (ha == null || hb == null || ha.isEmpty || hb.isEmpty) return false;
+    if (ha == hb) return true;
+    String reg(String h) {
+      final parts = h.split('.');
+      return parts.length <= 2 ? h : parts.sublist(parts.length - 2).join('.');
+    }
+
+    return reg(ha) == reg(hb);
   }
 
   /// 媒体 URL 判定（网络层嗅探用）。
@@ -697,6 +963,7 @@ class VideoWebviewAndroidImpl
 
   @override
   Future<void> dispose() async {
+    _cancelSniffCollection();
     await headlessWebView?.dispose();
     headlessWebView = null;
     webviewController = null;
@@ -755,6 +1022,23 @@ class VideoWebviewAndroidImplProbe {
   static bool isSniffableMediaUrl(String url) =>
       VideoWebviewAndroidImpl._isSniffableMediaUrl(url);
 
+  /// v1.7.0（P0-7）：网络层请求头 → 播放头的收集规则。
+  static Map<String, String> collectPlaybackHeaders({
+    Map<String, String>? requestHeaders,
+    String? documentUrl,
+  }) =>
+      VideoWebviewAndroidImpl.collectPlaybackHeaders(
+        requestHeaders: requestHeaders,
+        documentUrl: documentUrl,
+      );
+
+  /// v1.7.0（P1-13）：嗅探候选打分 / 选优。
+  static int sniffCandidateScore(String url, String? pageUrl) =>
+      VideoWebviewAndroidImpl.sniffCandidateScore(url, pageUrl);
+
+  static String pickBestSniffCandidate(List<String> urls, {String? pageUrl}) =>
+      VideoWebviewAndroidImpl.pickBestSniffCandidate(urls, pageUrl: pageUrl);
+
   /// video 标签嗅探 + src setter 劫持脚本全文（v1.6.8 R-4 回归锁用）。
   ///
   /// 直接从 [_buildAllUserScripts] 的真实产物里取（不另存副本，脚本
@@ -767,4 +1051,25 @@ class VideoWebviewAndroidImplProbe {
         .firstWhere((s) => s.source.contains('VideoTagParser script loaded'))
         .source;
   }
+
+  /// v1.7.0（P1-2）：PerformanceObserver 嗅探脚本全文（回归锁用）。
+  static String perfObserverSniffScript() {
+    final scripts = VideoWebviewAndroidImpl()._buildAllUserScripts();
+    return scripts
+        .firstWhere((s) => s.source.contains('__miruPerfObsInstalled'))
+        .source;
+  }
+}
+
+/// v1.7.0（P1-13）：嗅探候选项。
+class _SniffCandidate {
+  const _SniffCandidate({
+    required this.url,
+    required this.headers,
+    this.documentUrl,
+  });
+
+  final String url;
+  final Map<String, String> headers;
+  final String? documentUrl;
 }

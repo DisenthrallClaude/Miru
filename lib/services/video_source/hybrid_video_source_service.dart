@@ -266,6 +266,10 @@ class HybridVideoSourceService implements IVideoSourceService {
       episodeUrl,
       userAgent: headers['user-agent'],
       referer: headers['referer'] ?? episodeUrl,
+      // v1.7.0（P0-8）：插件 Cookie 透传给快解层——验证类站点
+      //（Cloudflare 等）的播放页裸奔必 403，快解 100% 失败后白等
+      // 600ms 才起云端、白等 1.5s 才进 WebView。
+      extraHeaders: _cookieOnlyHeaders(headers),
     );
     if (report.candidates.isEmpty) {
       trace.record(ResolveStage.fast, 'no-candidates',
@@ -464,6 +468,8 @@ class HybridVideoSourceService implements IVideoSourceService {
               episodeUrl,
               userAgent: headers['user-agent'],
               referer: headers['referer'] ?? episodeUrl,
+              // v1.7.0（P0-8）：预取同样携带插件 Cookie。
+              extraHeaders: _cookieOnlyHeaders(headers),
             );
       VideoSource? result;
       if (report != null && report.candidates.isNotEmpty) {
@@ -621,6 +627,13 @@ class HybridVideoSourceService implements IVideoSourceService {
     final callerUa = headers['user-agent']?.trim() ?? '';
     headers['user-agent'] = callerUa.isNotEmpty ? callerUa : getSessionUA();
     return headers;
+  }
+
+  /// v1.7.0（P0-8）：提取 cookie 单键（快解层 extraHeaders 的形态）。
+  static Map<String, String>? _cookieOnlyHeaders(Map<String, String> headers) {
+    final cookie = headers['cookie'];
+    if (cookie == null || cookie.isEmpty) return null;
+    return {'cookie': cookie};
   }
 
   // -------------------------------------------------------------------------
