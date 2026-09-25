@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:io';
 
 import 'package:hive_ce/hive.dart';
@@ -288,6 +289,12 @@ class FastVideoSourceResolver {
   // 候选收集主流程
   // ---------------------------------------------------------------------------
 
+  /// v1.7.0（P1-7）：大页面纯提取的 isolate 阈值——低于此直接同步执行
+  ///（isolate spawn 开销 > 提取耗时），高于此移出 UI isolate（多组
+  /// 正则 + 括号配平在 1MB HTML 上是几十毫秒级，加载期间掉帧并拖慢
+  /// WebView 回调排队，见 P1-2）。
+  static const int _isolateExtractionThreshold = 32 * 1024;
+
   Future<List<FastCandidate>> _extractCandidates(
       String pageUrl, String ua, String referer, int depth,
       {Map<String, String>? extraHeaders,
@@ -296,7 +303,82 @@ class FastVideoSourceResolver {
         extraHeaders: extraHeaders, abortToken: abortToken);
     if (html.isEmpty) return const [];
 
+    // v1.7.0（P1-7）：「拿到 html 之后的纯提取部分」拆为顶层纯函数，
+    // 大页面用 Isolate.run 执行；网络依赖的跳转（解析器二跳/iframe
+    // 递归）留在调用方。
+    final parsed = html.length >= _isolateExtractionThreshold
+        ? await Isolate.run(
+            () => parseStaticCandidatesFromHtml(html, pageUrl, referer))
+        : parseStaticCandidatesFromHtml(html, pageUrl, referer);
+
     final candidates = <FastCandidate>[];
+    candidates.addAll(parsed.direct);
+
+    // ---- 策略 1.1(d)：解析器接口二跳（网络依赖，留在 isolate 外）----
+    if (parsed.parserHop != null) {
+      final hop = parsed.parserHop!;
+      final hopped = await _resolveViaThirdPartyParser(
+        pageUrl,
+        hop.from,
+        hop.rawUrl,
+        ua,
+        depth,
+        extraHeaders: extraHeaders,
+        abortToken: abortToken,
+      );
+      for (final url in hopped) {
+        candidates.add(FastCandidate(
+          url: url,
+          referer: hop.varReferer.isNotEmpty ? hop.varReferer : referer,
+          strategy: FastResolveStrategy.parserHop,
+          needsPositiveConfirm: !_isLikelyMediaUrl(url),
+          format: _formatOf(url),
+        ));
+      }
+    }
+
+    // ---- 策略 3：iframe 二跳（限一层，防止深递归烧时间）----
+    if (depth < 1 && parsed.iframeUrl != null) {
+      final iframeUrl = parsed.iframeUrl!;
+      if (!isAdUrl(iframeUrl)) {
+        try {
+          final nested = await _extractCandidates(
+            iframeUrl,
+            ua,
+            pageUrl,
+            depth + 1,
+            // v1.7.0（P0-8）：cookie 仅在同一可注册域下随 iframe
+            // 二跳透传（跨域 iframe 拿站点 cookie 无效且属泄漏）。
+            extraHeaders: _sameRegistrableDomain(iframeUrl, pageUrl)
+                ? extraHeaders
+                : null,
+            abortToken: abortToken,
+          );
+          candidates.addAll(nested.map((c) => FastCandidate(
+                url: c.url,
+                referer: c.referer,
+                strategy: FastResolveStrategy.iframe,
+                needsPositiveConfirm: c.needsPositiveConfirm,
+                format: c.format,
+              )));
+        } catch (_) {
+          // iframe 拉取失败继续走完
+        }
+      }
+    }
+
+    return _normalizeCandidates(candidates, pageUrl);
+  }
+
+  /// v1.7.0（P1-7）：单页纯提取（顶层静态函数——Isolate.run 要求，
+  /// 无任何实例状态捕获）。策略 1（player_aaaa 直链部分）+ 策略 2
+  ///（正文直链）+ iframe src 提取；解析器二跳的原料以 [ParsedPage.parserHop]
+  /// 返回，网络动作由调用方执行。
+  static ParsedPage parseStaticCandidatesFromHtml(
+      String html, String pageUrl, String referer) {
+    final direct = <FastCandidate>[];
+    ParserHop? parserHop;
+    String? iframeUrl;
 
     // ---- 策略 1：player_aaaa（括号配平 + encrypt 解码 + from 分流）----
     final playerVar = _extractPlayerVarFull(html);
@@ -307,28 +389,14 @@ class FastVideoSourceResolver {
       final likely = _isLikelyMediaUrl(resolved ?? rawUrl);
 
       if (isParserSource || !resolved!.startsWith('http')) {
-        // 1.1(d) 解析器接口二跳：token/中转地址不是直链，从
-        // /static/player/{from}.js 定位解析接口后二次提取。
-        final hopped = await _resolveViaThirdPartyParser(
-          pageUrl,
-          from,
-          rawUrl,
-          ua,
-          depth,
-          extraHeaders: extraHeaders,
-          abortToken: abortToken,
+        // 解析器接口二跳：token/中转地址不是直链——原料留给调用方。
+        parserHop = ParserHop(
+          from: from,
+          rawUrl: rawUrl,
+          varReferer: varReferer,
         );
-        for (final url in hopped) {
-          candidates.add(FastCandidate(
-            url: url,
-            referer: varReferer.isNotEmpty ? varReferer : referer,
-            strategy: FastResolveStrategy.parserHop,
-            needsPositiveConfirm: !_isLikelyMediaUrl(url),
-            format: _formatOf(url),
-          ));
-        }
       } else {
-        candidates.add(FastCandidate(
+        direct.add(FastCandidate(
           url: resolved,
           referer: varReferer.isNotEmpty ? varReferer : referer,
           strategy: FastResolveStrategy.direct,
@@ -339,11 +407,11 @@ class FastVideoSourceResolver {
     }
 
     // ---- 策略 2：正文/内联 JS 直链 ----
-    final direct = _extractDirectVideoUrl(html);
-    if (direct != null) {
-      final resolved = _absolutize(direct, pageUrl);
+    final inline = _extractDirectVideoUrl(html);
+    if (inline != null) {
+      final resolved = _absolutize(inline, pageUrl);
       if (resolved != null && !isAdUrl(resolved)) {
-        candidates.add(FastCandidate(
+        direct.add(FastCandidate(
           url: resolved,
           referer: referer,
           strategy: FastResolveStrategy.inline,
@@ -353,40 +421,16 @@ class FastVideoSourceResolver {
       }
     }
 
-    // ---- 策略 3：iframe 二跳（限一层，防止深递归烧时间）----
-    if (depth < 1) {
-      final iframeSrc = _extractIframeSrc(html);
-      if (iframeSrc != null) {
-        final iframeUrl = _absolutize(iframeSrc, pageUrl);
-        if (iframeUrl != null && !isAdUrl(iframeUrl)) {
-          try {
-            final nested = await _extractCandidates(
-              iframeUrl,
-              ua,
-              pageUrl,
-              depth + 1,
-              // v1.7.0（P0-8）：cookie 仅在同一可注册域下随 iframe
-              // 二跳透传（跨域 iframe 拿站点 cookie 无效且属泄漏）。
-              extraHeaders: _sameRegistrableDomain(iframeUrl, pageUrl)
-                  ? extraHeaders
-                  : null,
-              abortToken: abortToken,
-            );
-            candidates.addAll(nested.map((c) => FastCandidate(
-                  url: c.url,
-                  referer: c.referer,
-                  strategy: FastResolveStrategy.iframe,
-                  needsPositiveConfirm: c.needsPositiveConfirm,
-                  format: c.format,
-                )));
-          } catch (_) {
-            // iframe 拉取失败继续走完
-          }
-        }
+    // ---- 策略 3 原料：iframe src（页面拉取由调用方执行）----
+    final iframeSrc = _extractIframeSrc(html);
+    if (iframeSrc != null) {
+      final resolved = _absolutize(iframeSrc, pageUrl);
+      if (resolved != null && !isAdUrl(resolved)) {
+        iframeUrl = resolved;
       }
     }
 
-    return _normalizeCandidates(candidates, pageUrl);
+    return ParsedPage(direct: direct, parserHop: parserHop, iframeUrl: iframeUrl);
   }
 
   /// 去重、排序（direct > parserHop > inline > iframe，host 提示加权）、
@@ -1088,4 +1132,36 @@ class FastResolveAbortedException implements Exception {
 
   @override
   String toString() => 'FastResolveAbortedException: race already won';
+}
+
+
+/// v1.7.0（P1-7）：单页纯提取结果（isolate 安全的简单数据类）。
+class ParsedPage {
+  const ParsedPage({
+    required this.direct,
+    this.parserHop,
+    this.iframeUrl,
+  });
+
+  /// 策略 1（直链部分）+ 策略 2 的候选。
+  final List<FastCandidate> direct;
+
+  /// 解析器二跳的原料（from/rawUrl/varReferer）。
+  final ParserHop? parserHop;
+
+  /// iframe 二跳的绝对地址（拉取由调用方执行）。
+  final String? iframeUrl;
+}
+
+/// v1.7.0（P1-7）：解析器二跳原料（isolate 安全，公开供 ParsedPage 引用）。
+class ParserHop {
+  const ParserHop({
+    required this.from,
+    required this.rawUrl,
+    required this.varReferer,
+  });
+
+  final String from;
+  final String rawUrl;
+  final String varReferer;
 }

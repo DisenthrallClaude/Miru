@@ -1,4 +1,5 @@
 import 'package:html/dom.dart';
+import 'dart:isolate';
 import 'package:html/parser.dart';
 import 'package:miru/modules/roads/road_module.dart';
 import 'package:miru/modules/search/plugin_search_module.dart';
@@ -94,6 +95,34 @@ class XPathRuleStrategy {
     // clearance 对搜索页和选集页一视同仁，不带 Cookie 的话用户刚完成
     // 验证、点进选集又会被拦一次（验证死循环）。
     return PreparedRuleRequest(method: 'GET', url: url, includeCookies: true);
+  }
+
+  /// v1.7.0（P1-7）：大页面（≥32KB）的 DOM parse + XPath 求值移出
+  /// UI isolate——搜索页动辄几百 KB，html 包的 DOM 构建是几十毫秒
+  /// 级，与 P1-2 的 WebView 回调同跑 UI isolate 时互相拖慢。
+  /// 小页面同步执行（isolate spawn 开销 > 解析耗时）。
+  static const int isolateThreshold = 32 * 1024;
+
+  Future<RuleSearchParseResult> parseSearchAsync(
+    String raw,
+    RuleExecutionConfig config,
+  ) async {
+    if (raw.length < isolateThreshold) {
+      return parseSearch(raw, config);
+    }
+    return Isolate.run(() => parseSearch(raw, config));
+  }
+
+  /// v1.7.0（P1-7）：章节页同款（isolate 内用全新无状态实例，
+  /// 不捕获 this）。
+  Future<RuleChapterParseResult> parseChaptersAsync(
+    String raw,
+    RuleExecutionConfig config,
+  ) async {
+    if (raw.length < isolateThreshold) {
+      return parseChapters(raw, config);
+    }
+    return Isolate.run(() => parseChapters(raw, config));
   }
 
   RuleSearchParseResult parseSearch(

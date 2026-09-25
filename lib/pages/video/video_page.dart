@@ -63,7 +63,12 @@ class _VideoPageState extends State<VideoPage>
   DownloadController get downloadController => widget.downloadController;
   late bool playResume;
   bool showDebugLog = false;
-  List<String> webviewLogLines = [];
+
+  /// v1.7.0（P1-8）：WebView 日志改为 ValueNotifier——旧实现每行日志
+  /// 一次整页 setState（包括播放器子树），加载期间每秒可能重建几十
+  /// 次；现在只有调试控制台用 ValueListenableBuilder 订阅。
+  final ValueNotifier<List<String>> webviewLogLines =
+      ValueNotifier<List<String>>(const []);
   StreamSubscription<String>? _logSubscription;
   final FocusNode keyboardFocus =
       FocusNode(debugLabel: 'Video player shortcut scope');
@@ -224,14 +229,12 @@ class _VideoPageState extends State<VideoPage>
     _scheduleRoadHealthProbeAfterFirstFrame(playerController);
 
     _logSubscription = videoPageController.logStream.listen((log) {
-      if (mounted) {
-        setState(() {
-          webviewLogLines.add(log);
-          if (webviewLogLines.length > 100) {
-            webviewLogLines.removeAt(0);
-          }
-        });
+      // v1.7.0（P1-8）：不再整页 setState——只通知调试控制台的订阅者。
+      final lines = [...webviewLogLines.value, log];
+      if (lines.length > 100) {
+        lines.removeRange(0, lines.length - 100);
       }
+      webviewLogLines.value = lines;
     });
 
     // v1.7.0（P1-5 条3）：changeEpisode 不再等 postFrame——微任务即刻
@@ -320,6 +323,7 @@ class _VideoPageState extends State<VideoPage>
   void dispose() {
     _roadHealthProbeReaction?.call();
     _roadHealthProbeReaction = null;
+    webviewLogLines.dispose();
     try {
       windowManager.removeListener(this);
     } catch (_) {}
@@ -380,7 +384,7 @@ class _VideoPageState extends State<VideoPage>
 
   void clearWebviewLog() {
     setState(() {
-      webviewLogLines.clear();
+      webviewLogLines.value = const [];
     });
   }
 
@@ -968,16 +972,23 @@ class _VideoPageState extends State<VideoPage>
                   color: Colors.black,
                   child: Align(
                     alignment: Alignment.center,
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: webviewLogLines.length,
-                      itemBuilder: (context, index) {
-                        return Text(
-                          webviewLogLines.isEmpty ? '' : webviewLogLines[index],
-                          style: const TextStyle(
-                            color: Colors.white,
-                          ),
-                          textAlign: TextAlign.center,
+                    // v1.7.0（P1-8）：日志列表自带订阅——日志更新不再
+                    // 触发整页（含播放器子树）重建。
+                    child: ValueListenableBuilder<List<String>>(
+                      valueListenable: webviewLogLines,
+                      builder: (context, lines, _) {
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: lines.length,
+                          itemBuilder: (context, index) {
+                            return Text(
+                              lines.isEmpty ? '' : lines[index],
+                              style: const TextStyle(
+                                color: Colors.white,
+                              ),
+                              textAlign: TextAlign.center,
+                            );
+                          },
                         );
                       },
                     ),

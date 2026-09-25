@@ -60,9 +60,10 @@ class RuleEngine {
       cancelToken: cancelToken,
     );
     try {
+      // v1.7.0（P1-7）：大页面的 XPath parse+求值移出 UI isolate。
       final parsed = config.searchMode == RuleMode.api
           ? _apiStrategy.parseSearch(raw, config.searchApiConfig)
-          : _xpathStrategy.parseSearch(raw, config);
+          : await _xpathStrategy.parseSearchAsync(raw, config);
       if (parsed.items.isEmpty) {
         throw NoResultException(config.pluginName);
       }
@@ -146,6 +147,7 @@ class RuleEngine {
       cancelToken: cancelToken,
     );
     try {
+      // v1.7.0（P1-7）：大页面的 XPath parse+求值移出 UI isolate。
       final parsed = config.chapterMode == RuleMode.api
           ? _apiStrategy.parseChapters(
               raw,
@@ -153,7 +155,7 @@ class RuleEngine {
               source: source,
               baseUrl: config.baseUrl,
             )
-          : _xpathStrategy.parseChapters(raw, config);
+          : await _xpathStrategy.parseChaptersAsync(raw, config);
       if (parsed.roads.isEmpty) {
         throw ChapterErrorException(config.pluginName);
       }
