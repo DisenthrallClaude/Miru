@@ -143,6 +143,46 @@ void main() {
       expect(pos, const Duration(seconds: 16));
     }, timeout: const Timeout(Duration(seconds: 60)));
 
+    test('seek 后画面滞后：等新画面渲染再取帧，仍能跳到 16s（CI 39947394829）',
+        () async {
+      final hitProbe = analyze(frame(overlay: true));
+      var rendered = Duration.zero;
+      final h = SponsorSkipHost(
+        // 取帧看到的是「已渲染」位置，seek 后不会立即更新。
+        probe: () async =>
+            rendered.inMilliseconds / 1000 < 15.5 ? hitProbe : OverlayProbe.none,
+        seek: (d) async => pos = d,
+        position: () => pos,
+        setMuted: (m) async => muted = m,
+        isStale: () => false,
+        waitFrameAt: (t) async {
+          rendered = pos;
+          return true;
+        },
+      );
+      final o = await run(h);
+      expect(o.kind, 'skipped');
+      expect(pos, const Duration(seconds: 16));
+      expect(muted, isFalse);
+    });
+
+    test('seek 后迟迟出不了新画面：中止并回到 0 秒', () async {
+      final hitProbe = analyze(frame(overlay: true));
+      final h = SponsorSkipHost(
+        probe: () async => hitProbe,
+        seek: (d) async => pos = d,
+        position: () => pos,
+        setMuted: (m) async => muted = m,
+        isStale: () => false,
+        waitFrameAt: (t) async => false,
+      );
+      final o = await run(h);
+      expect(o.kind, 'aborted');
+      expect(pos, Duration.zero);
+      expect(muted, isFalse);
+      expect(active.last, isFalse);
+    });
+
     test('换集作废：立即中止', () async {
       final o = await run(host(15, stale: true));
       expect(o.kind, 'aborted');

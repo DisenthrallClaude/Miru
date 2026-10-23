@@ -316,6 +316,29 @@ class PlayerController implements Disposable {
         } catch (_) {}
       },
       isStale: stale,
+      waitFrameAt: (target) async {
+        // 位置落到目标附近（关键帧可能略早）且向前推进 ≥350ms，说明新位置
+        // 的画面已经在渲染；弱网最多等 8s。
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        Duration? base;
+        while (DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          if (stale()) return false;
+          final p = player.state.position;
+          final near = p >= target - const Duration(seconds: 3) &&
+              p <= target + const Duration(seconds: 6);
+          if (!near || player.state.buffering) {
+            base = null;
+            continue;
+          }
+          base ??= p;
+          if (p - base >= const Duration(milliseconds: 350)) {
+            await Future<void>.delayed(const Duration(milliseconds: 150));
+            return true;
+          }
+        }
+        return false;
+      },
     );
     unawaited(SponsorOverlaySkipper.run(host, onActive: (active) {
       if (gen == _sponsorGen) sponsorSkipActive.value = active;

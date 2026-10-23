@@ -127,6 +127,7 @@ class SponsorSkipHost {
     required this.position,
     required this.setMuted,
     required this.isStale,
+    this.waitFrameAt,
   });
 
   /// 取当前画面并分析；拿不到画面返回 null。
@@ -137,6 +138,14 @@ class SponsorSkipHost {
 
   /// 换集/退出后为 true，流程立即终止。
   final bool Function() isStale;
+
+  /// seek 之后等到**新位置的画面真正渲染出来**（播放位置在目标附近并向前
+  /// 推进）再取帧；超时返回 false。为 null 时退回固定 [SponsorOverlaySkipper.settle]。
+  ///
+  /// v1.8.0 CI 39947394829 证据：远端 HLS seek 往往要 1~3s 才出新画面，
+  /// 固定等 650ms 取到的是 seek 前最后一帧（仍带水印），8 次试探全「脏」→
+  /// 误判整集常驻、放弃跳过。
+  final Future<bool> Function(Duration target)? waitFrameAt;
 }
 
 class SponsorSkipOutcome {
@@ -193,10 +202,29 @@ abstract final class SponsorOverlaySkipper {
     log('detected a=$a b=$b');
     onActive?.call(true);
     await host.setMuted(true);
+    var frameTimeout = false;
+    // seek 后迟迟出不了新画面（弱网）：无法判断，回到 0 秒原样播放，
+    // 正片中途遮罩仍会兜底盖住水印。
+    Future<SponsorSkipOutcome> aborted() async {
+      if (frameTimeout && !host.isStale()) {
+        await host.seek(Duration.zero);
+        log('frame timeout, back to 0');
+      }
+      return const SponsorSkipOutcome('aborted');
+    }
+
     try {
       Future<bool?> cleanAt(int sec) async {
         await host.seek(Duration(seconds: sec));
-        await Future<void>.delayed(settle);
+        final wait = host.waitFrameAt;
+        if (wait != null) {
+          if (!await wait(Duration(seconds: sec))) {
+            frameTimeout = true;
+            return null;
+          }
+        } else {
+          await Future<void>.delayed(settle);
+        }
         if (host.isStale()) return null;
         final p = await host.probe();
         if (p == null) return null;
@@ -208,7 +236,7 @@ abstract final class SponsorOverlaySkipper {
       int lastDirty = 0;
       for (var s = stepSeconds; s <= maxSkipSeconds; s += stepSeconds) {
         final c = await cleanAt(s);
-        if (c == null) return const SponsorSkipOutcome('aborted');
+        if (c == null) return await aborted();
         if (c) {
           firstClean = s;
           break;
@@ -226,7 +254,7 @@ abstract final class SponsorOverlaySkipper {
       while (hi - lo > 1) {
         final mid = (lo + hi) ~/ 2;
         final c = await cleanAt(mid);
-        if (c == null) return const SponsorSkipOutcome('aborted');
+        if (c == null) return await aborted();
         if (c) {
           hi = mid;
         } else {
