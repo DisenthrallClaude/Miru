@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -652,7 +653,7 @@ class _SourceSheetState extends State<SourceSheet> {
               ] else if (hasMenu)
                 PopupMenuButton<VoidCallback>(
                   tooltip: '${plugin.name} 的更多操作',
-                  icon: const Icon(Icons.more_vert_rounded, size: 20),
+                  icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
                   onSelected: (action) => action(),
                   itemBuilder: (context) => [
                     PopupMenuItem(
@@ -678,7 +679,7 @@ class _SourceSheetState extends State<SourceSheet> {
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeOutCubic,
                   child: Icon(
-                    Icons.expand_more_rounded,
+                    CupertinoIcons.chevron_down,
                     size: 20,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -720,7 +721,7 @@ class _SourceSheetState extends State<SourceSheet> {
               ),
               const SizedBox(width: 8),
               Icon(
-                Icons.play_arrow_rounded,
+                CupertinoIcons.play_fill,
                 size: 20,
                 color: Theme.of(context).colorScheme.primary,
               ),
@@ -1178,7 +1179,7 @@ class _AliasDialogState extends State<_AliasDialog> {
                         },
                       );
                     },
-                    icon: Icon(Icons.delete),
+                    icon: Icon(CupertinoIcons.trash),
                   ),
                   onTap: () => widget.onAliasSelected(alias),
                 );

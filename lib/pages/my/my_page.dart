@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -241,7 +242,7 @@ class _MyPageState extends State<MyPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _entryTile(
-            icon: Icons.history_rounded,
+            icon: CupertinoIcons.clock,
             title: '历史记录',
             description: stats.lastWatchName != null
                 ? '最近看到 ${stats.lastWatchName}'
@@ -250,14 +251,14 @@ class _MyPageState extends State<MyPage> {
           ),
           const _EntryDivider(),
           _entryTile(
-            icon: Icons.download_rounded,
+            icon: CupertinoIcons.arrow_down_circle,
             title: '离线下载',
             description: '缓存任务与本地文件',
             onTap: () => context.pushNamed('/settings/download/'),
           ),
           const _EntryDivider(),
           _entryTile(
-            icon: Icons.cloud_sync_rounded,
+            icon: CupertinoIcons.arrow_2_circlepath,
             title: '数据同步',
             description: githubLoggedIn
                 ? 'GitHub · @${GStorage.getSetting(SettingsKeys.githubLogin)}'
@@ -266,7 +267,7 @@ class _MyPageState extends State<MyPage> {
           ),
           const _EntryDivider(),
           _entryTile(
-            icon: Icons.settings_rounded,
+            icon: CupertinoIcons.gear,
             title: '设置',
             description: '播放、弹幕、外观与规则',
             onTap: () => context.pushNamed('/settings/'),
@@ -316,7 +317,7 @@ class _MyPageState extends State<MyPage> {
               ),
             ),
             Icon(
-              Icons.chevron_right_rounded,
+              CupertinoIcons.chevron_right,
               color: colorScheme.onSurfaceVariant,
             ),
           ],
@@ -412,13 +413,13 @@ class _CollectHeroState extends State<_CollectHero> {
                                 File(_avatarPath),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => Icon(
-                                  Icons.favorite_rounded,
+                                  CupertinoIcons.heart_fill,
                                   size: 18,
                                   color: colorScheme.onPrimaryContainer,
                                 ),
                               )
                             : Icon(
-                                Icons.favorite_rounded,
+                                CupertinoIcons.heart_fill,
                                 size: 18,
                                 color: colorScheme.onPrimaryContainer,
                               ),
@@ -433,7 +434,7 @@ class _CollectHeroState extends State<_CollectHero> {
                     ),
                     const SizedBox(width: 6),
                     Icon(
-                      Icons.edit_rounded,
+                      CupertinoIcons.pencil,
                       size: 14,
                       color: colorScheme.onSurfaceVariant
                           .withValues(alpha: 0.7),

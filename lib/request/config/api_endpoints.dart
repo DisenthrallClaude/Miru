@@ -86,11 +86,26 @@ class ApiEndpoints {
   static const String latestAppMirror =
       'https://gh-proxy.com/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest';
 
-  /// APK 下载镜像前缀：GitHub Releases 的 browser_download_url 直连国内
-  /// 基本不可达，下载前先并发探测镜像与直连，谁先应答用谁。
-  /// gh-proxy 支持 302 到源站的大文件转发，实测可用。
+  /// v1.8.1：Release 元数据的额外镜像（直连 [latestApp] 与 [latestAppMirror]
+  /// 之外再并发一路）。2026-10-23 实测 gh-proxy.org 可原样转发 api.github.com。
+  static const List<String> latestAppExtraMirrors = [
+    'https://gh-proxy.org/https://api.github.com/repos/DisenthrallClaude/Miru/releases/latest',
+  ];
+
+  /// APK 下载镜像前缀（v1.8.1 扩充）：下载前所有前缀 + 直连并发测速
+  /// （各拉 512KB，按真实吞吐排序），再多镜像分块并发下载，失败自动换源。
+  /// 2026-10-23 逐个实测：以下前缀对 Release 资产都回 206 且字节正确；
+  /// ghproxy.cc / github.moeyy.xyz 已失效，ghfile.geekertao.top /
+  /// gh.ddlc.top 返回 429，未收录。新增/下线镜像只改这里。
   static const List<String> updateDownloadMirrorPrefixes = [
     'https://gh-proxy.com/',
+    'https://hk.gh-proxy.com/',
+    'https://cdn.gh-proxy.com/',
+    'https://edgeone.gh-proxy.com/',
+    'https://ghfast.top/',
+    'https://gh-proxy.org/',
+    'https://gh.llkk.cc/',
+    'https://ghproxy.net/',
   ];
 
   /// 弹弹官网

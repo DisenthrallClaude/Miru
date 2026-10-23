@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:miru/bean/widget/frosted_surface.dart';
 
@@ -84,7 +85,7 @@ class UpdateDialog extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.system_update_alt_rounded,
+                            const Icon(CupertinoIcons.arrow_down_circle,
                                 size: 22, color: _accent),
                             const SizedBox(width: 8),
                             Expanded(
@@ -198,7 +199,7 @@ class UpdateDialog extends StatelessWidget {
                       onPressed: () => Navigator.of(context,
                           rootNavigator: true).pop(),
                       icon: const Icon(
-                        Icons.close_rounded,
+                        CupertinoIcons.xmark,
                         size: 20,
                         color: _inkSoft,
                       ),

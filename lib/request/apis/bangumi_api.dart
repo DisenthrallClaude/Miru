@@ -1,3 +1,5 @@
+import 'package:miru/request/apis/season_schedule.dart';
+import 'package:miru/utils/anime_categories.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/request/clients/bangumi_client.dart';
@@ -109,6 +111,143 @@ class BangumiApi {
     return bangumiCalendar;
   }
 
+  /// v1.8.1：条目搜索原始结果（保留 infobox/platform/eps，时间表判定更新日要用）。
+  static Future<(int, List<Map<String, dynamic>>)> searchSubjectsRaw(
+    Map<String, dynamic> filter, {
+    int limit = 20,
+    int offset = 0,
+    String sort = 'rank',
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final jsonData = await _client
+        .post(
+          ApiEndpoints.formatUrl(
+              ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiRankSearch,
+              [limit, offset]),
+          data: {'keyword': '', 'sort': sort, 'filter': filter},
+        )
+        .timeout(timeout);
+    final total = jsonData['total'] is int ? jsonData['total'] as int : 0;
+    final list = <Map<String, dynamic>>[];
+    for (final e in (jsonData['data'] as List? ?? const [])) {
+      if (e is Map<String, dynamic>) list.add(e);
+      if (e is Map && e is! Map<String, dynamic>) {
+        list.add(Map<String, dynamic>.from(e));
+      }
+    }
+    return (total, list);
+  }
+
+  /// 拉取一个过滤条件下的全部条目：先取第一页拿到 total，其余页并发
+  /// （至多 [concurrency] 路、[maxPages] 页）。v1.8.0 是逐页串行，
+  /// 10 页 × 往返延迟 = 时间表加载慢的主因之一。
+  static Future<List<Map<String, dynamic>>> searchAllSubjectsRaw(
+    Map<String, dynamic> filter, {
+    int maxPages = 10,
+    int concurrency = 4,
+  }) async {
+    const limit = 20;
+    final (total, first) = await searchSubjectsRaw(filter, limit: limit);
+    final pages = ((total + limit - 1) ~/ limit).clamp(1, maxPages);
+    final results = List<List<Map<String, dynamic>>?>.filled(pages, null);
+    results[0] = first;
+    var next = 1;
+    Future<void> worker() async {
+      while (true) {
+        final page = next++;
+        if (page >= pages) return;
+        try {
+          final (_, list) = await searchSubjectsRaw(filter,
+              limit: limit, offset: page * limit);
+          results[page] = list;
+        } catch (e) {
+          // 单页失败重试一次，仍失败就跳过这一页（不让一页拖垮整张表）
+          try {
+            final (_, list) = await searchSubjectsRaw(filter,
+                limit: limit, offset: page * limit);
+            results[page] = list;
+          } catch (e2) {
+            MiruLogger().w('Schedule: page $page failed', error: e2);
+          }
+        }
+      }
+    }
+
+    await Future.wait(
+        List.generate(concurrency.clamp(1, pages), (_) => worker()));
+    return [for (final r in results) ...?r];
+  }
+
+  /// v1.8.1：官方每日放送表 id → 星期（1=周一…7=周日）。失败返回空表。
+  static Future<Map<int, int>> getOfficialWeekdays() async {
+    try {
+      final jsonData = await _client
+          .get(ApiEndpoints.bangumiAPINextDomain + ApiEndpoints.bangumiCalendar)
+          .timeout(const Duration(seconds: 8));
+      final out = <int, int>{};
+      for (var d = 1; d <= 7; d++) {
+        final list = jsonData['$d'];
+        if (list is! List) continue;
+        for (final e in list) {
+          final id = e is Map && e['subject'] is Map ? e['subject']['id'] : null;
+          if (id is int) out[id] = d;
+        }
+      }
+      return out;
+    } catch (e) {
+      MiruLogger().w('Schedule: official calendar unavailable', error: e);
+      return const {};
+    }
+  }
+
+  /// v1.8.1：季度时间表（替代逐页串行 + 首播星期分组的 getCalendarBySearch）。
+  ///
+  /// * 本季窗口条目、官方放送表并发拉取；
+  /// * [includeContinuing]（当季视图）额外拉「首播在窗口前 12 个月内」的国漫，
+  ///   只保留仍在连载的长篇；
+  /// * 更新日判定见 lib/utils/broadcast_schedule.dart。
+  static Future<ScheduleBuild> getSeasonSchedule(
+    List<String> dateRange, {
+    bool includeContinuing = false,
+    DateTime? today,
+  }) async {
+    Map<String, dynamic> filterOf(String from, String to) => {
+          'type': [2],
+          'tag': [ApiEndpoints.bangumiRegionTag],
+          'air_date': ['>=$from', '<$to'],
+          'nsfw': true,
+        };
+    final seasonF = searchAllSubjectsRaw(filterOf(dateRange[0], dateRange[1]));
+    final officialF = getOfficialWeekdays();
+    Future<List<Map<String, dynamic>>> continuingF = Future.value(const []);
+    if (includeContinuing) {
+      final start = DateTime.parse(dateRange[0]);
+      final from = DateTime(start.year - 1, start.month, start.day);
+      String fmt(DateTime d) =>
+          '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      continuingF = searchAllSubjectsRaw(filterOf(fmt(from), dateRange[0]),
+              maxPages: 15)
+          .catchError((Object e) {
+        MiruLogger().w('Schedule: continuing query failed', error: e);
+        return <Map<String, dynamic>>[];
+      });
+    }
+    final season = await seasonF;
+    final official = await officialF;
+    final continuing = await continuingF;
+    final build = buildSeasonSchedule(
+      seasonRaw: season,
+      continuingRaw: continuing,
+      official: official,
+      today: today,
+    );
+    MiruLogger().i('Schedule: season=${season.length} continuing='
+        '${continuing.length} official=${official.length} placed='
+        '${build.sources.length} '
+        'bySource=${build.sources.values.fold<Map<String, int>>({}, (m, v) => m..[v] = (m[v] ?? 0) + 1)}');
+    return build;
+  }
+
   // 注：原 getBangumiMirrorSeasonCalendar / getBangumiMirrorPopularSubjects
   // 已删除 —— 它们指向的上游镜像域名（api.miru.fyi）需要签名才能使用，
   // 且全仓无调用方；时间表与推荐页分别走 getCalendarBySearch /
@@ -127,23 +266,7 @@ class BangumiApi {
     int offset = 0,
   }) async {
     List<BangumiItem> bangumiList = [];
-    final tags = <String>[
-      ApiEndpoints.bangumiRegionTag,
-      if (tag.isNotEmpty) tag,
-    ];
-    final params = <String, dynamic>{
-      'keyword': '',
-      // 按热度排序：rank 排序会把 1961 年的《大闹天宫》一类老片顶到最前，
-      // 热度更贴合「推荐」的语义（刺客伍六七 / 罗小黑战记 / 凡人修仙传…）。
-      'sort': 'heat',
-      "filter": {
-        "type": [2],
-        "tag": tags,
-        // 刻意不加 rank 过滤：新番往往尚未排名（rank=0），
-        // 加了会把当season新作全部挡掉。
-        "nsfw": false
-      },
-    };
+    final params = buildBangumiListParams(tag: tag);
     try {
       final jsonData = await _client.post(
         ApiEndpoints.formatUrl(
@@ -164,6 +287,29 @@ class BangumiApi {
       rethrow;
     }
     return bangumiList;
+  }
+
+  /// 推荐流 / 分类浏览的搜索参数（v1.8.1 拆出便于单测）。
+  ///
+  /// * 推荐流（tag 为空）：沿用 v1.8.0 的产地用户标签「中国」+ 热度排序；
+  /// * 分类：改用 Bangumi 公共标签 `meta_tags`（产地「中国」+ 分类题材），
+  ///   不再用用户标签 `tag`——后者只要有人打过就命中，内容与分类名对不上
+  ///   （详见 lib/utils/anime_categories.dart）。
+  static Map<String, dynamic> buildBangumiListParams({String tag = ''}) {
+    final filter = <String, dynamic>{
+      "type": [2],
+      if (tag.isEmpty) "tag": [ApiEndpoints.bangumiRegionTag],
+      if (tag.isNotEmpty) "meta_tags": categoryMetaTags(tag),
+      // 刻意不加 rank 过滤：新番往往尚未排名（rank=0），
+      // 加了会把当season新作全部挡掉。
+      "nsfw": false,
+    };
+    return <String, dynamic>{
+      'keyword': '',
+      // 按热度排序：rank 排序会把 1961 年的《大闹天宫》一类老片顶到最前。
+      'sort': 'heat',
+      "filter": filter,
+    };
   }
 
   static Future<List<BangumiItem>> getBangumiTrendsList(

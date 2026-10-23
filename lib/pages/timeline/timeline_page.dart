@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
@@ -16,6 +17,7 @@ import 'package:miru/bean/widget/bangumi_mirror_error_widget.dart';
 import 'package:miru/bean/widget/empty_state_widget.dart';
 import 'package:miru/navigation.dart';
 import 'package:miru/utils/device.dart';
+import 'package:skeletonizer/skeletonizer.dart';
 
 class TimelinePage extends StatefulWidget {
   const TimelinePage({
@@ -529,8 +531,8 @@ class _TimelinePageState extends State<TimelinePage>
         ),
         trailing: Icon(
           isSelected
-              ? Icons.check_circle_rounded
-              : Icons.radio_button_unchecked_rounded,
+              ? CupertinoIcons.checkmark_circle_fill
+              : CupertinoIcons.circle,
           color: isSelected
               ? colorScheme.onSecondaryContainer
               : colorScheme.onSurfaceVariant,
@@ -619,7 +621,7 @@ class _TimelinePageState extends State<TimelinePage>
               onChanged: (value) {
                 timelineController.setNotShowAbandonedBangumis(value);
               },
-              icon: Icons.heart_broken_rounded,
+              icon: CupertinoIcons.heart_slash,
             ),
           ),
           const SizedBox(height: 12),
@@ -632,7 +634,7 @@ class _TimelinePageState extends State<TimelinePage>
               onChanged: (value) {
                 timelineController.setNotShowWatchedBangumis(value);
               },
-              icon: Icons.task_alt_rounded,
+              icon: CupertinoIcons.checkmark_circle,
             ),
           ),
           const SizedBox(height: 12),
@@ -645,7 +647,7 @@ class _TimelinePageState extends State<TimelinePage>
               onChanged: (value) {
                 timelineController.setOnlyShowWatchingBangumis(value);
               },
-              icon: Icons.live_tv_rounded,
+              icon: CupertinoIcons.tv,
             ),
           ),
         ],
@@ -664,7 +666,7 @@ class _TimelinePageState extends State<TimelinePage>
             sortType: 3,
             title: '按热度排序',
             description: '优先展示讨论度和关注度更高的条目。',
-            icon: Icons.local_fire_department_rounded,
+            icon: CupertinoIcons.flame_fill,
           ),
           const SizedBox(height: 12),
           buildSortOptionTile(
@@ -672,7 +674,7 @@ class _TimelinePageState extends State<TimelinePage>
             sortType: 2,
             title: '按评分排序',
             description: '优先展示评分更高的条目。',
-            icon: Icons.star_rounded,
+            icon: CupertinoIcons.star_fill,
           ),
           const SizedBox(height: 12),
           buildSortOptionTile(
@@ -680,7 +682,7 @@ class _TimelinePageState extends State<TimelinePage>
             sortType: 1,
             title: '按时间排序',
             description: '恢复默认时间顺序，方便按播出节奏查看。',
-            icon: Icons.schedule_rounded,
+            icon: CupertinoIcons.clock,
           ),
         ],
       ),
@@ -715,14 +717,14 @@ class _TimelinePageState extends State<TimelinePage>
         actions: [
           IconButton(
             tooltip: '季度切换（时间机器）',
-            icon: const Icon(Icons.calendar_month_rounded),
+            icon: const Icon(CupertinoIcons.calendar),
             onPressed: () {
               showSeasonBottomSheet(context);
             },
           ),
           IconButton(
             tooltip: '排序与筛选',
-            icon: const Icon(Icons.tune_rounded),
+            icon: const Icon(CupertinoIcons.slider_horizontal_3),
             onPressed: () {
               MiruDialog.showBottomSheet(
                 isScrollControlled: true,
@@ -748,11 +750,10 @@ class _TimelinePageState extends State<TimelinePage>
         ),
       ),
       body: Observer(builder: (context) {
+        // v1.8.1：首次加载（无缓存）铺骨架卡片，替代整页转圈。
         if (timelineController.isLoading &&
             timelineController.bangumiCalendar.isEmpty) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+          return _buildSkeleton(context);
         }
         if (timelineController.isTimeOut) {
           return Center(
@@ -771,11 +772,72 @@ class _TimelinePageState extends State<TimelinePage>
             ),
           );
         }
-        return TabBarView(
-          controller: tabController,
-          children: contentGrid(timelineController.bangumiCalendar),
+        return Stack(
+          children: [
+            TabBarView(
+              controller: tabController,
+              children: contentGrid(timelineController.bangumiCalendar),
+            ),
+            // v1.8.1：已展示缓存、后台联网刷新时，顶部一条细进度提示。
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: timelineController.refreshing,
+                builder: (context, refreshing, _) => AnimatedOpacity(
+                  opacity: refreshing ? 1 : 0,
+                  duration: const Duration(milliseconds: 250),
+                  child: const LinearProgressIndicator(minHeight: 2),
+                ),
+              ),
+            ),
+          ],
         );
       }),
+    );
+  }
+
+  static final BangumiItem _skeletonItem = BangumiItem(
+    id: 0,
+    type: 2,
+    name: '',
+    nameCn: '番组标题占位文字',
+    summary: '简介占位文字，加载完成后替换为真实内容。简介占位文字。',
+    airDate: '',
+    airWeekday: 0,
+    rank: 1,
+    images: const {},
+    tags: const [],
+    alias: const [],
+    ratingScore: 7.5,
+    votes: 100,
+    votesCount: const [],
+    info: '',
+  );
+
+  Widget _buildSkeleton(BuildContext context) {
+    final ts = MediaQuery.textScalerOf(context);
+    final double cardHeight =
+        ts.scale(isDesktop() ? 160.0 : (isTablet() ? 140.0 : 120.0));
+    return IgnorePointer(
+      child: Skeletonizer(
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, 0),
+          itemCount: 6,
+          separatorBuilder: (_, __) =>
+              const SizedBox(height: StyleString.cardSpace - 2),
+          itemBuilder: (_, __) => SizedBox(
+            height: cardHeight + 12,
+            child: BangumiTimelineCard(
+              bangumiItem: _skeletonItem,
+              cardHeight: cardHeight,
+              showRating: true,
+              enableHero: false,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -836,7 +898,7 @@ class _TimelinePageState extends State<TimelinePage>
                   hasScrollBody: false,
                   child: Center(
                     child: GeneralEmptyState(
-                      icon: Icons.event_busy_rounded,
+                      icon: CupertinoIcons.calendar_badge_minus,
                       title: '这一天没有放送的番组',
                     ),
                   ),

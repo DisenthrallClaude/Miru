@@ -1,8 +1,10 @@
 import 'dart:ui';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/widget/bangumi_mirror_error_widget.dart';
-import 'package:miru/bean/widget/custom_dropdown_menu.dart';
+import 'package:miru/bean/widget/glass_category_bar.dart';
+import 'package:miru/utils/anime_categories.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/pages/popular/popular_controller.dart';
 import 'package:miru/bean/card/bangumi_feed_card.dart';
@@ -35,9 +37,6 @@ class PopularPage extends StatefulWidget {
 class _PopularPageState extends State<PopularPage> {
   late final ScrollController scrollController;
   PopularController get popularController => widget.controller;
-
-  // Key used to position the dropdown menu for the tag selector
-  final GlobalKey selectorKey = GlobalKey();
 
   /// 封面「加载完成」的先后顺序（存 bangumi id）。
   /// 先加载完的排在信息流前面，未加载完的留在后面继续慢慢加载。
@@ -80,6 +79,8 @@ class _PopularPageState extends State<PopularPage> {
           duration: Motion.normal, curve: Motion.standard);
     }
   }
+
+  bool get _isTrend => popularController.currentTag == '';
 
   void _onCoverLoaded(int id) {
     if (_loadedIds.contains(id)) return;
@@ -296,12 +297,13 @@ class _PopularPageState extends State<PopularPage> {
     if (bangumiList.isEmpty && popularController.isLoadingMore) {
       return SliverMainAxisGroup(
         slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: Space.lg),
-              child: BangumiHeroCarousel(source: bangumiList),
+          if (_isTrend)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: Space.lg),
+                child: BangumiHeroCarousel(source: bangumiList),
+              ),
             ),
-          ),
           SliverToBoxAdapter(
             // IgnorePointer：骨架不可点——占位卡带的假数据
             // 点进去会导航到不存在的条目。
@@ -330,12 +332,17 @@ class _PopularPageState extends State<PopularPage> {
 
     return SliverMainAxisGroup(
       slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: Space.lg),
-            child: BangumiHeroCarousel(source: bangumiList),
-          ),
-        ),
+        // v1.8.1：内置主视觉轮播是「热门推荐」的固定置顶内容，分类页不再展示
+        // ——旧版在「日常」等分类顶部仍铺热门大图，造成分类与内容不一致。
+        if (_isTrend)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: Space.lg),
+              child: BangumiHeroCarousel(source: bangumiList),
+            ),
+          )
+        else
+          const SliverToBoxAdapter(child: SizedBox(height: Space.sm)),
         SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             mainAxisSpacing: Space.md,
@@ -380,7 +387,7 @@ class _PopularPageState extends State<PopularPage> {
                         popularController.queryBangumiByTrend();
                       }
                     },
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    icon: const Icon(CupertinoIcons.arrow_clockwise, size: 16),
                     label: const Text('加载更多失败，点击重试'),
                   ),
                 ),
@@ -398,7 +405,8 @@ class _PopularPageState extends State<PopularPage> {
     // 之前写死 120dp：状态栏较高的设备（挖孔屏/大字体）上
     // SafeArea 吃掉大半高度，标题与右侧按钮被挤进工具栏里互相遮挡。
     final double topInset = MediaQuery.paddingOf(context).top;
-    final double expandedHeight = kToolbarHeight + topInset + 52;
+    const double barHeight = 46;
+    final double expandedHeight = kToolbarHeight + topInset + 52 + barHeight;
     return SliverAppBar(
       pinned: true,
       stretch: true,
@@ -410,12 +418,27 @@ class _PopularPageState extends State<PopularPage> {
       backgroundColor: Colors.transparent,
       actions: buildActions(),
       title: null,
+      // v1.8.1：分类改为常驻的玻璃胶囊条（原标题下拉菜单 80dp 宽，
+      // 选项挤成两列、热门与分类混在一起，难以辨认）。
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(barHeight),
+        child: Observer(
+          builder: (_) => GlassCategoryBar(
+            height: barHeight,
+            items: ['', ...kAnimeCategories.map((c) => c.label)],
+            selected: popularController.currentTag,
+            onSelected: _selectCategory,
+          ),
+        ),
+      ),
       flexibleSpace: FrostedSurface(
         child: SafeArea(
           child: dtb.DragToMoveArea(
+            child: Padding(
+            padding: const EdgeInsets.only(bottom: barHeight),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final double maxExtent = expandedHeight - topInset;
+                final double maxExtent = expandedHeight - topInset - barHeight;
                 final t = (1 -
                     ((constraints.maxHeight - kToolbarHeight) /
                             (maxExtent - kToolbarHeight))
@@ -438,28 +461,27 @@ class _PopularPageState extends State<PopularPage> {
                           // v1.3.1 回退为无边框原版样式：玻璃药丸的底色
                           // 在部分主题下会遮挡标题文字。key 供 showTagMenu
                           // 定位下拉菜单。
-                          return InkWell(
-                            key: selectorKey,
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: showTagMenu,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  isTrend
-                                      ? '热门番组'
-                                      : popularController.currentTag,
-                                  style:
-                                      theme.textTheme.headlineMedium!.copyWith(
-                                    fontWeight: fontWeight,
-                                    fontSize: fontSize,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(Icons.keyboard_arrow_down_rounded,
-                                    size: fontSize,
-                                    color: theme.iconTheme.color),
-                              ],
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 240),
+                            transitionBuilder: (child, anim) => FadeTransition(
+                              opacity: anim,
+                              child: SlideTransition(
+                                position: Tween(
+                                        begin: const Offset(0, 0.25),
+                                        end: Offset.zero)
+                                    .animate(anim),
+                                child: child,
+                              ),
+                            ),
+                            child: Text(
+                              isTrend
+                                  ? '热门番组'
+                                  : popularController.currentTag,
+                              key: ValueKey(popularController.currentTag),
+                              style: theme.textTheme.headlineMedium!.copyWith(
+                                fontWeight: fontWeight,
+                                fontSize: fontSize,
+                              ),
                             ),
                           );
                         },
@@ -468,6 +490,7 @@ class _PopularPageState extends State<PopularPage> {
                   ),
                 );
               },
+            ),
             ),
           ),
         ),
@@ -481,7 +504,7 @@ class _PopularPageState extends State<PopularPage> {
         IconButton(
           tooltip: '搜索',
           onPressed: () => context.pushNamed('/search/'),
-          icon: const Icon(Icons.search_rounded),
+          icon: const Icon(CupertinoIcons.search),
         ),
     ];
     actions.add(
@@ -492,14 +515,14 @@ class _PopularPageState extends State<PopularPage> {
           // C2：刷新期间旧列表保留，落地后平滑回顶（见 _refreshFeed）。
           await _refreshFeed();
         },
-        icon: const Icon(Icons.refresh_rounded),
+        icon: const Icon(CupertinoIcons.arrow_clockwise),
       ),
     );
     actions.add(
       IconButton(
         tooltip: '历史记录',
         onPressed: () => context.pushNamed('/settings/history/'),
-        icon: const Icon(Icons.history_rounded),
+        icon: const Icon(CupertinoIcons.clock),
       ),
     );
     if (isDesktop()) {
@@ -508,7 +531,7 @@ class _PopularPageState extends State<PopularPage> {
           IconButton(
             tooltip: '退出',
             onPressed: () => windowManager.close(),
-            icon: const Icon(Icons.close_rounded),
+            icon: const Icon(CupertinoIcons.xmark),
           ),
         );
       }
@@ -516,43 +539,7 @@ class _PopularPageState extends State<PopularPage> {
     return actions;
   }
 
-  Future<void> showTagMenu() async {
-    // Calculate the position of the button manually to position the dropdown menu.
-    // Using CustomDropdownMenu instead of PopupMenuButton to avoid flickering issues
-    // and to support different font sizes in the button and menu items.
-    final RenderBox renderBox =
-        selectorKey.currentContext!.findRenderObject() as RenderBox;
-    final Offset offset = renderBox.localToGlobal(Offset.zero);
-    final Size size = renderBox.size;
-
-    final selected = await Navigator.push<String>(
-      context,
-      PageRouteBuilder(
-        opaque: false,
-        barrierDismissible: true,
-        barrierColor: Colors.transparent,
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return CustomDropdownMenu(
-            offset: offset,
-            buttonSize: size,
-            animation: animation,
-            // v1.6.7（F-8）：minWidth 默认 140 会静默吞掉 maxWidth: 80——
-            // 显式传 minWidth 让窄菜单真正生效（菜单不再比锚点宽一截）。
-            minWidth: 80,
-            maxWidth: 80,
-            items: [
-              '',
-              ...defaultAnimeTags,
-            ],
-            itemBuilder: (item) => item.isEmpty ? '热门番组' : item,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 200),
-        reverseTransitionDuration: const Duration(milliseconds: 150),
-      ),
-    );
-
-    if (selected == null) return;
+  Future<void> _selectCategory(String selected) async {
     if (selected == '' && popularController.currentTag != '') {
       scrollController.animateTo(0,
           duration: const Duration(milliseconds: 250), curve: Curves.easeOut);

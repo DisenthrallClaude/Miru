@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
@@ -85,15 +86,15 @@ class _HistoryPageState extends State<HistoryPage> {
                     });
                   },
                   icon: showDelete
-                      ? const Icon(Icons.edit_off_outlined)
-                      : const Icon(Icons.edit_outlined),
+                      ? const Icon(CupertinoIcons.pencil_slash)
+                      : const Icon(CupertinoIcons.pencil),
                   tooltip: showDelete ? '退出编辑' : '编辑',
                 ),
                 IconButton(
                   onPressed: () {
                     showHistoryClearDialog();
                   },
-                  icon: const Icon(Icons.delete_sweep_outlined),
+                  icon: const Icon(CupertinoIcons.trash),
                   tooltip: '清除全部',
                 ),
               ],
@@ -111,7 +112,7 @@ class _HistoryPageState extends State<HistoryPage> {
     } else {
       return const Center(
         child: GeneralEmptyState(
-          icon: Icons.history_rounded,
+          icon: CupertinoIcons.clock,
           title: '暂无历史记录',
         ),
       );

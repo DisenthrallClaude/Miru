@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/dialog/update_dialog.dart';
+import 'package:miru/bean/dialog/update_download_dialog.dart';
+import 'package:miru/services/update/dio_range_transport.dart';
+import 'package:miru/services/update/mirror_downloader.dart';
 import 'package:miru/request/clients/download_http_client.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -163,8 +165,15 @@ class AutoUpdater {
     return availableTypes;
   }
 
+  /// 仅供 CI 自测（autotest 构建的 `update|demo`）：把当前版本视作 0.0.1，
+  /// 弹出 releases/latest 的更新弹窗，验证真实的镜像测速 + 分块下载链路。
+  Future<void> debugShowUpdateForAutotest() async {
+    final info = await checkForUpdates(currentVersionOverride: '0.0.1');
+    if (info != null) _showUpdateDialog(info, isAutoCheck: false);
+  }
+
   /// 检查是否有新版本可用
-  Future<UpdateInfo?> checkForUpdates() async {
+  Future<UpdateInfo?> checkForUpdates({String? currentVersionOverride}) async {
     try {
       final data = await _latestRelease();
 
@@ -174,7 +183,7 @@ class AutoUpdater {
       }
 
       final remoteVersion = tagName;
-      final currentVersion = ApiEndpoints.version;
+      final currentVersion = currentVersionOverride ?? ApiEndpoints.version;
 
       if (needUpdate(currentVersion, remoteVersion)) {
         final availableTypes = await _detectAvailableInstallationTypes();
@@ -210,7 +219,11 @@ class AutoUpdater {
     // v1.6.9：并发竞速替代串行轮询——直连被墙时旧实现要先白等 8s
     // 超时才轮到镜像源（「检查更新慢」的主因）；现在两源同发，首个
     // 有效应答胜出，未胜出的在途请求随 CancelToken 止损。
-    final sources = [ApiEndpoints.latestApp, ApiEndpoints.latestAppMirror];
+    final sources = [
+      ApiEndpoints.latestApp,
+      ApiEndpoints.latestAppMirror,
+      ...ApiEndpoints.latestAppExtraMirrors,
+    ];
     final cancelToken = CancelToken();
     try {
       return await _firstSuccess(sources.map((source) async {
@@ -418,96 +431,54 @@ class AutoUpdater {
     }
   }
 
-  /// 下载更新
+  /// 下载更新（v1.8.1：多镜像测速择优 + 分块并发 + 断点续传）。
   Future<void> _downloadUpdate(
       UpdateInfo updateInfo, String expectedHash) async {
     if (updateInfo.downloadUrl.isEmpty) {
       MiruDialog.showToast(message: '没有找到合适的下载链接');
       return;
     }
-
-    // 显示下载进度对话框
+    _progress.value = DownloadProgress.probing();
     MiruDialog.show(
       clickMaskDismiss: false,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('正在下载更新'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ValueListenableBuilder<double>(
-                valueListenable: _downloadProgress,
-                builder: (context, value, child) {
-                  return Column(
-                    children: [
-                      LinearProgressIndicator(value: value),
-                      const SizedBox(height: 8),
-                      Text('${(value * 100).toStringAsFixed(1)}%'),
-                    ],
-                  );
-                },
-              ),
-              // v1.6.9：弱网下百分比变化慢，速度/流量行让用户确认
-              //「还在下、没有卡死」，也方便判断要不要换网络重试。
-              ValueListenableBuilder<String?>(
-                valueListenable: _downloadStats,
-                builder: (context, value, child) {
-                  if (value == null || value.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      value,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                _cancelDownload();
-                MiruDialog.dismiss();
-              },
-              child: const Text('取消'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => UpdateDownloadDialog(
+        version: updateInfo.version,
+        progress: _progress,
+        onCancel: () {
+          _cancelDownload();
+          MiruDialog.dismiss();
+          MiruDialog.showToast(message: '已暂停，下次点「立即更新」会从断点继续');
+        },
+        onBrowser: () {
+          _cancelDownload();
+          MiruDialog.dismiss();
+          _openReleasePage(updateInfo);
+        },
+      ),
     );
 
     try {
-      final downloadPath = await _downloadFile(
-          updateInfo.downloadUrl, updateInfo.version, expectedHash);
-
-      // 不自动关闭对话框，而是显示下载完成状态
+      final downloadPath = await _downloadFile(updateInfo.downloadUrl,
+          updateInfo.version, expectedHash, updateInfo.assets);
       _showDownloadCompleteDialog(downloadPath, updateInfo);
+    } on DownloadCancelled {
+      MiruLogger().i('Update: download paused by user');
     } catch (e) {
       MiruDialog.dismiss();
-
-      // 显示详细的错误信息
       final msg = e.toString();
       String errorMessage = '下载失败';
       if (msg.contains('Permission denied') ||
           msg.contains('Operation not permitted')) {
-        errorMessage = '权限不足，文件已保存到应用临时目录';
+        errorMessage = '权限不足，无法写入下载文件';
       } else if (msg.contains('No space left')) {
         errorMessage = '磁盘空间不足';
-      } else if (msg.contains('网络超时') ||
-          msg.contains('timeout') ||
-          msg.contains('TimeoutException')) {
-        errorMessage = '网络超时，请检查网络后重试';
-      } else if (msg.contains('网络连接') ||
-          msg.contains('Network') ||
-          msg.contains('Connection')) {
-        errorMessage = '网络连接错误，请检查网络后重试';
       } else if (msg.contains('文件完整性验证失败')) {
         errorMessage = '文件完整性验证失败，可能是网络传输错误';
+      } else if (msg.contains('所有下载源')) {
+        errorMessage = '所有下载源都连不上，请稍后重试或用浏览器下载';
+      } else if (msg.contains('timeout') || msg.contains('Timeout')) {
+        errorMessage = '网络超时，请检查网络后重试（已下载部分会保留）';
       }
-
       MiruDialog.show(
         builder: (context) {
           return AlertDialog(
@@ -520,6 +491,8 @@ class AutoUpdater {
                 const SizedBox(height: 8),
                 Text(
                   '错误详情: $e',
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -532,7 +505,6 @@ class AutoUpdater {
               TextButton(
                 onPressed: () {
                   MiruDialog.dismiss();
-                  // 浏览器下载：应用内持续失败时的最终兑底
                   _openReleasePage(updateInfo);
                 },
                 child: const Text('浏览器下载'),
@@ -540,53 +512,25 @@ class AutoUpdater {
               TextButton(
                 onPressed: () {
                   MiruDialog.dismiss();
-                  // 重新尝试下载
                   _downloadUpdate(updateInfo, expectedHash);
                 },
-                child: const Text('重试'),
+                child: const Text('继续下载'),
               ),
             ],
           );
         },
       );
-
       MiruLogger().e('Update: download update failed', error: e);
     }
   }
 
-  final ValueNotifier<double> _downloadProgress = ValueNotifier(0.0);
+  final ValueNotifier<DownloadProgress> _progress =
+      ValueNotifier(DownloadProgress.probing());
 
-  /// v1.6.9：下载可观测性——已下载量/总量/速度的文本行，弱网慢速
-  /// 下载时用户至少能看到「在动」而不是干等百分比。
-  final ValueNotifier<String?> _downloadStats = ValueNotifier(null);
-
-  CancelToken? _cancelToken;
+  MirrorDownloader? _downloader;
 
   void _cancelDownload() {
-    _cancelToken?.cancel();
-  }
-
-  /// v1.6.9：重置下载统计（新一段下载开始时）。
-  void _resetDownloadStats(int baselineBytes) {
-    _downloadStats.value = baselineBytes > 0
-        ? '已续传基线 ${(baselineBytes / 1024 / 1024).toStringAsFixed(1)} MB'
-        : null;
-  }
-
-  /// v1.6.9：更新下载统计文本（每 ~500ms 刷新一次）。
-  void _updateDownloadStats(
-      int received, int? total, int windowBytes, Duration elapsed) {
-    final receivedMb = received / 1024 / 1024;
-    final totalPart = total != null && total > 0
-        ? ' / ${(total / 1024 / 1024).toStringAsFixed(1)} MB'
-        : '';
-    final seconds = elapsed.inMilliseconds / 1000.0;
-    final speed = seconds > 0 ? windowBytes / seconds : 0.0;
-    final speedPart = speed > 0
-        ? ' · ${(speed / 1024 / 1024).toStringAsFixed(2)} MB/s'
-        : '';
-    _downloadStats.value =
-        '已下载 ${receivedMb.toStringAsFixed(1)} MB$totalPart$speedPart';
+    _downloader?.cancel();
   }
 
   /// 显示下载完成对话框
@@ -683,265 +627,52 @@ class AutoUpdater {
     );
   }
 
-  /// 下载文件
+  /// 下载文件（v1.8.1）。
   ///
-  /// GitHub Releases 直连在国内基本不可达（连接被重置 / 长时间无响应），
-  /// 因此下载前先并发探测「镜像 + 直连」的可达性（Range 0-0 小请求，
-  /// 2.5 秒超时），谁先应答就用谁下载；探测全失败则按候选顺序硬试。
-  /// 下载中途网络错误也会自动切换下一个候选源重试。
-  ///
-  /// 完整性链路：元数据（Release json）与 APK 允许来自不同源，
-  /// 但只要元数据带 digest，这里就会对下载结果强制校验；
-  /// _installUpdate 只会处理本方法校验通过后返回的文件，
-  /// 因此 digest 校验是安装前的硬关口，镜像换源不会绕过它。
-  Future<String> _downloadFile(
-      String url, String version, String expectedHash) async {
+  /// 交给 [MirrorDownloader]：多镜像并发测速择优、4MB 分块 4 线程并发、
+  /// 断点续传（`.part` + `.part.json`）、源失败自动换源；完成后按
+  /// Release digest 强制 sha256 校验（安装前的硬关口，镜像换源不会绕过）。
+  Future<String> _downloadFile(String url, String version,
+      String expectedHash, List<dynamic> assets) async {
     final fileName = _getFileNameFromUrl(url, version);
-
-    // 统一使用临时目录
     final tempDir = await getTemporaryDirectory();
     final filePath = '${tempDir.path}/$fileName';
     final file = File(filePath);
 
-    // 检查文件是否已存在
     if (await file.exists()) {
       try {
-        //使用哈希验证文件完整性
-        final localHash = await _sha256File(file);
-        // 资产未提供 digest 时无法验证：跳过校验直接复用本地文件
-        // （重新下载同样无法验证，只会白耗一次流量）。
+        final localHash = await sha256OfFile(file);
         if (expectedHash.isEmpty || localHash == expectedHash) {
-          // 文件已存在且哈希匹配，直接返回
-          MiruLogger().i(
-              'Update: file already exists and hash verified, skipping download: $filePath');
-          _downloadProgress.value = 1.0;
+          MiruLogger().i('Update: reuse verified file $filePath');
           return filePath;
-        } else {
-          // 文件存在但哈希不匹配，删除后重新下载
-          MiruLogger().i(
-              'Update: file hash mismatch detected (local: $localHash, expected: $expectedHash), deleting and re-downloading');
-          await file.delete();
         }
+        await file.delete();
       } catch (e) {
-        // 验证过程中出错，删除文件重新下载
-        MiruLogger().w(
-            'Update: file verification failed, deleting and re-downloading',
-            error: e);
-        if (await file.exists()) {
-          await file.delete();
-        }
+        MiruLogger().w('Update: verify existing file failed', error: e);
+        if (await file.exists()) await file.delete();
       }
     }
 
-    final candidates = _downloadUrlCandidates(url);
-    final ranked = await _rankDownloadCandidates(candidates);
-
-    // v1.6.9：断点续传 + 同源重试——弱网下一次网络抖动就删半成品从零
-    // 重下（几十 MB 的 APK 基本永远下不完）。现在：
-    // - 下载写入 <filePath>.part，失败保留半成品；
-    // - 同一源最多 3 次尝试，每次用 Range 从断点续传（源站/镜像
-    //   不支持 Range 回 200 全量时自动退回全量重下）；
-    // - 换源时也带着 .part 续传（镜像与直连的字节内容一致，digest
-    //   终检兜底）；
-    // - 哈希校验仍是安装前的硬关口：续传拼接若损坏会在终检暴露，
-    //   届时删 .part 全量重来。
-    final partFile = File('$filePath.part');
-    Object? lastError;
-    for (final candidate in ranked) {
-      for (var attempt = 1; attempt <= 3; attempt++) {
-        final cancelToken = CancelToken();
-        _cancelToken = cancelToken;
-        try {
-          final received = await _downloadWithResume(
-            candidate,
-            partFile,
-            cancelToken: cancelToken,
-          );
-          // 终检：续传拼好的完整文件先过哈希，再落成正式文件名。
-          final downloadedHash = await _sha256File(partFile);
-          if (expectedHash.isNotEmpty && downloadedHash != expectedHash) {
-            await partFile.delete();
-            throw Exception(
-                '文件完整性验证失败: 期望 $expectedHash，实际 $downloadedHash');
-          }
-          if (expectedHash.isEmpty) {
-            MiruLogger().w(
-                'Update: asset has no sha256 digest, skip integrity verification');
-          }
-          await partFile.rename(filePath);
-          MiruLogger().i(
-              'Update: file downloaded from $candidate ($received bytes, attempt $attempt) and hash verified');
-          return filePath;
-        } catch (e) {
-          // 用户主动取消：不重试不换源，直接抛出（半成品保留，
-          // 用户下次点重试还能续传）。
-          if (_cancelToken?.isCancelled ?? false) {
-            rethrow;
-          }
-          lastError = e;
-          final kept = await partFile.exists()
-              ? ' (kept ${await partFile.length()} bytes for resume)'
-              : '';
-          MiruLogger().w(
-              'Update: download failed from $candidate (attempt $attempt/3)$kept',
-              error: e);
-          // 哈希终检失败时上面已删 .part，attempt 递进自动全量重下；
-          // 其他失败保留 .part 供下一次续传。
-          if (e.toString().contains('文件完整性验证失败')) {
-            // 已经删除，直接进入下一次尝试。
-          }
-          // 网络层死亡（连接被重置等）时小睡片刻再重试，避免立即
-          // 撞同一故障。
-          if (attempt < 3) {
-            await Future<void>.delayed(
-                Duration(milliseconds: 500 * attempt));
-          }
-        }
+    int? expectedSize;
+    for (final a in assets) {
+      if (a is Map && a['browser_download_url'] == url && a['size'] is int) {
+        expectedSize = a['size'] as int;
       }
     }
-    throw lastError ?? Exception('所有下载源均不可用');
-  }
 
-  /// v1.6.9：带断点续传的流式下载。
-  ///
-  /// - [partFile] 已有内容时携带 `Range: bytes=<n>-` 续传，追加写盘；
-  /// - 源站回 206 且起始对齐 → 续传；回 200（不支持 Range）→ 全量重下；
-  /// - body 流自带 30s chunk 间隔超时（dio 的 receiveTimeout 只覆盖
-  ///   响应头，流式 body 无任何超时——断流会挂死，这是弱网更新
-  ///   「卡住不动」的直接成因）；
-  /// - 返回本次会话结束时的累计字节数（含续传基线）。
-  Future<int> _downloadWithResume(
-    String candidate,
-    File partFile, {
-    required CancelToken cancelToken,
-  }) async {
-    var existing =
-        await partFile.exists() ? await partFile.length() : 0;
-
-    final headers = <String, dynamic>{
-      if (existing > 0) 'Range': 'bytes=$existing-',
-    };
-    final response = await _downloadClient.getStream(
-      candidate,
-      headers: headers,
-      cancelToken: cancelToken,
+    final downloader = MirrorDownloader(transport: DioRangeTransport());
+    _downloader = downloader;
+    final outcome = await downloader.download(
+      url: url,
+      mirrorPrefixes: ApiEndpoints.updateDownloadMirrorPrefixes,
+      destPath: filePath,
+      expectedSha256: expectedHash,
+      expectedSize: expectedSize,
+      onProgress: (p) => _progress.value = p,
     );
-    final status = response.statusCode ?? 200;
-    final contentRange = response.headers.value('content-range') ?? '';
-    var append = false;
-    if (status == HttpStatus.partialContent && existing > 0) {
-      final match = RegExp(r'^bytes\s+(\d+)-').firstMatch(contentRange.trim());
-      final start = match == null ? null : int.parse(match.group(1)!);
-      if (start == existing) {
-        append = true; // 起始对齐：从断点继续
-      } else {
-        // 起始错位（镜像改写/缓存错位）：放弃本地半成品，全量重下。
-        existing = 0;
-      }
-    } else if (existing > 0) {
-      // 200 全量：源站不支持续传，从零开始。
-      existing = 0;
-    }
-
-    final contentLength =
-        int.tryParse(response.headers.value('content-length') ?? '');
-    final total = contentLength == null
-        ? null
-        : (append ? existing + contentLength : contentLength);
-
-    _downloadProgress.value =
-        total != null && total > 0 ? existing / total : 0.0;
-    _resetDownloadStats(existing);
-
-    final sink =
-        partFile.openWrite(mode: append ? FileMode.append : FileMode.write);
-    var received = existing;
-    var windowStart = DateTime.now();
-    var windowBytes = 0;
-    try {
-      // 30s 无任何数据到达即判死断流（见方法注释）。
-      await for (final chunk in response.data!.stream
-          .timeout(const Duration(seconds: 30))) {
-        sink.add(chunk);
-        received += chunk.length;
-        windowBytes += chunk.length;
-        if (total != null && total > 0) {
-          _downloadProgress.value = (received / total).clamp(0.0, 1.0);
-        }
-        final elapsed = DateTime.now().difference(windowStart);
-        if (elapsed.inMilliseconds >= 500) {
-          _updateDownloadStats(received, total, windowBytes, elapsed);
-          windowBytes = 0;
-          windowStart = DateTime.now();
-        }
-      }
-      final elapsed = DateTime.now().difference(windowStart);
-      if (windowBytes > 0 || elapsed.inMilliseconds > 0) {
-        _updateDownloadStats(received, total, windowBytes, elapsed);
-      }
-      await sink.flush();
-      await sink.close();
-    } catch (e) {
-      // 失败时保留已写盘的部分（续传资产），只保证 sink 关闭。
-      await sink.close().catchError((_) {});
-      rethrow;
-    }
-    return received;
-  }
-
-  /// 构造下载候选地址：镜像在前，原始直连在后。
-  List<String> _downloadUrlCandidates(String url) {
-    final candidates = <String>[
-      for (final prefix in ApiEndpoints.updateDownloadMirrorPrefixes)
-        if (!url.startsWith(prefix)) '$prefix$url',
-      url,
-    ];
-    return candidates;
-  }
-
-  /// 并发探测候选地址可达性，返回按响应速度排序的列表。
-  ///
-  /// 用 `Range: bytes=0-0` 探测（响应 206/200 即视为可用，仅需几字节
-  /// 流量），单源 2.5 秒超时。全部失败时返回原始顺序（硬试一轮）。
-  Future<List<String>> _rankDownloadCandidates(List<String> candidates) async {
-    if (candidates.length <= 1) return candidates;
-    try {
-      final results = await Future.wait(
-        candidates.map((candidate) async {
-          final stopwatch = Stopwatch()..start();
-          try {
-            await _downloadClient.getPlain(
-              candidate,
-              headers: const {'Range': 'bytes=0-0'},
-              receiveTimeout: const Duration(milliseconds: 2500),
-            );
-            return (candidate, stopwatch.elapsedMilliseconds);
-          } catch (_) {
-            return (candidate, -1);
-          }
-        }),
-      );
-      final reachable = results
-          .where((entry) => entry.$2 >= 0)
-          .toList()
-        ..sort((a, b) => a.$2.compareTo(b.$2));
-      if (reachable.isEmpty) {
-        return candidates;
-      }
-      // 可达的按速度排前，不可达的保留在后面作最后尝试
-      final ranked = [
-        for (final entry in reachable) entry.$1,
-        for (final entry in results.where((e) => e.$2 < 0)) entry.$1,
-      ];
-      MiruLogger().i(
-          'Update: download mirror probe result: ${ranked.join(' -> ')}');
-      return ranked;
-    } catch (e) {
-      MiruLogger()
-          .w('Update: download mirror probe failed, fallback to direct',
-              error: e);
-      return candidates;
-    }
+    MiruLogger().i('Update: downloaded $filePath; probe: '
+        '${outcome.probe.join(' | ')}');
+    return outcome.path;
   }
 
   /// 安装更新
@@ -1058,27 +789,4 @@ class AutoUpdater {
     }
     return 'Miru-$version$extension';
   }
-}
-
-/// 收集分块哈希最终结果的极简 Sink。
-class _DigestSink implements Sink<Digest> {
-  Digest? value;
-
-  @override
-  void add(Digest data) => value = data;
-
-  @override
-  void close() {}
-}
-
-/// 分块流式 sha256：更新包动辄几十 MB，整文件读入内存会在低端机上
-/// 造成同等大小的内存尖峰，这里按流分块喂给哈希器。
-Future<String> _sha256File(File file) async {
-  final sink = _DigestSink();
-  final input = sha256.startChunkedConversion(sink);
-  await for (final chunk in file.openRead()) {
-    input.add(chunk);
-  }
-  input.close();
-  return sink.value.toString();
 }

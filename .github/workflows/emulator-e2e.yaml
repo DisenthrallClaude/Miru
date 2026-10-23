@@ -7,8 +7,8 @@ on:
         required: false
         default: ''
   push:
-    branches: [v2-overhaul]
-    paths: ['lib/**', 'assets/plugins/**', 'android/**', 'pubspec.*', '.github/workflows/emulator-e2e.yaml', 'tool/ci_emulator_e2e.sh', 'tool/ci_ui_tour.sh']
+    branches: [v2-overhaul, v1.8.1-dev]
+    paths: ['lib/**', 'assets/plugins/**', 'android/**', 'pubspec.*', '.github/workflows/emulator-e2e.yaml', 'tool/ci_emulator_e2e.sh', 'tool/ci_ui_tour.sh', 'tool/ci_ui_tour_v181.sh']
 concurrency:
   group: emulator-e2e-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +34,7 @@ jobs:
       - name: Build x86_64 autotest APK
         run: |
           flutter pub get
-          flutter build apk --release --target-platform android-x64 -Pmiru.abis=x86_64 --dart-define=MIRU_AUTOTEST='FQDM|凡人修仙传'
+          flutter build apk --release --target-platform android-x64 -Pmiru.abis=x86_64 --dart-define=MIRU_AUTOTEST='FQDM|凡人修仙传' --dart-define=MIRU_GLASS=high
       - uses: actions/upload-artifact@v4
         with:
           name: apk-x86_64
@@ -85,10 +85,10 @@ jobs:
           path: e2e-out/
           retention-days: 7
   ui-tour:
-    # P2：开启系统动画的 UI 巡检（真实触控走一遍转场/手势/加载态），截图 ui_v2_*.png
+    # v1.8.1：开启系统动画的 UI 巡检（首页/分类/时间表/播放/更新下载），截图 ui_v181_*.png
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -114,7 +114,7 @@ jobs:
           disk-size: 6000M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
           disable-animations: false
-          script: timeout 900 bash tool/ci_ui_tour.sh
+          script: timeout 1100 bash tool/ci_ui_tour_v181.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 class GeneralErrorWidget extends StatelessWidget {
@@ -28,7 +29,7 @@ class GeneralErrorWidget extends StatelessWidget {
             shape: BoxShape.circle,
           ),
           child: Icon(
-            Icons.cloud_off_rounded,
+            CupertinoIcons.wifi_slash,
             size: 26,
             color: colorScheme.onErrorContainer,
           ),

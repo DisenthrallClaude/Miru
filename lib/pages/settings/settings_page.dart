@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/appbar/sys_app_bar.dart';
@@ -49,21 +50,21 @@ final List<_SettingsGroup> _settingsGroups = [
         id: 'player',
         label: '播放设置',
         description: '解码、渲染与播放行为',
-        icon: Icons.display_settings_rounded,
+        icon: CupertinoIcons.device_desktop,
         builder: (_) => const PlayerSettingsPage(),
       ),
       _SettingsCategory(
         id: 'danmaku',
         label: '弹幕设置',
         description: '弹幕来源与显示效果',
-        icon: Icons.subtitles_rounded,
+        icon: CupertinoIcons.captions_bubble,
         builder: (_) => const DanmakuSettingsPage(),
       ),
       _SettingsCategory(
         id: 'keyboard',
         label: '操作设置',
         description: '播放器按键映射',
-        icon: Icons.keyboard_rounded,
+        icon: CupertinoIcons.keyboard,
         builder: (_) => const KeyboardSettingsPage(),
       ),
     ],
@@ -75,14 +76,14 @@ final List<_SettingsGroup> _settingsGroups = [
         id: 'plugin',
         label: '规则管理',
         description: '番剧资源规则',
-        icon: Icons.extension_rounded,
+        icon: CupertinoIcons.cube,
         builder: (_) => PluginViewPage(controller: inject<PluginsController>()),
       ),
       _SettingsCategory(
         id: 'download',
         label: '下载设置',
         description: '并发数与弹幕缓存',
-        icon: Icons.downloading_rounded,
+        icon: CupertinoIcons.arrow_down_circle,
         builder: (_) => const DownloadSettingsPage(),
       ),
     ],
@@ -95,35 +96,35 @@ final List<_SettingsGroup> _settingsGroups = [
         label: '外观设置',
         // v1.6.3 已删除「配色方案」，描述如实反映当前页面内容。
         description: '深色模式、OLED 与字体',
-        icon: Icons.palette_rounded,
+        icon: CupertinoIcons.paintbrush,
         builder: (_) => const ThemeSettingsPage(),
       ),
       _SettingsCategory(
         id: 'interface',
         label: '界面设置',
         description: '启动页与展示信息',
-        icon: Icons.pages_rounded,
+        icon: CupertinoIcons.square_stack,
         builder: (_) => const InterfaceSettingsPage(),
       ),
       _SettingsCategory(
         id: 'sync',
         label: '同步设置',
         description: 'WebDAV、Bangumi 与规则仓库镜像',
-        icon: Icons.cloud_rounded,
+        icon: CupertinoIcons.cloud,
         builder: (_) => const WebDavSettingsPage(),
       ),
       _SettingsCategory(
         id: 'github',
         label: 'GitHub 云同步',
         description: '登录 GitHub，历史与收藏同步到私有仓库',
-        icon: Icons.verified_rounded,
+        icon: CupertinoIcons.checkmark_seal_fill,
         builder: (_) => const GithubSettingsPage(),
       ),
       _SettingsCategory(
         id: 'proxy',
         label: '代理设置',
         description: 'HTTP 代理服务器',
-        icon: Icons.vpn_key_rounded,
+        icon: CupertinoIcons.lock_shield,
         builder: (_) => const ProxySettingsPage(),
       ),
     ],
@@ -135,7 +136,7 @@ final List<_SettingsGroup> _settingsGroups = [
         id: 'about',
         label: '关于',
         description: '版本、日志与开源许可',
-        icon: Icons.info_outline_rounded,
+        icon: CupertinoIcons.info_circle,
         builder: (_) => AboutPage(controller: inject<MyController>()),
       ),
     ],
@@ -265,7 +266,7 @@ class _SettingsPageState extends State<SettingsPage> {
         // 与全局自动 leading 同款细箭头（见 SysAppBar）。
         leading: IconButton(
           onPressed: () => context.maybePop(),
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          icon: const Icon(CupertinoIcons.chevron_back, size: 20),
         ),
       ),
       body: SafeArea(

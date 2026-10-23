@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:miru/utils/glass_performance.dart';
 import 'package:miru/app_module.dart';
 import 'package:miru/app_widget.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -46,6 +47,9 @@ void main() async {
     final hivePath = '${(await getApplicationSupportDirectory()).path}/hive';
     await Hive.initFlutter(hivePath);
     await GStorage.init();
+    // v1.8.1：玻璃性能档（低端机/用户手动降级为无实时模糊）
+    GlassPerformance.userReduce =
+        GStorage.getSetting(SettingsKeys.reduceGlassBlur);
     // v1.6.4 自定义字体：启动时注册已激活的下载字体（FontLoader）。
     // 必须在 runApp 之前完成——否则首帧按内置字体渲染，注册完成后
     // 还得重建一遍主题。失败（文件损坏/缺失）静默回落，设置里可

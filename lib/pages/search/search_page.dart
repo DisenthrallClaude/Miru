@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -263,7 +264,7 @@ class _SearchPageState extends State<SearchPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.tune_rounded, size: 20),
+                Icon(CupertinoIcons.slider_horizontal_3, size: 20),
                 SizedBox(width: 8),
                 Text('筛选'),
               ],
@@ -290,7 +291,7 @@ class _SearchPageState extends State<SearchPage> {
                   onPressed: () {
                     searchController.closeView(searchController.text);
                   },
-                  icon: const Icon(Icons.arrow_back),
+                  icon: const Icon(CupertinoIcons.chevron_back),
                 ),
                 barTrailing: [
                   IconButton(
@@ -304,7 +305,7 @@ class _SearchPageState extends State<SearchPage> {
                         );
                       }
                     },
-                    icon: const Icon(Icons.image_search_rounded),
+                    icon: const Icon(CupertinoIcons.photo),
                   ),
                 ],
                 isFullScreen: MediaQuery.sizeOf(context).width <
@@ -468,7 +469,7 @@ class _SearchPageState extends State<SearchPage> {
                             searchPageController.searchBangumi(
                                 searchController.text, type: 'add');
                           },
-                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          icon: const Icon(CupertinoIcons.arrow_clockwise, size: 16),
                           label: const Text('加载更多失败，点击重试'),
                         ),
                       ),
@@ -665,7 +666,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '排序',
                   description: '选择列表优先展示的内容。',
-                  icon: Icons.sort_rounded,
+                  icon: CupertinoIcons.sort_down,
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: SegmentedButton<String>(
@@ -688,7 +689,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '标签',
                   description: '选择多个标签时，会优先寻找同时包含这些标签的番剧。',
-                  icon: Icons.sell_outlined,
+                  icon: CupertinoIcons.tag,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -723,7 +724,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                               controller: tagController,
                               decoration: const InputDecoration(
                                 labelText: '自定义标签',
-                                prefixIcon: Icon(Icons.add_circle_outline),
+                                prefixIcon: Icon(CupertinoIcons.plus_circle),
                               ),
                               onSubmitted: addTag,
                             ),
@@ -732,7 +733,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                           IconButton.filledTonal(
                             tooltip: '添加标签',
                             onPressed: () => addTag(tagController.text),
-                            icon: const Icon(Icons.add),
+                            icon: const Icon(CupertinoIcons.plus),
                           ),
                         ],
                       ),
@@ -772,7 +773,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '季度与日期',
                   description: '按播出季度查找，也可以指定更精确的日期范围。',
-                  icon: Icons.calendar_month,
+                  icon: CupertinoIcons.calendar,
                   child: Column(
                     children: [
                       DropdownButtonFormField<String>(
@@ -780,7 +781,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                             draft.season.isEmpty ? null : draft.season,
                         decoration: const InputDecoration(
                           labelText: '季度',
-                          prefixIcon: Icon(Icons.event_available_outlined),
+                          prefixIcon: Icon(CupertinoIcons.calendar_badge_plus),
                         ),
                         items: [
                           for (final season in seasonOptions)
@@ -807,7 +808,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                           children: [
                             OutlinedButton.icon(
                               onPressed: pickCustomDateRange,
-                              icon: const Icon(Icons.date_range),
+                              icon: const Icon(CupertinoIcons.calendar),
                               label: Text(draft.dateRange == null
                                   ? '自定义日期'
                                   : '${draft.dateRange!.start}..${draft.dateRange!.end}'),
@@ -823,7 +824,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                                     );
                                   });
                                 },
-                                icon: const Icon(Icons.clear),
+                                icon: const Icon(CupertinoIcons.xmark),
                                 label: const Text('不限日期'),
                               ),
                           ],
@@ -836,7 +837,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '数值范围',
                   description: '只显示符合评分或排名范围的番剧。',
-                  icon: Icons.tune_rounded,
+                  icon: CupertinoIcons.slider_horizontal_3,
                   child: Column(
                     children: [
                       _SearchSwitchTile(
@@ -879,7 +880,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '星期',
                   description: '按放送星期过滤，多个星期按任一匹配处理。',
-                  icon: Icons.today_outlined,
+                  icon: CupertinoIcons.calendar_today,
                   child: Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -909,7 +910,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                 MaterialBottomSheetSection(
                   title: '过滤',
                   description: '控制是否隐藏已经看过或放弃的番剧。',
-                  icon: Icons.filter_alt_outlined,
+                  icon: CupertinoIcons.line_horizontal_3_decrease,
                   child: Column(
                     children: [
                       _SearchSwitchTile(
@@ -944,7 +945,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                       notShowAbandoned = false;
                     });
                   },
-                  icon: const Icon(Icons.restart_alt),
+                  icon: const Icon(CupertinoIcons.arrow_counterclockwise),
                   label: const Text('重置'),
                 ),
                 const Spacer(),
@@ -960,7 +961,7 @@ class _SearchWorkbenchSheetState extends State<_SearchWorkbenchSheet> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.check),
+                  icon: const Icon(CupertinoIcons.checkmark),
                   label: const Text('应用'),
                 ),
               ],
@@ -1169,11 +1170,11 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
               for (var history
                   in widget.searchPageController.searchHistories.take(10))
                 ListTile(
-                  leading: const Icon(Icons.history_rounded),
+                  leading: const Icon(CupertinoIcons.clock),
                   title: Text(history.keyword),
                   onTap: () => _pick(history.keyword),
                   trailing: IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(CupertinoIcons.xmark),
                     onPressed: () {
                       widget.searchPageController.deleteSearchHistory(history);
                     },
@@ -1186,7 +1187,7 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
                   child: TextButton.icon(
                     onPressed: () =>
                         widget.searchPageController.clearSearchHistory(),
-                    icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                    icon: const Icon(CupertinoIcons.trash, size: 18),
                     label: const Text('清空搜索历史'),
                   ),
                 ),
@@ -1221,12 +1222,12 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
               ),
             for (final history in localMatches)
               ListTile(
-                leading: const Icon(Icons.history_rounded),
+                leading: const Icon(CupertinoIcons.clock),
                 title: Text(history.keyword),
                 dense: true,
                 onTap: () => _pick(history.keyword),
                 trailing: IconButton(
-                  icon: const Icon(Icons.close, size: 20),
+                  icon: const Icon(CupertinoIcons.xmark, size: 20),
                   onPressed: () {
                     widget.searchPageController.deleteSearchHistory(history);
                   },
@@ -1254,7 +1255,7 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
                                   .colorScheme
                                   .primaryContainer
                                   .withValues(alpha: 0.4),
-                              child: const Icon(Icons.movie_outlined, size: 18),
+                              child: const Icon(CupertinoIcons.film, size: 18),
                             ),
                           )
                         : Container(
@@ -1262,7 +1263,7 @@ class _SearchSuggestionViewState extends State<_SearchSuggestionView> {
                                 .colorScheme
                                 .primaryContainer
                                 .withValues(alpha: 0.4),
-                            child: const Icon(Icons.movie_outlined, size: 18),
+                            child: const Icon(CupertinoIcons.film, size: 18),
                           ),
                   ),
                 ),

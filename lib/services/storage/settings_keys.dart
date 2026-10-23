@@ -531,6 +531,25 @@ class SettingsKeys {
     '',
     group: SettingGroup.bangumi,
   );
+  /// v1.8.1：时间表缓存的每日 id 顺序（一部番可出现在多天）。
+  /// 为空表示旧版缓存（按首播星期分组，可能错位）→ 展示后立即后台刷新。
+  static const calendarCacheLayout = SettingKey<String>(
+    _SettingBoxKey.calendarCacheLayout,
+    '',
+    group: SettingGroup.bangumi,
+  );
+  /// v1.8.1：时间表缓存写入时间（毫秒时间戳），超过 3 小时后台刷新。
+  static const calendarCacheSavedAt = SettingKey<int>(
+    _SettingBoxKey.calendarCacheSavedAt,
+    0,
+    group: SettingGroup.bangumi,
+  );
+  /// v1.8.1：降低玻璃模糊（低端机性能档，见 GlassPerformance）。
+  static const reduceGlassBlur = SettingKey<bool>(
+    _SettingBoxKey.reduceGlassBlur,
+    false,
+    group: SettingGroup.interface,
+  );
   static const showRating = SettingKey<bool>(
     _SettingBoxKey.showRating,
     true,
@@ -780,7 +799,10 @@ class SettingsKeys {
     proxyUrl,
     proxyTestUrl,
     calendarCacheSeason,
+    calendarCacheLayout,
+    calendarCacheSavedAt,
     popularCacheOffset,
+    reduceGlassBlur,
     showRating,
     showAnimeCounter,
     downloadParallelEpisodes,
@@ -900,7 +922,10 @@ class _SettingBoxKey {
       proxyUrl = 'proxyUrl',
       proxyTestUrl = 'proxyTestUrl',
       calendarCacheSeason = 'calendarCacheSeason',
+      calendarCacheLayout = 'calendarCacheLayout',
+      calendarCacheSavedAt = 'calendarCacheSavedAt',
       popularCacheOffset = 'popularCacheOffset',
+      reduceGlassBlur = 'reduceGlassBlur',
       showRating = 'showRating',
       showAnimeCounter = 'showAnimeCounter',
       downloadParallelEpisodes = 'downloadParallelEpisodes',

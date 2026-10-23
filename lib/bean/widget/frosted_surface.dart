@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:cupertino_liquid_glass/cupertino_liquid_glass.dart';
 import 'package:flutter/material.dart';
+import 'package:miru/utils/glass_performance.dart';
 import 'package:miru/utils/theme.dart';
 
 /// 毛玻璃 / 液态玻璃材质容器。
@@ -132,6 +133,42 @@ class _FrostedSurfaceState extends State<FrostedSurface> {
     final double opacity = Frost.tintOpacity(brightness);
     // 局部变量承接可空字段：Dart 的类型提升对实例字段无效。
     final Color? tintColor = widget.tint;
+
+    // v1.8.1 低端机降级：不做任何实时模糊，用更不透明的底色 + 上缘镜面
+    // 高光 + 发丝描边保持玻璃语言（见 GlassPerformance）。
+    if (GlassPerformance.reduced) {
+      final bool isDark = brightness == Brightness.dark;
+      final Color base = tintColor != null
+          ? Color.alphaBlend(tintColor.withValues(alpha: 0.80),
+              scheme.surface.withValues(alpha: 0.92))
+          : scheme.surface.withValues(alpha: isDark ? 0.94 : 0.92);
+      final Widget plain = DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: widget.borderRadius,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.alphaBlend(
+                  Colors.white.withValues(alpha: isDark ? 0.06 : 0.30), base),
+              base,
+            ],
+            stops: const [0.0, 0.6],
+          ),
+          border: widget.border ??
+              Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : Colors.white.withValues(alpha: 0.65),
+                width: 0.8,
+              ),
+        ),
+        child: widget.child,
+      );
+      return widget.borderRadius == null
+          ? plain
+          : ClipRRect(borderRadius: widget.borderRadius!, child: plain);
+    }
 
     // cupertino_liquid_glass 内部已插入 RepaintBoundary 隔离合成层，
     // 这里不再重复包裹，避免多一次离屏栅格缓存。

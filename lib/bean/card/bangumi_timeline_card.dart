@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
@@ -179,7 +180,7 @@ class BangumiTimelineCard extends StatelessWidget {
         if (showScore)
           buildMetric(
             context,
-            icon: Icons.star_rounded,
+            icon: CupertinoIcons.star_fill,
             iconColor: colorScheme.primary,
             label:
                 showRating ? bangumiItem.ratingScore.toStringAsFixed(1) : '***',
@@ -188,7 +189,7 @@ class BangumiTimelineCard extends StatelessWidget {
         if (showRank)
           buildMetric(
             context,
-            icon: Icons.leaderboard_outlined,
+            icon: CupertinoIcons.chart_bar,
             iconColor: colorScheme.secondary,
             label: rankText,
             textStyle: metricStyle,
@@ -196,7 +197,7 @@ class BangumiTimelineCard extends StatelessWidget {
         if (showVotes)
           buildMetric(
             context,
-            icon: Icons.how_to_vote_outlined,
+            icon: CupertinoIcons.person_2,
             iconColor: colorScheme.onSurfaceVariant,
             label: votesText,
             textStyle: metricStyle,

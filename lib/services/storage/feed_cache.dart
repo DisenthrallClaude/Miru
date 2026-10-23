@@ -1,3 +1,4 @@
+import 'package:miru/request/apis/season_schedule.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -63,13 +64,28 @@ abstract final class FeedCache {
       season == cachedCalendarSeason &&
       (GStorage.calendarCacheOrNull?.isNotEmpty ?? false);
 
-  /// 按 airWeekday 还原成 7 天分组。
-  /// 与 `BangumiApi.getCalendarBySearch` 的分组方式一致，
-  /// 且各天内部顺序与写入时相同（写入时按天依次展平）。
+  /// 缓存是否为 v1.8.1 新格式（带每日 id 顺序）。旧格式按首播星期分组，
+  /// 可能错位，调用方应展示后立刻后台刷新。
+  static bool get calendarHasLayout =>
+      GStorage.getSetting(SettingsKeys.calendarCacheLayout).isNotEmpty;
+
+  /// 缓存写入时间；0 表示未知（旧版缓存）。
+  static DateTime? get calendarSavedAt {
+    final ms = GStorage.getSetting(SettingsKeys.calendarCacheSavedAt);
+    return ms <= 0 ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  /// 还原 7 天分组：优先按 v1.8.1 的 layout（支持一部番多天），
+  /// 没有 layout 的旧缓存按 airWeekday 分组。
   static List<List<BangumiItem>> loadCalendar() {
     final box = GStorage.calendarCacheOrNull;
     final grouped = List.generate(7, (_) => <BangumiItem>[]);
     if (box == null) return grouped;
+    final layout = GStorage.getSetting(SettingsKeys.calendarCacheLayout);
+    final byLayout = decodeScheduleLayout(layout, box.values);
+    if (byLayout != null && byLayout.any((d) => d.isNotEmpty)) {
+      return byLayout;
+    }
     for (final item in box.values) {
       final weekday = item.airWeekday;
       if (weekday >= 1 && weekday <= 7) {
@@ -83,19 +99,50 @@ abstract final class FeedCache {
     List<List<BangumiItem>> calendar,
     String season,
   ) async {
-    final flat = calendar.expand((day) => day).toList();
+    // 一部番可在多天出现：落盘去重（Hive 不能重复存同一实例），
+    // 每日顺序另存 layout。
+    final seen = <int>{};
+    final flat = <BangumiItem>[
+      for (final day in calendar)
+        for (final item in day)
+          if (seen.add(item.id)) item,
+    ];
     if (flat.isEmpty) return;
     try {
       await GStorage.ensureFeedCachesOpen();
       final box = GStorage.calendarCache;
       await box.clear();
-      await box.addAll(flat);
+      await box.addAll(flat.map(_copyOf));
       await box.flush();
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, season);
+      await GStorage.putSetting(
+          SettingsKeys.calendarCacheLayout, encodeScheduleLayout(calendar));
+      await GStorage.putSetting(SettingsKeys.calendarCacheSavedAt,
+          DateTime.now().millisecondsSinceEpoch);
     } catch (e) {
       MiruLogger().w('FeedCache: save calendar failed', error: e);
     }
   }
+
+  /// 存副本：内存里正在展示的实例不绑定到 Hive 盒（避免同一实例
+  /// 跨盒/重复入盒异常，也避免 box.clear 后实例失效）。
+  static BangumiItem _copyOf(BangumiItem b) => BangumiItem(
+        id: b.id,
+        type: b.type,
+        name: b.name,
+        nameCn: b.nameCn,
+        summary: b.summary,
+        airDate: b.airDate,
+        airWeekday: b.airWeekday,
+        rank: b.rank,
+        images: Map<String, String>.from(b.images),
+        tags: List.of(b.tags),
+        alias: List.of(b.alias),
+        ratingScore: b.ratingScore,
+        votes: b.votes,
+        votesCount: List.of(b.votesCount),
+        info: b.info,
+      );
 
   // ---------------------------------------------------------------------- 清理
 
@@ -106,6 +153,7 @@ abstract final class FeedCache {
       await GStorage.popularCache.clear();
       await GStorage.calendarCache.clear();
       await GStorage.putSetting(SettingsKeys.calendarCacheSeason, '');
+      await GStorage.putSetting(SettingsKeys.calendarCacheLayout, '');
       await GStorage.putSetting(SettingsKeys.popularCacheOffset, 0);
     } catch (e) {
       MiruLogger().w('FeedCache: clear failed', error: e);

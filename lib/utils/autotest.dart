@@ -8,6 +8,7 @@ import 'package:miru/navigation.dart';
 import 'package:miru/pages/video/video_playback_args.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/services/logging/logger.dart';
+import 'package:miru/services/update/auto_updater.dart';
 
 /// CI/模拟器自动化播放自测（仅在构建时 `--dart-define=MIRU_AUTOTEST=...`
 /// 注入时启用；正式发布包为空字符串，零行为变化）。
@@ -34,6 +35,19 @@ Future<void> runAutotest(PluginsController pluginsController) async {
   final pluginName = parts.first.trim();
   final keyword = parts.length > 1 ? parts[1].trim() : '凡人修仙传';
   void log(String m) => MiruLogger().i('MIRU_AUTOTEST $m');
+  // v1.8.1：`update|demo` —— CI 验证应用内更新下载（把当前版本视作 0.0.1，
+  // 弹出 releases/latest 的更新弹窗，由 CI 点「立即更新」走真实镜像下载）。
+  if (pluginName == 'update') {
+    await Future<void>.delayed(const Duration(seconds: 4));
+    log('update-demo start');
+    try {
+      await AutoUpdater().debugShowUpdateForAutotest();
+      log('update-demo dialog shown');
+    } catch (e) {
+      log('update-demo failed $e');
+    }
+    return;
+  }
   try {
     await Future<void>.delayed(const Duration(seconds: 3));
     final plugin = pluginsController.pluginList

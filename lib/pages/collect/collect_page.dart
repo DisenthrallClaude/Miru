@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/modules/collect/collect_module.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:miru/utils/constants.dart';
 import 'package:miru/bean/card/bangumi_card.dart';
@@ -252,7 +253,7 @@ class _CollectPageState extends State<CollectPage>
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync_rounded),
+                : const Icon(CupertinoIcons.arrow_2_circlepath),
           ),
           IconButton(
               tooltip: showDelete ? '退出编辑' : '编辑',
@@ -264,8 +265,8 @@ class _CollectPageState extends State<CollectPage>
               // 与历史页同构页面保持同一套图标语义（此前两页状态互为
               // 相反，且缺「退出编辑」的 edit_off 语义）。
               icon: showDelete
-                  ? const Icon(Icons.edit_off_outlined)
-                  : const Icon(Icons.edit_outlined))
+                  ? const Icon(CupertinoIcons.pencil_slash)
+                  : const Icon(CupertinoIcons.pencil))
         ],
       ),
       body: Observer(builder: (context) {
@@ -283,7 +284,7 @@ class _CollectPageState extends State<CollectPage>
     } else {
       return const Center(
         child: GeneralEmptyState(
-          icon: Icons.favorite_border_rounded,
+          icon: CupertinoIcons.heart,
           title: '暂无追番内容',
         ),
       );

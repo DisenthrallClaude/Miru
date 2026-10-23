@@ -1,6 +1,7 @@
 import 'package:miru/utils/haptics.dart';
 import 'dart:async';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:miru/bean/widget/spring_press.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -657,7 +658,7 @@ class _VideoPageState extends State<VideoPage>
                     ListTile(
                       contentPadding:
                           const EdgeInsets.symmetric(horizontal: 16),
-                      leading: const Icon(Icons.groups_rounded),
+                      leading: const Icon(CupertinoIcons.person_3),
                       title: const Text('发送到聊天室'),
                       subtitle: const Text('同步观看成员均可看到'),
                       onTap: () => Navigator.of(context)
@@ -666,7 +667,7 @@ class _VideoPageState extends State<VideoPage>
                     ListTile(
                       contentPadding:
                           const EdgeInsets.symmetric(horizontal: 16),
-                      leading: const Icon(Icons.cloud_upload_rounded),
+                      leading: const Icon(CupertinoIcons.cloud_upload),
                       title: const Text('发送到远程弹幕库'),
                       subtitle: const Text('作为视频弹幕发送'),
                       onTap: () => Navigator.of(context)
@@ -1000,7 +1001,7 @@ class _VideoPageState extends State<VideoPage>
                       child: Row(
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.arrow_back,
+                            icon: const Icon(CupertinoIcons.chevron_back,
                                 color: Colors.white),
                             onPressed: () => onBackPressed(context),
                           ),
@@ -1008,7 +1009,7 @@ class _VideoPageState extends State<VideoPage>
                               child: dtb.DragToMoveArea(
                                   child: SizedBox(height: 40))),
                           IconButton(
-                            icon: const Icon(Icons.refresh_outlined,
+                            icon: const Icon(CupertinoIcons.arrow_clockwise,
                                 color: Colors.white),
                             onPressed: () {
                               MiruHaptics.tap();
@@ -1028,8 +1029,8 @@ class _VideoPageState extends State<VideoPage>
                               },
                               icon: Icon(
                                 _tabBodyTargetVisible
-                                    ? Icons.menu_open
-                                    : Icons.menu_open_outlined,
+                                    ? CupertinoIcons.sidebar_left
+                                    : CupertinoIcons.sidebar_left,
                                 color: Colors.white,
                               ),
                             ),
@@ -1037,8 +1038,8 @@ class _VideoPageState extends State<VideoPage>
                           IconButton(
                             icon: Icon(
                                 showDebugLog
-                                    ? Icons.bug_report
-                                    : Icons.bug_report_outlined,
+                                    ? CupertinoIcons.ant
+                                    : CupertinoIcons.ant,
                                 color: Colors.white),
                             onPressed: () {
                               switchDebugConsole();
@@ -1214,7 +1215,7 @@ class _VideoPageState extends State<VideoPage>
     if (episode == null) return const SizedBox.shrink();
     switch (episode.status) {
       case DownloadStatus.completed:
-        return Icon(Icons.offline_pin,
+        return Icon(CupertinoIcons.checkmark_circle,
             size: 16, color: Theme.of(context).colorScheme.primary);
       case DownloadStatus.downloading:
         return SizedBox(
@@ -1226,10 +1227,10 @@ class _VideoPageState extends State<VideoPage>
           ),
         );
       case DownloadStatus.failed:
-        return Icon(Icons.error_outline,
+        return Icon(CupertinoIcons.exclamationmark_circle,
             size: 16, color: Theme.of(context).colorScheme.error);
       case DownloadStatus.paused:
-        return Icon(Icons.pause_circle_outline,
+        return Icon(CupertinoIcons.pause_circle,
             size: 16, color: Theme.of(context).colorScheme.outline);
       case DownloadStatus.pending:
       case DownloadStatus.resolving:
@@ -1343,7 +1344,7 @@ class _VideoPageState extends State<VideoPage>
                             ),
                             // 已看角标：100+ 集长番选集面板最大的信息缺口。
                             if (isWatched)
-                              Icon(Icons.done_all_rounded,
+                              Icon(CupertinoIcons.checkmark_alt,
                                   size: 14, color: scheme.outline),
                             _buildDownloadStatusIcon(count0, urlItem),
                             const SizedBox(width: 2),
@@ -1498,7 +1499,7 @@ class _VideoPageState extends State<VideoPage>
             ),
             if (danmakuOn)
               Icon(
-                Icons.send_rounded,
+                CupertinoIcons.paperplane_fill,
                 size: 18,
                 color: color,
               ),
@@ -1523,7 +1524,7 @@ class _VideoPageState extends State<VideoPage>
             ),
           );
         },
-        icon: Icons.download_rounded,
+        icon: CupertinoIcons.arrow_down_circle,
         tooltip: '下载',
       ),
     );
@@ -1544,7 +1545,7 @@ class _RoadHealthBadge extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     if (!health.ok) {
       return Icon(
-        Icons.cloud_off_outlined,
+        CupertinoIcons.wifi_slash,
         size: 14,
         color: scheme.error,
         semanticLabel: '线路不可用',
@@ -1559,7 +1560,7 @@ class _RoadHealthBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
-          Icons.bolt_rounded,
+          CupertinoIcons.bolt_fill,
           size: 14,
           color: color,
           semanticLabel: '线路健康',

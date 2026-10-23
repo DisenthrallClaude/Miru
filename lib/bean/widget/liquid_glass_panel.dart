@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:miru/utils/glass_performance.dart';
 
 /// 预加载液态玻璃面板 shader（main.dart 启动时 await——首帧前就绪，
 /// 底部 Dock 不会先闪一下毛玻璃再变折射玻璃）。
@@ -139,6 +140,47 @@ class _LiquidGlassPanelState extends State<LiquidGlassPanel> {
     // 配合 v1.6.7 全通道磨砂双保险，页签文字在任何封面下都读得清。
     final double tintAmt = widget.tintAmt ??
         (brightness == Brightness.dark ? 0.55 : 0.45);
+
+    // v1.8.1 低端机降级：关闭折射 shader 与实时模糊，静态玻璃。
+    if (GlassPerformance.reduced) {
+      final bool isDark = brightness == Brightness.dark;
+      final Color base = Color.alphaBlend(
+          tint.withValues(alpha: isDark ? 0.92 : 0.90),
+          isDark ? const Color(0xFF0E1218) : Colors.white);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(widget.radius),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color.alphaBlend(
+                    Colors.white.withValues(alpha: isDark ? 0.08 : 0.45),
+                    base),
+                base,
+              ],
+              stops: const [0.0, 0.55],
+            ),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Colors.white.withValues(alpha: 0.70),
+              width: 0.8,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.10),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: widget.child,
+        ),
+      );
+    }
 
     final shader = _shaderInstance;
     if (_program != null && shader != null) {

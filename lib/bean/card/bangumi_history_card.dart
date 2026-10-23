@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -103,7 +104,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Icon(
-          Icons.delete_outline,
+          CupertinoIcons.trash,
           color: colorScheme.onErrorContainer,
         ),
       ),
@@ -150,7 +151,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
                         Row(
                           children: [
                             Icon(
-                              Icons.play_circle_outline,
+                              CupertinoIcons.play_circle,
                               size: 14,
                               color: colorScheme.onSurfaceVariant,
                             ),
@@ -171,7 +172,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
                         Row(
                           children: [
                             Icon(
-                              Icons.extension_outlined,
+                              CupertinoIcons.cube,
                               size: 14,
                               color: colorScheme.onSurfaceVariant,
                             ),
@@ -192,7 +193,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
                         Row(
                           children: [
                             Icon(
-                              Icons.access_time,
+                              CupertinoIcons.clock,
                               size: 12,
                               color: colorScheme.outline,
                             ),
@@ -229,7 +230,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
                       ),
                       IconButton(
                         icon: Icon(
-                          Icons.open_in_new,
+                          CupertinoIcons.arrow_up_right_square,
                           size: 20,
                           color: colorScheme.onSurfaceVariant,
                         ),
@@ -245,7 +246,7 @@ class _BangumiHistoryCardVState extends State<BangumiHistoryCardV> {
                     if (widget.showDelete)
                       IconButton(
                         icon: Icon(
-                          Icons.delete_outline,
+                          CupertinoIcons.trash,
                           color: colorScheme.error,
                         ),
                         tooltip: '删除记录',

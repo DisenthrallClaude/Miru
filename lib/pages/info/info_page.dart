@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:miru/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/pages/info/rating_review_dialog.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/widget/collect_button.dart';
@@ -421,7 +422,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                         onPressed: () {
                           context.maybePop();
                         },
-                        icon: Icon(Icons.arrow_back),
+                        icon: Icon(CupertinoIcons.chevron_back),
                       ),
                     ),
                     actions: [
@@ -442,7 +443,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                               mode: LaunchMode.externalApplication,
                             );
                           },
-                          icon: const Icon(Icons.open_in_browser_rounded),
+                          icon: const Icon(CupertinoIcons.globe),
                         ),
                       ),
                       if (!showWindowButton && isDesktop())
@@ -561,7 +562,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                   tooltip: '吐槽',
                   onPressed: onBangumiRatingTap,
                   label: '发表吐槽',
-                  icon: Icons.rate_review_rounded,
+                  icon: CupertinoIcons.text_bubble,
                 )
               : GlassActionButton(
                   tooltip: '开始观看',
@@ -577,7 +578,7 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                     );
                   },
                   label: '开始观看',
-                  icon: Icons.play_arrow_rounded,
+                  icon: CupertinoIcons.play_fill,
                 ),
         ),
       ),

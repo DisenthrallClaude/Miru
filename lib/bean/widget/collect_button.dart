@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:miru/bean/widget/frosted_surface.dart';
 import 'package:miru/bean/widget/glass.dart';
@@ -71,17 +72,17 @@ class _CollectButtonState extends State<CollectButton> {
   IconData getIconByInt(int collectType) {
     switch (collectType) {
       case 1:
-        return Icons.favorite;
+        return CupertinoIcons.heart_fill;
       case 2:
-        return Icons.star_rounded;
+        return CupertinoIcons.star_fill;
       case 3:
-        return Icons.pending_actions;
+        return CupertinoIcons.clock;
       case 4:
-        return Icons.done;
+        return CupertinoIcons.checkmark;
       case 5:
-        return Icons.heart_broken;
+        return CupertinoIcons.heart_slash;
       default:
-        return Icons.favorite_border;
+        return CupertinoIcons.heart;
     }
   }
 

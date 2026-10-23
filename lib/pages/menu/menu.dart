@@ -1,4 +1,5 @@
 import 'package:miru/utils/haptics.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter/services.dart';
@@ -224,23 +225,23 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                 indicatorColor: Colors.transparent,
                 destinations: const <Widget>[
                   NavigationDestination(
-                    selectedIcon: Icon(Icons.auto_awesome_rounded),
-                    icon: Icon(Icons.auto_awesome_outlined),
+                    selectedIcon: Icon(CupertinoIcons.sparkles),
+                    icon: Icon(CupertinoIcons.sparkles),
                     label: '推荐',
                   ),
                   NavigationDestination(
-                    selectedIcon: Icon(Icons.calendar_today_rounded),
-                    icon: Icon(Icons.calendar_today_outlined),
+                    selectedIcon: Icon(CupertinoIcons.calendar),
+                    icon: Icon(CupertinoIcons.calendar),
                     label: '时间表',
                   ),
                   NavigationDestination(
-                    selectedIcon: Icon(Icons.bookmark_rounded),
-                    icon: Icon(Icons.bookmark_border_rounded),
+                    selectedIcon: Icon(CupertinoIcons.bookmark_fill),
+                    icon: Icon(CupertinoIcons.bookmark),
                     label: '追番',
                   ),
                   NavigationDestination(
-                    selectedIcon: Icon(Icons.person_rounded),
-                    icon: Icon(Icons.person_outline_rounded),
+                    selectedIcon: Icon(CupertinoIcons.person_fill),
+                    icon: Icon(CupertinoIcons.person),
                     label: '我的',
                   ),
                 ],
@@ -285,7 +286,7 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                     padding: const EdgeInsets.only(bottom: Space.sm),
                     child: IconButton.filledTonal(
                       onPressed: () => context.pushNamed('/search/'),
-                      icon: const Icon(Icons.search_rounded),
+                      icon: const Icon(CupertinoIcons.search),
                       style: IconButton.styleFrom(
                         shape: const RoundedRectangleBorder(
                           borderRadius: Radii.brMd,
@@ -297,23 +298,23 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                   labelType: NavigationRailLabelType.selected,
                   destinations: const <NavigationRailDestination>[
                     NavigationRailDestination(
-                      selectedIcon: Icon(Icons.auto_awesome_rounded),
-                      icon: Icon(Icons.auto_awesome_outlined),
+                      selectedIcon: Icon(CupertinoIcons.sparkles),
+                      icon: Icon(CupertinoIcons.sparkles),
                       label: Text('推荐'),
                     ),
                     NavigationRailDestination(
-                      selectedIcon: Icon(Icons.calendar_today_rounded),
-                      icon: Icon(Icons.calendar_today_outlined),
+                      selectedIcon: Icon(CupertinoIcons.calendar),
+                      icon: Icon(CupertinoIcons.calendar),
                       label: Text('时间表'),
                     ),
                     NavigationRailDestination(
-                      selectedIcon: Icon(Icons.bookmark_rounded),
-                      icon: Icon(Icons.bookmark_border_rounded),
+                      selectedIcon: Icon(CupertinoIcons.bookmark_fill),
+                      icon: Icon(CupertinoIcons.bookmark),
                       label: Text('追番'),
                     ),
                     NavigationRailDestination(
-                      selectedIcon: Icon(Icons.person_rounded),
-                      icon: Icon(Icons.person_outline_rounded),
+                      selectedIcon: Icon(CupertinoIcons.person_fill),
+                      icon: Icon(CupertinoIcons.person),
                       label: Text('我的'),
                     ),
                   ],

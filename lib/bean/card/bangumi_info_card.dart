@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:miru/bean/widget/collect_button.dart';
@@ -225,7 +226,7 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                                             2
                                         : 0,
                                     itemBuilder: (context, index) => Icon(
-                                      Icons.star_rounded,
+                                      CupertinoIcons.star_fill,
                                       color:
                                           Theme.of(context).colorScheme.primary,
                                     ),

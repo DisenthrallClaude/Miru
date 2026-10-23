@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:flutter_modular/flutter_modular.dart';
@@ -691,7 +692,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       isDesktop())
                     IconButton(
                       color: Colors.white,
-                      icon: const Icon(Icons.skip_next_rounded),
+                      icon: const Icon(CupertinoIcons.forward_end_fill),
                       tooltip: '下一集',
                       onPressed: () => widget.handlePreNextEpisode('next'),
                     ),
@@ -887,7 +888,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                           }
                         },
                         icon: const Icon(
-                          Icons.aspect_ratio_rounded,
+                          CupertinoIcons.crop,
                           color: Colors.white,
                         ),
                         tooltip: '视频比例',
@@ -923,7 +924,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       ? Container()
                       : IconButton(
                           color: Colors.white,
-                          icon: const Icon(Icons.menu_open_rounded),
+                          icon: const Icon(CupertinoIcons.sidebar_left),
                           tooltip: '选集面板',
                           onPressed: () {
                             widget.toggleMenu();
@@ -937,8 +938,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                       : IconButton(
                           color: Colors.white,
                           icon: Icon(videoPageController.isFullscreen
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded),
+                              ? CupertinoIcons.fullscreen_exit
+                              : CupertinoIcons.fullscreen),
                           tooltip:
                               videoPageController.isFullscreen ? '退出全屏' : '全屏',
                           onPressed: () {
@@ -981,7 +982,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             children: [
               IconButton(
                 color: Colors.white,
-                icon: const Icon(Icons.arrow_back_rounded),
+                icon: const Icon(CupertinoIcons.chevron_back),
                 tooltip: '返回',
                 onPressed: () {
                   widget.onBackPressed(context);
@@ -1041,7 +1042,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                   },
                   tooltip: '画中画',
                   icon: const Icon(
-                    Icons.picture_in_picture,
+                    CupertinoIcons.rectangle_on_rectangle,
                     color: Colors.white,
                   ),
                 ),
@@ -1065,7 +1066,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     },
                     tooltip: '更多选项',
                     icon: const Icon(
-                      Icons.more_vert,
+                      CupertinoIcons.ellipsis_vertical,
                       color: Colors.white,
                     ),
                   );
@@ -1285,7 +1286,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               ? Container()
               : IconButton(
                   icon: const Icon(
-                    Icons.photo_camera_outlined,
+                    CupertinoIcons.camera,
                     color: Colors.white,
                   ),
                   tooltip: '截图',
@@ -1296,8 +1297,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           IconButton(
             icon: Icon(
               playerController.panel.lockPanel
-                  ? Icons.lock_outline
-                  : Icons.lock_open,
+                  ? CupertinoIcons.lock
+                  : CupertinoIcons.lock_open,
               color: Colors.white,
             ),
             tooltip: playerController.panel.lockPanel ? '解锁面板' : '锁定面板',

@@ -6,6 +6,8 @@ import 'package:miru/request/apis/bangumi_api.dart';
 import 'package:miru/utils/anime_season.dart';
 import 'package:miru/repositories/collect_repository.dart';
 import 'package:miru/modules/collect/collect_type.dart';
+import 'package:flutter/foundation.dart';
+import 'package:miru/request/apis/season_schedule.dart';
 import 'package:mobx/mobx.dart';
 
 part 'timeline_controller.g.dart';
@@ -67,79 +69,90 @@ abstract class _TimelineController with Store {
     await getSchedulesBySeason();
   }
 
-  @action
-  /// 按季度拉取时间表。
-  ///
-  /// 不再走需要签名的 mirror 独有接口（/miru/v1/calendar/season），
-  /// 统一使用官方搜索路径 —— 域名已由拦截器重写到公共反代。
-  Future<void> getSchedulesBySeason({bool forceRefresh = false}) async {
-    final season = AnimeSeason(selectedDate).toString();
+  /// v1.8.1：后台刷新中（已展示缓存，同时在联网更新）。非 mobx 字段，
+  /// 页面用 ValueListenableBuilder 显示顶部细进度条，不需要重跑 codegen。
+  final ValueNotifier<bool> refreshing = ValueNotifier(false);
 
-    // 命中同季度的本地缓存就直接用，完全不联网。
-    // 换季（season 变化）或用户主动刷新时才重新拉取。
-    if (!forceRefresh && FeedCache.hasCalendarFor(season)) {
-      bangumiCalendar.clear();
-      bangumiCalendar.addAll(FeedCache.loadCalendar());
-      isLoading = false;
-      isTimeOut = bangumiCalendar.every((innerList) => innerList.isEmpty);
-      if (!isTimeOut) {
+  /// 缓存超过这个时长就在展示后后台刷新（放送表一天内会有改档/新番补录）。
+  static const Duration cacheTtl = Duration(hours: 3);
+
+  /// 当前请求代次：切季度/重复刷新时丢弃过期结果，避免旧季度数据覆盖新季度。
+  int _generation = 0;
+
+  @action
+  /// 按季度拉取时间表（v1.8.1：先展示缓存、后台刷新；并发分页；更新日按
+  /// 放送星期/官方放送表判定，见 BangumiApi.getSeasonSchedule）。
+  Future<void> getSchedulesBySeason({bool forceRefresh = false}) async {
+    final generation = ++_generation;
+    final seasonObj = AnimeSeason(selectedDate);
+    final season = seasonObj.toString();
+    final isCurrent = AnimeSeason(DateTime.now()).toString() == season;
+
+    var showingCache = false;
+    if (FeedCache.hasCalendarFor(season)) {
+      final cached = FeedCache.loadCalendar();
+      if (cached.any((d) => d.isNotEmpty)) {
+        bangumiCalendar
+          ..clear()
+          ..addAll(cached);
+        isLoading = false;
+        isTimeOut = false;
         changeSortType(sortType);
-        return;
+        showingCache = true;
+        final savedAt = FeedCache.calendarSavedAt;
+        final fresh = FeedCache.calendarHasLayout &&
+            savedAt != null &&
+            DateTime.now().difference(savedAt) < cacheTtl;
+        if (fresh && !forceRefresh) return;
       }
-      // 缓存内容异常（全空）则回落到联网
     }
 
-    isLoading = true;
-    isTimeOut = false;
-    bangumiCalendar.clear();
-    var time = 0;
-    // 页数上限提高 + 整页为空时提前终止：当季条目超过 80 条
-    // 不再被静默截断；小季度也不会多打空页请求。
-    const maxTime = 10;
-    const limit = 20;
-    var resBangumiCalendar = List.generate(7, (_) => <BangumiItem>[]);
+    if (showingCache) {
+      refreshing.value = true;
+    } else {
+      isLoading = true;
+      isTimeOut = false;
+      bangumiCalendar.clear();
+    }
+
+    final ScheduleBuild build;
     try {
-      while (time < maxTime) {
-        final offset = time * limit;
-        var newList = await BangumiApi.getCalendarBySearch(
-            AnimeSeason(selectedDate).toSeasonStartAndEnd(), limit, offset);
-        var fetchedCount = 0;
-        for (int i = 0; i < resBangumiCalendar.length; ++i) {
-          fetchedCount += newList[i].length;
-          resBangumiCalendar[i].addAll(newList[i]);
-        }
-        bangumiCalendar.clear();
-        bangumiCalendar.addAll(resBangumiCalendar);
-        if (fetchedCount == 0) break; // 整页为空：已到尽头
-        time++;
-      }
+      build = await BangumiApi.getSeasonSchedule(
+        seasonObj.toSeasonStartAndEnd(),
+        includeContinuing: isCurrent,
+      );
     } catch (e) {
+      if (generation != _generation) return;
       isLoading = false;
-      // 联网失败时优先回落到上一季度的本地缓存，而不是渲染成空时间表。
-      if (FeedCache.hasCalendarFor(season)) {
-        bangumiCalendar.addAll(FeedCache.loadCalendar());
-        if (bangumiCalendar.any((innerList) => innerList.isNotEmpty)) {
-          changeSortType(sortType);
-          return;
+      refreshing.value = false;
+      if (showingCache) {
+        if (forceRefresh) {
+          MiruDialog.showToast(message: '刷新失败，当前显示的是本地缓存');
         }
+        return;
       }
       isTimeOut = true;
       MiruDialog.showToast(message: '时间表加载失败，请检查网络后重试');
       return;
     }
+    if (generation != _generation) return;
     isLoading = false;
-    if (bangumiCalendar.isEmpty) {
-      isTimeOut = true;
-    } else {
-      isTimeOut = bangumiCalendar.every((innerList) => innerList.isEmpty);
-    }
-    if (!isTimeOut) {
+    refreshing.value = false;
+    final empty = build.days.every((d) => d.isEmpty);
+    if (empty && showingCache) return; // 网络给了空表：保留缓存
+    bangumiCalendar
+      ..clear()
+      ..addAll(build.days);
+    isTimeOut = empty;
+    if (!empty) {
       changeSortType(sortType);
-      // 排序后再落盘，恢复时顺序与当前一致
-      await FeedCache.saveCalendar(
-        bangumiCalendar.map((e) => e.toList()).toList(),
-        season,
-      );
+      // 只缓存当季（打开 App 默认看的就是当季）；翻看往季不覆盖当季缓存。
+      if (isCurrent) {
+        await FeedCache.saveCalendar(
+          bangumiCalendar.map((e) => e.toList()).toList(),
+          season,
+        );
+      }
     }
   }
 

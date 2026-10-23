@@ -1,5 +1,6 @@
 import 'package:miru/bean/settings/settings_list.dart';
 import 'package:flutter/material.dart';
+import 'package:miru/utils/glass_performance.dart';
 import 'package:miru/bean/settings/settings_detail_scaffold.dart';
 import 'package:miru/services/storage/storage.dart';
 
@@ -12,6 +13,7 @@ class InterfaceSettingsPage extends StatefulWidget {
 
 class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
   late bool showRating;
+  late bool reduceGlassBlur;
   late bool showAnimeCounter;
   late bool showSplashEveryLaunch;
   late String defaultPage;
@@ -28,6 +30,7 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
   void initState() {
     super.initState();
     showRating = GStorage.getSetting(SettingsKeys.showRating);
+    reduceGlassBlur = GStorage.getSetting(SettingsKeys.reduceGlassBlur);
     showAnimeCounter = GStorage.getSetting(SettingsKeys.showAnimeCounter);
     showSplashEveryLaunch =
         GStorage.getSetting(SettingsKeys.showSplashOnEveryLaunch);
@@ -107,6 +110,21 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
             ),
           ]),
           SettingsSection(title: Text('展示信息'), tiles: [
+            SettingsTile.switchTile(
+              leading: Icons.blur_off_rounded,
+              onToggle: (value) async {
+                reduceGlassBlur = value ?? !reduceGlassBlur;
+                GlassPerformance.userReduce = reduceGlassBlur;
+                await GStorage.putSetting(
+                    SettingsKeys.reduceGlassBlur, reduceGlassBlur);
+                setState(() {});
+              },
+              title: Text('降低玻璃模糊'),
+              description: Text(GlassPerformance.autoLowEnd
+                  ? '已检测为低配设备，自动使用无模糊玻璃以保证流畅'
+                  : '关闭实时模糊与折射，滚动更流畅、更省电（返回后生效）'),
+              initialValue: reduceGlassBlur || GlassPerformance.autoLowEnd,
+            ),
             SettingsTile.switchTile(
               leading: Icons.star_rounded,
               onToggle: (value) async {
