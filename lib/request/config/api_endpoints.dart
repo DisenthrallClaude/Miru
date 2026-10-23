@@ -5,7 +5,7 @@ class ApiEndpoints {
   static const String version = appBuildName ?? '0.0.0';
 
   /// 规则API级别
-  static const int apiLevel = 8;
+  static const int apiLevel = 9; // v1.8.1：支持 searchApiConfig.sourceTemplate（上游 ff85947）
 
   /// 项目主页
   static const String projectUrl = "https://github.com/DisenthrallClaude/Miru";
@@ -26,10 +26,22 @@ class ApiEndpoints {
   static const String pluginShop =
       'https://raw.githubusercontent.com/Predidit/KazumiRules/main/';
 
-  /// 规则仓库镜像（jsdelivr 的 fastly 节点，国内直连友好，已实测可达；
-  /// 引导默认开启镜像，即默认走这里）
+  /// 规则仓库镜像（保留旧常量，等价于 [pluginShopMirrors] 中的 jsdelivr 项）
   static const String pluginShopMirror =
       'https://fastly.jsdelivr.net/gh/Predidit/KazumiRules@main/';
+
+  /// 规则仓库镜像链（v1.8.1，参考上游 Kazumi 2.4.1/2.4.2 的镜像切换）：
+  /// 依次尝试，前一个失败（超时/连接错误/非 2xx/返回的不是 JSON）自动换下一个，
+  /// 成功的镜像会被记住，下次优先使用。
+  /// - gh-proxy.org：上游 2.4.2 默认镜像（CF 前置）。
+  /// - ghfast.top：上游备用镜像。
+  /// - fastly.jsdelivr：旧默认，@main 有缓存延迟，但胜在稳定。
+  /// gitcode 镜像实测对非浏览器请求返回 418 反爬页，未纳入。
+  static const List<String> pluginShopMirrors = [
+    'https://gh-proxy.org/$pluginShop',
+    'https://ghfast.top/$pluginShop',
+    pluginShopMirror,
+  ];
 
   /// 在线升级（Miru 自己的 GitHub Releases）。
   ///

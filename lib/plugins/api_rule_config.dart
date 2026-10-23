@@ -75,12 +75,20 @@ class ApiSearchConfig {
   String namePath;
   String sourcePath;
 
+  /// 详情页地址模板，`@source` 替换为条目来源；空串保持原值。
+  /// 规则 API 级别 9（上游 Kazumi ff85947）：KazumiRules 的 LMM 2.3、
+  /// dalvdm 1.2、moonci 等已改用 `/ajax/suggest` 接口搜索（绕开 HTML
+  /// 搜索页的 CF 质询），只返回裸 id，必须靠模板拼出详情页。
+  final String sourceTemplate;
+
   ApiSearchConfig({
     ApiRequestConfig? request,
     this.listPath = r'$.data[*]',
     this.namePath = r'$.name',
     this.sourcePath = r'$.url',
-  }) : request = request ?? ApiRequestConfig();
+    String sourceTemplate = '',
+  })  : request = request ?? ApiRequestConfig(),
+        sourceTemplate = sourceTemplate.trim();
 
   factory ApiSearchConfig.fromJson(Map<String, dynamic> json) {
     return ApiSearchConfig(
@@ -88,6 +96,7 @@ class ApiSearchConfig {
       listPath: json['listPath'] as String? ?? r'$.data[*]',
       namePath: json['namePath'] as String? ?? r'$.name',
       sourcePath: json['sourcePath'] as String? ?? r'$.url',
+      sourceTemplate: json['sourceTemplate'] as String? ?? '',
     );
   }
 
@@ -96,6 +105,7 @@ class ApiSearchConfig {
         'listPath': listPath,
         'namePath': namePath,
         'sourcePath': sourcePath,
+        if (sourceTemplate.isNotEmpty) 'sourceTemplate': sourceTemplate,
       };
 }
 

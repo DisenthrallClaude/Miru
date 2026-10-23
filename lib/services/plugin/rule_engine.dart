@@ -51,14 +51,25 @@ class RuleEngine {
       throw SearchErrorException(config.pluginName, cause: error);
     }
 
-    final raw = await _executeRequest(
-      request,
-      config,
-      phase: 'search request',
-      wrapError: (error) =>
-          SearchErrorException(config.pluginName, cause: error),
-      cancelToken: cancelToken,
-    );
+    late final String raw;
+    try {
+      raw = await _executeRequest(
+        request,
+        config,
+        phase: 'search request',
+        wrapError: (error) =>
+            SearchErrorException(config.pluginName, cause: error),
+        cancelToken: cancelToken,
+      );
+    } on SearchErrorException catch (error) {
+      // 上游 Kazumi 241ec54：CF/WAF 常以 403/429/503 返回验证页，
+      // Dio 在非 2xx 时直接抛错、解析层看不到正文 → 以前只报「网络异常」。
+      // 这里复用规则配置的验证码探测，命中则转入已有的验证码流程。
+      if (_isCaptchaChallengeResponse(error, config)) {
+        throw CaptchaRequiredException(config.pluginName);
+      }
+      rethrow;
+    }
     try {
       // v1.7.0（P1-7）：大页面的 XPath parse+求值移出 UI isolate。
       final parsed = config.searchMode == RuleMode.api
@@ -85,6 +96,45 @@ class RuleEngine {
       if (_isCancellation(error)) rethrow;
       _logFailure(config, 'search response parsing', error, stackTrace);
       throw SearchErrorException(config.pluginName, cause: error);
+    }
+  }
+
+  /// 失败的 XPath 搜索请求是否其实是反爬验证页（上游 241ec54）。
+  bool _isCaptchaChallengeResponse(
+    SearchErrorException error,
+    RuleExecutionConfig config,
+  ) {
+    if (config.searchMode != RuleMode.xpath ||
+        !config.antiCrawlerConfig.enabled) {
+      return false;
+    }
+    final cause = error.cause;
+    if (cause is! NetworkException ||
+        cause.type != NetworkExceptionType.badResponse) {
+      return false;
+    }
+    final rawError = cause.rawError;
+    if (rawError is! DioException) return false;
+    final response = rawError.response;
+    // Cloudflare 托管质询会带 cf-mitigated: challenge，正文为空时也能识别。
+    final cfMitigated = response?.headers.value('cf-mitigated');
+    if (cfMitigated?.toLowerCase() == 'challenge') return true;
+    final data = response?.data;
+    final raw = data is String ? data : data?.toString() ?? '';
+    if (raw.trim().isEmpty) return false;
+    try {
+      return _xpathStrategy.detectsCaptchaChallenge(
+        raw,
+        config.antiCrawlerConfig,
+      );
+    } catch (detectError, stackTrace) {
+      _logFailure(
+        config,
+        'failed response captcha detection',
+        detectError,
+        stackTrace,
+      );
+      return false;
     }
   }
 

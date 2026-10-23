@@ -35,7 +35,7 @@ class DioFactory {
         defaultHeaders: {
           'user-agent': getRandomUA(),
         },
-        interceptors: [_RulesMirrorInterceptor()],
+        interceptors: [_RulesMirrorInterceptor(() => _rulesRepoDio!)],
       );
 
   static Dio get pluginDio => _pluginDio ??= _create(
@@ -194,7 +194,29 @@ class _IdempotentRetryInterceptor extends Interceptor {
   }
 }
 
+/// 规则仓库镜像链拦截器。
+///
+/// 开启「规则镜像」时按 [ApiEndpoints.pluginShopMirrors] 顺序改写请求；
+/// 失败（网络错误/非 2xx/镜像返回 HTML 错误页）自动切到下一个镜像，
+/// 全部镜像失败后最后再直连 GitHub 一次。成功的镜像下标会被记住。
 class _RulesMirrorInterceptor extends Interceptor {
+  _RulesMirrorInterceptor(this._dioGetter);
+
+  final Dio Function() _dioGetter;
+
+  static const _kIndex = '__rulesMirrorIndex';
+  static const _kOriginal = '__rulesOriginalUrl';
+
+  /// 上次成功的镜像下标（进程内记忆）；`mirrors.length` 表示直连。
+  static int preferredIndex = 0;
+
+  static List<String> get _mirrors => ApiEndpoints.pluginShopMirrors;
+
+  static String urlFor(String original, int index) {
+    if (index >= _mirrors.length) return original;
+    return _mirrors[index] + original.substring(ApiEndpoints.pluginShop.length);
+  }
+
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final enableGitProxy = GStorage.getSetting(SettingsKeys.enableGitProxy);
@@ -202,17 +224,85 @@ class _RulesMirrorInterceptor extends Interceptor {
       handler.next(options);
       return;
     }
-
-    final url = options.uri.toString();
+    final url = (options.extra[_kOriginal] as String?) ?? options.uri.toString();
     if (!url.startsWith(ApiEndpoints.pluginShop)) {
       handler.next(options);
       return;
     }
-
-    final mirrored = ApiEndpoints.pluginShopMirror +
-        url.substring(ApiEndpoints.pluginShop.length);
-    MiruLogger().d('Rules mirror: $mirrored');
-    options.path = mirrored;
+    final index = (options.extra[_kIndex] as int?) ??
+        preferredIndex.clamp(0, _mirrors.length);
+    options.extra[_kOriginal] = url;
+    options.extra[_kIndex] = index;
+    final target = urlFor(url, index);
+    MiruLogger().d('Rules mirror[$index]: $target');
+    options.path = target;
     handler.next(options);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    final options = response.requestOptions;
+    if (!options.extra.containsKey(_kOriginal)) {
+      handler.next(response);
+      return;
+    }
+    if (!_looksLikeJson(response.data)) {
+      // 镜像把错误页当 200 返回（常见于反代限流/风控页），视为失败换下一个。
+      _tryNext(
+        options,
+        onResolved: handler.resolve,
+        onExhausted: () => handler.next(response),
+      );
+      return;
+    }
+    preferredIndex = options.extra[_kIndex] as int;
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    final options = err.requestOptions;
+    final cancelToken = options.cancelToken;
+    if (!options.extra.containsKey(_kOriginal) ||
+        err.type == DioExceptionType.cancel ||
+        (cancelToken != null && cancelToken.isCancelled)) {
+      handler.next(err);
+      return;
+    }
+    _tryNext(
+      options,
+      onResolved: handler.resolve,
+      onExhausted: () => handler.next(err),
+    );
+  }
+
+  Future<void> _tryNext(
+    RequestOptions options, {
+    required void Function(Response) onResolved,
+    required void Function() onExhausted,
+  }) async {
+    final index = options.extra[_kIndex] as int;
+    if (index >= _mirrors.length) {
+      onExhausted();
+      return;
+    }
+    final next = index + 1;
+    MiruLogger().w('Rules mirror[$index] failed, switching to [$next]');
+    final retry = options.copyWith(
+      extra: {...options.extra, _kIndex: next, '__retried': true},
+    );
+    retry.cancelToken = options.cancelToken;
+    try {
+      onResolved(await _dioGetter().fetch<dynamic>(retry));
+    } catch (_) {
+      onExhausted();
+    }
+  }
+
+  static bool _looksLikeJson(Object? data) {
+    if (data is Map || data is List) return true;
+    if (data is! String) return true; // 字节流等非文本响应不干预
+    final t = data.trimLeft();
+    return t.startsWith('[') || t.startsWith('{');
   }
 }

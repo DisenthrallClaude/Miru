@@ -15,12 +15,16 @@ import 'package:miru/utils/version.dart';
 /// 域名迁移后通常当天就有新版本 —— 自动同步让用户无感跟上。
 ///
 /// 国内可达性：raw.githubusercontent.com 直连不稳定，
-/// 因此按 jsDelivr 多节点优先、raw 兜底的顺序逐级回退。
+/// 因此按 gh-proxy/ghfast 反代优先、jsDelivr 多节点其次、raw 兜底的顺序逐级回退。
 class CommunityRulesSync {
   CommunityRulesSync._();
 
   /// 镜像前缀，按国内可达性排序；{file} 会替换为目标文件名。
+  /// v1.8.1：参考上游 Kazumi 2.4.2，gh-proxy.org / ghfast.top 前置
+  /// （jsDelivr 的 @main 有最长 12h 的缓存延迟，且国内节点时好时坏）。
   static const List<String> _mirrors = [
+    'https://gh-proxy.org/https://raw.githubusercontent.com/Predidit/KazumiRules/main/',
+    'https://ghfast.top/https://raw.githubusercontent.com/Predidit/KazumiRules/main/',
     'https://cdn.jsdelivr.net/gh/Predidit/KazumiRules@main/',
     'https://fastly.jsdelivr.net/gh/Predidit/KazumiRules@main/',
     'https://testingcf.jsdelivr.net/gh/Predidit/KazumiRules@main/',

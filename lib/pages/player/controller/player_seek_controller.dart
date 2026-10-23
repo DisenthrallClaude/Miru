@@ -1,5 +1,6 @@
 import 'package:miru/pages/player/controller/player_danmaku_controller.dart';
 import 'package:miru/pages/player/controller/player_playback_controller.dart';
+import 'package:miru/services/logging/logger.dart';
 
 class _InteractiveSeekSession {
   _InteractiveSeekSession(this.pauseCompleted, this.target);
@@ -55,8 +56,16 @@ class PlayerSeekController {
       } catch (_) {
         return;
       }
-      if (_playback.isCurrentPlayer(player)) {
+      if (!_playback.isCurrentPlayer(player)) {
+        return;
+      }
+      try {
         await _onSeekCompleted(enableSync);
+      } catch (e) {
+        // 上游 184f8db：调用方常丢弃该 future，完成回调异常不能冒成
+        // 未处理错误（否则一次弹幕/同步异常会污染后续每次 seek）。
+        MiruLogger().w('PlayerSeekController: seek completion failed',
+            error: e);
       }
     });
     _seekTail = _settle(operation);
