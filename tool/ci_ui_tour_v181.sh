@@ -38,7 +38,7 @@ for m in re.finditer(r'<node [^>]*>', xml):
     txt = (t.group(1) if t else '') + ' ' + (d.group(1) if d else '')
     exact = __import__('os').environ.get('EXACT') == '1'
     vals = [(t.group(1) if t else ''), (d.group(1) if d else '')]
-    if (exact and any(v.split('\n')[0].strip() == label for v in vals)) or (not exact and label in txt):
+    if (exact and any(v.replace('&#10;','\n').split('\n')[0].strip() == label for v in vals)) or (not exact and label in txt):
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
         if b:
             x1, y1, x2, y2 = map(int, b.groups())
@@ -72,7 +72,7 @@ echo "screen ${W}x${H}"
 timeout 30 adb shell pm clear $PKG > /dev/null
 launch 'none|none'
 sleep 20; shot 01_home; dump home
-tap_exact "日常" && { sleep 7; shot 02_category_daily; dump cat_daily; }
+tap_exact "奇幻" && { sleep 7; shot 02_category_qihuan; dump cat_qihuan; }
 tap_exact "武侠" && { sleep 7; shot 03_category_wuxia; dump cat_wuxia; }
 tap_exact "推荐" && sleep 3
 
