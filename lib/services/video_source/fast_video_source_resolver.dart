@@ -469,9 +469,22 @@ class FastVideoSourceResolver {
 
     // 去重：同 URL 只保留优先级最高的来源
     final byUrl = <String, FastCandidate>{};
-    for (final c in candidates) {
-      final key = c.url.trim();
+    for (final raw in candidates) {
+      var c = raw;
+      var key = c.url.trim();
       if (key.isEmpty) continue;
+      // v2：非 ASCII 路径（如 ntdm2 /m3u8/凡人修仙传001.m3u8）统一百分号
+      // 编码——与内联提取同形，去重后只留一条，mpv/探测请求行合法。
+      if (!key.contains('%') && key.runes.any((r) => r > 0x7f)) {
+        key = Uri.encodeFull(key);
+        c = FastCandidate(
+          url: key,
+          referer: c.referer,
+          strategy: c.strategy,
+          needsPositiveConfirm: c.needsPositiveConfirm,
+          format: c.format,
+        );
+      }
       // v2：所有策略（含 iframe 二跳内层）统一过滤广告片。
       if (AdUrlFilter.isAd(key)) continue;
       final existing = byUrl[key];

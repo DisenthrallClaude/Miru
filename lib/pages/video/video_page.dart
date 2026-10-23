@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:miru/bean/widget/spring_press.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/pages/player/player_controller.dart';
 import 'package:miru/pages/player/playback_mask_logic.dart';
@@ -389,7 +391,7 @@ class _VideoPageState extends State<VideoPage>
   }
 
   Future<void> changeEpisode(int episode,
-      {int currentRoad = 0, int offset = 0}) async {
+      {int currentRoad = 0, int offset = 0, bool forceResolve = false}) async {
     if (!mounted) {
       return;
     }
@@ -398,6 +400,7 @@ class _VideoPageState extends State<VideoPage>
     await videoPageController.changeEpisode(episode,
         currentRoad: currentRoad,
         offset: offset,
+        forceResolve: forceResolve,
         playerController: playerController);
   }
 
@@ -928,11 +931,13 @@ class _VideoPageState extends State<VideoPage>
                                 const SizedBox(height: 24),
                                 FilledButton.icon(
                                   onPressed: () {
+                                    HapticFeedback.mediumImpact();
                                     changeEpisode(
                                         videoPageController
                                             .selectedEpisode.episode,
                                         currentRoad: videoPageController
-                                            .selectedEpisode.road);
+                                            .selectedEpisode.road,
+                                        forceResolve: true);
                                   },
                                   icon: const Icon(Icons.refresh_rounded),
                                   label: const Text('重试'),
@@ -1017,10 +1022,12 @@ class _VideoPageState extends State<VideoPage>
                             icon: const Icon(Icons.refresh_outlined,
                                 color: Colors.white),
                             onPressed: () {
+                              HapticFeedback.lightImpact();
                               changeEpisode(
                                   videoPageController.selectedEpisode.episode,
                                   currentRoad:
-                                      videoPageController.selectedEpisode.road);
+                                      videoPageController.selectedEpisode.road,
+                                  forceResolve: true);
                             },
                           ),
                           Visibility(
@@ -1267,7 +1274,9 @@ class _VideoPageState extends State<VideoPage>
             // 「已看」按当前播放位置粗略推断（历史所在集之前的集视为看过；
             // per-episode 精确进度记录属数据层另立项）。
             final bool isWatched = !isCurrent && count0 < selection.episode;
-            cardList.add(Container(
+            cardList.add(SpringPress(
+              pressedScale: 0.95,
+              child: Container(
               margin: const EdgeInsets.only(bottom: 4),
               child: Material(
                 color: isCurrent
@@ -1288,6 +1297,7 @@ class _VideoPageState extends State<VideoPage>
                         videoPageController.errorMessage == null) {
                       return;
                     }
+                    HapticFeedback.selectionClick();
                     MiruLogger()
                         .i('VideoPageController: video URL is $urlItem');
                     _closeTabBodyAnimated();
@@ -1340,7 +1350,7 @@ class _VideoPageState extends State<VideoPage>
                   ),
                 ),
               ),
-            ));
+            )));
             count++;
           }
         }

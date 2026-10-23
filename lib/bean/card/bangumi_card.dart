@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:miru/bean/widget/spring_press.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/bean/card/network_img_layer.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
@@ -25,7 +27,8 @@ class BangumiCardV extends StatelessWidget {
     // 让网格靠留白而非边框来分隔。
     // （E6：原先外层还包了一个无任何回调的 GestureDetector，
     // 纯冗余——手势语义与命中区域由 InkWell 一层决定即可。）
-    return InkWell(
+    return SpringPress(
+      child: InkWell(
       borderRadius: Radii.brMd,
       onTap: () {
         if (!canTap) {
@@ -34,6 +37,7 @@ class BangumiCardV extends StatelessWidget {
           );
           return;
         }
+        HapticFeedback.selectionClick();
         context.pushNamed('/info/', arguments: bangumiItem);
       },
       child: Column(
@@ -65,6 +69,7 @@ class BangumiCardV extends StatelessWidget {
           ),
           BangumiContent(bangumiItem: bangumiItem)
         ],
+      ),
       ),
     );
   }

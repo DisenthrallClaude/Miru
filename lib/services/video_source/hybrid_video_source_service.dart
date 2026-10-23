@@ -17,6 +17,7 @@ import 'package:miru/services/video_source/resolution_result_cache.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/services/video_source/video_source_service.dart';
 import 'package:miru/services/video_source/webview_video_source_service.dart';
+import 'package:miru/utils/ad_url_filter.dart';
 import 'package:miru/utils/http_headers.dart';
 
 /// 混合视频源解析服务：秒开链路的「调度层」。
@@ -494,14 +495,21 @@ class HybridVideoSourceService implements IVideoSourceService {
       referer: headers['referer'],
       cancelToken: cancelToken,
     );
-    final cloudResult = cloudReport.source;
+    var cloudResult = cloudReport.source;
+    var failureClass = cloudReport.failureClass;
+    // v2：云端 Worker 同样会把广告片当正片返回（实测 AGE 线路1 →
+    // .../Play/adposter.mp4）——与快解/嗅探同一份广告规则。
+    if (cloudResult != null && AdUrlFilter.isAd(cloudResult.url)) {
+      MiruLogger().w('HybridResolver: cloud returned ad ${cloudResult.url}');
+      cloudResult = null;
+      failureClass = 'extract-failed';
+    }
     if (cloudResult == null) {
-      trace.record(ResolveStage.cloud, 'no-source',
-          cloudReport.failureClass);
+      trace.record(ResolveStage.cloud, 'no-source', failureClass);
       // 云端失败按分类分级：传输层故障不写负缓存（网络抖动不放大），
       // 站点级提取失败写 host 级（该站云端解不了，换站仍可用）。
       await _markLevelFailed(
-          episodeUrl, _cloudLevelSuffix, _cloudFailureKind(cloudReport.failureClass));
+          episodeUrl, _cloudLevelSuffix, _cloudFailureKind(failureClass));
       return null;
     }
     final needsConfirm =
@@ -646,7 +654,7 @@ class HybridVideoSourceService implements IVideoSourceService {
           referer: headers['referer'],
         );
         final cloudResult = cloudReport.source;
-        if (cloudResult != null) {
+        if (cloudResult != null && !AdUrlFilter.isAd(cloudResult.url)) {
           // 云端结果同样探测后再入缓存（同 P0-4 语义）。
           final verdict = await _probe(
             cloudResult.url,

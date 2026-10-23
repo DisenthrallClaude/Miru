@@ -647,6 +647,7 @@ abstract class _VideoPageController with Store implements Disposable {
     int offset = 0,
     required PlayerController playerController,
     bool resetAutoFallback = true,
+    bool forceResolve = false,
   }) async {
     final session = _playbackSessions.begin();
     final selection = VideoEpisodeSelection(
@@ -717,6 +718,7 @@ abstract class _VideoPageController with Store implements Disposable {
       resolvedEpisode: resolvedEpisode,
       session: session,
       playerController: playerController,
+      forceResolve: forceResolve,
     );
   }
 
@@ -851,6 +853,7 @@ abstract class _VideoPageController with Store implements Disposable {
     required EpisodeRef resolvedEpisode,
     required AsyncSession session,
     required PlayerController playerController,
+    bool forceResolve = false,
   }) async {
     // v1.7.0（P1-1/P1-6）：进程级共享单例——WebView 由常驻池提供
     //（冷启动只付一次），解析单飞共享；页面路由进出不再销毁重建。
@@ -889,6 +892,10 @@ abstract class _VideoPageController with Store implements Disposable {
         offset: offset,
         timeout: timeout,
         playbackHeaders: playbackHeaders,
+        // v2：用户显式重试 → 忽略负缓存/短窗失败记忆/免探测缓存。
+        // v1.7.0 设计了 force 但从未接线：60s 内点「重试」快解与云端
+        // 层被短窗记忆直接跳过，5 分钟内同一死链被缓存免探测复用。
+        force: forceResolve,
       );
 
       if (session.isStale) {
