@@ -2,7 +2,6 @@ import 'package:miru/utils/haptics.dart';
 import 'dart:async';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:miru/bean/widget/spring_press.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/pages/player/player_controller.dart';

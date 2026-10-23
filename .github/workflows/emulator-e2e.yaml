@@ -8,7 +8,7 @@ on:
         default: ''
   push:
     branches: [v2-overhaul]
-    paths: ['lib/**', 'assets/plugins/**', 'android/**', 'pubspec.*', '.github/workflows/emulator-e2e.yaml', 'tool/ci_emulator_e2e.sh']
+    paths: ['lib/**', 'assets/plugins/**', 'android/**', 'pubspec.*', '.github/workflows/emulator-e2e.yaml', 'tool/ci_emulator_e2e.sh', 'tool/ci_ui_tour.sh']
 concurrency:
   group: emulator-e2e-${{ github.ref }}
   cancel-in-progress: true
@@ -82,5 +82,42 @@ jobs:
         if: always()
         with:
           name: e2e-${{ steps.tag.outputs.tag }}
+          path: e2e-out/
+          retention-days: 7
+  ui-tour:
+    # P2：开启系统动画的 UI 巡检（真实触控走一遍转场/手势/加载态），截图 ui_v2_*.png
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: apk-x86_64, path: apk }
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: UI tour on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK: apk/app-release.apk
+          SPEC: 'FQDM|凡人修仙传'
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          ram-size: 2048M
+          cores: 2
+          emulator-boot-timeout: 900
+          disk-size: 6000M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          disable-animations: false
+          script: timeout 900 bash tool/ci_ui_tour.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-tour
           path: e2e-out/
           retention-days: 7
