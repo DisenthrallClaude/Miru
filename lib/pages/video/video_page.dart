@@ -1,3 +1,4 @@
+import 'package:miru/utils/haptics.dart';
 import 'dart:async';
 import 'package:canvas_danmaku/models/danmaku_content_item.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,8 @@ import 'package:miru/bean/widget/glass_fab.dart';
 import 'package:miru/modules/download/download_module.dart';
 import 'package:miru/services/player/timed_shutdown_service.dart';
 import 'package:miru/utils/device.dart';
+import 'package:miru/pages/video/playback_status_view.dart';
+import 'package:miru/bean/widget/staggered_reveal.dart';
 import 'package:miru/services/platform/display_mode_service.dart';
 
 class VideoPage extends StatefulWidget {
@@ -83,6 +86,10 @@ class _VideoPageState extends State<VideoPage>
   late TabController tabController;
 
   int visibleRoad = 0;
+
+  /// P2-6：选集网格这一组的「诞生时刻」（打开面板/切换线路时重置），
+  /// 驱动 StaggeredReveal 只在刚出现时错峰入场。
+  DateTime _episodeGridEpoch = DateTime.now();
   bool _tabBodyTargetVisible = true;
   int _tabBodyAnimationRun = 0;
 
@@ -430,6 +437,7 @@ class _VideoPageState extends State<VideoPage>
       mounted && _isSideTabLayout && !disableAnimations;
 
   void _openTabBodyAnimated() {
+    _episodeGridEpoch = DateTime.now();
     _setTabBodyVisible(true, animated: true);
     menuJumpToCurrentEpisode();
   }
@@ -906,66 +914,33 @@ class _VideoPageState extends State<VideoPage>
                   child: Observer(builder: (context) {
                     return Center(
                       child: videoPageController.errorMessage != null
-                          ? Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.error_outline,
-                                    color: Theme.of(context).colorScheme.error,
-                                    size: 48),
-                                const SizedBox(height: 16),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 32),
-                                  child: Text(
-                                    _friendlyErrorMessage(
-                                        videoPageController.errorMessage!),
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 16),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                                // 解析失败是本应用最高频失败态（线路挂/防
-                                // 盗链），黑屏只有一行字没有任何动作——用户
-                                // 得自己去顶栏摸小刷新图标。直接给「重试当
-                                // 前集」；横屏侧栏布局下再给「换个线路」。
-                                const SizedBox(height: 24),
-                                FilledButton.icon(
-                                  onPressed: () {
-                                    HapticFeedback.mediumImpact();
-                                    changeEpisode(
-                                        videoPageController
-                                            .selectedEpisode.episode,
-                                        currentRoad: videoPageController
-                                            .selectedEpisode.road,
-                                        forceResolve: true);
-                                  },
-                                  icon: const Icon(Icons.refresh_rounded),
-                                  label: const Text('重试'),
-                                ),
-                                if (videoPageController.roadList.length > 1 &&
-                                    MediaQuery.sizeOf(context).width >
-                                        MediaQuery.sizeOf(context).height)
-                                  TextButton(
-                                    onPressed: _toggleTabBodyAnimated,
-                                    child: const Text('换个线路'),
-                                  ),
-                              ],
+                          // P2-5：失败态——克制标题 + 说明 + 分层操作。
+                          // 解析失败是本应用最高频失败态（线路挂/防盗链），
+                          // 直接给「重试当前集」；横屏侧栏布局下再给「换个线路」。
+                          ? PlaybackErrorView(
+                              message: _friendlyErrorMessage(
+                                  videoPageController.errorMessage!),
+                              onRetry: () {
+                                MiruHaptics.impact();
+                                changeEpisode(
+                                    videoPageController.selectedEpisode.episode,
+                                    currentRoad: videoPageController
+                                        .selectedEpisode.road,
+                                    forceResolve: true);
+                              },
+                              onSwitchRoad:
+                                  (videoPageController.roadList.length > 1 &&
+                                          MediaQuery.sizeOf(context).width >
+                                              MediaQuery.sizeOf(context).height)
+                                      ? _toggleTabBodyAnimated
+                                      : null,
+                              disableAnimations: disableAnimations,
                             )
-                          : Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                CircularProgressIndicator(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .tertiaryContainer),
-                                const SizedBox(height: 10),
-                                // v1.6.4：解析耗时实时可见——转圈不再是
-                                // 无限等待的错觉，用户能对照设置里的
-                                // 解析超时预算判断当前状态。
-                                _ResolveStatusText(
-                                  resolving: videoPageController.loading,
-                                ),
-                              ],
+                          // P2-5：加载态——呼吸光环 + 阶段点 + 真实耗时
+                          // （v1.6.4 起的承诺：等待要有刻度）+ 久等建议。
+                          : PlaybackLoadingView(
+                              resolving: videoPageController.loading,
+                              disableAnimations: disableAnimations,
                             ),
                     );
                   }),
@@ -1022,7 +997,7 @@ class _VideoPageState extends State<VideoPage>
                             icon: const Icon(Icons.refresh_outlined,
                                 color: Colors.white),
                             onPressed: () {
-                              HapticFeedback.lightImpact();
+                              MiruHaptics.tap();
                               changeEpisode(
                                   videoPageController.selectedEpisode.episode,
                                   currentRoad:
@@ -1155,8 +1130,10 @@ class _VideoPageState extends State<VideoPage>
               videoPageController.roadList.length,
               (int i) => MenuItemButton(
                 onPressed: () {
+                  MiruHaptics.select();
                   setState(() {
                     visibleRoad = i;
+                    _episodeGridEpoch = DateTime.now();
                   });
                 },
                 child: Container(
@@ -1274,7 +1251,12 @@ class _VideoPageState extends State<VideoPage>
             // 「已看」按当前播放位置粗略推断（历史所在集之前的集视为看过；
             // per-episode 精确进度记录属数据层另立项）。
             final bool isWatched = !isCurrent && count0 < selection.episode;
-            cardList.add(SpringPress(
+            cardList.add(StaggeredReveal(
+              key: ValueKey('ep-$visibleRoad-$count0'),
+              index: count0 - 1,
+              epoch: _episodeGridEpoch,
+              enabled: !disableAnimations,
+              child: SpringPress(
               pressedScale: 0.95,
               child: Container(
               margin: const EdgeInsets.only(bottom: 4),
@@ -1282,7 +1264,16 @@ class _VideoPageState extends State<VideoPage>
                 color: isCurrent
                     ? scheme.primaryContainer
                     : scheme.onInverseSurface,
-                borderRadius: BorderRadius.circular(6),
+                // P2-6：圆角 6→10，与卡片/玻璃面板的圆角体系对齐；当前集
+                // 加一圈主色描边，网格里一眼定位「我放到哪了」。
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: isCurrent
+                      ? BorderSide(
+                          color: scheme.primary.withValues(alpha: 0.55),
+                          width: 1.2)
+                      : BorderSide.none,
+                ),
                 clipBehavior: Clip.hardEdge,
                 child: InkWell(
                   onTap: () async {
@@ -1297,7 +1288,7 @@ class _VideoPageState extends State<VideoPage>
                         videoPageController.errorMessage == null) {
                       return;
                     }
-                    HapticFeedback.selectionClick();
+                    MiruHaptics.select();
                     MiruLogger()
                         .i('VideoPageController: video URL is $urlItem');
                     _closeTabBodyAnimated();
@@ -1350,7 +1341,7 @@ class _VideoPageState extends State<VideoPage>
                   ),
                 ),
               ),
-            )));
+            ))));
             count++;
           }
         }
@@ -1571,54 +1562,3 @@ class _RoadHealthBadge extends StatelessWidget {
   }
 }
 
-/// v1.6.4：加载层的真实进度文案。
-///
-/// * 解析阶段：显示已耗时秒数（每 500ms 刷新），与设置里的
-///   解析超时预算形成真实对照——不再是无限转圈的错觉；
-/// * 缓冲阶段：解析已完成、mpv 正在拉流，按实际耗时显示。
-///
-/// 计时从组件挂载起算（挂载即遮罩出现 = 本集解析开始），
-/// 换集时遮罩重建，计时自然归零。
-class _ResolveStatusText extends StatefulWidget {
-  const _ResolveStatusText({required this.resolving});
-
-  /// true = 解析层工作中；false = 已解析、播放器缓冲中。
-  final bool resolving;
-
-  @override
-  State<_ResolveStatusText> createState() => _ResolveStatusTextState();
-}
-
-class _ResolveStatusTextState extends State<_ResolveStatusText> {
-  final DateTime _startedAt = DateTime.now();
-  Timer? _ticker;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (mounted) {
-        setState(() {});
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final elapsedSeconds =
-        DateTime.now().difference(_startedAt).inMilliseconds / 1000.0;
-    final label = widget.resolving
-        ? '正在解析视频源… ${elapsedSeconds.toStringAsFixed(1)}s'
-        : '已解析完成，正在缓冲视频… ${elapsedSeconds.toStringAsFixed(1)}s';
-    return Text(
-      label,
-      style: const TextStyle(color: Colors.white),
-    );
-  }
-}

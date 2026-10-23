@@ -477,10 +477,15 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                               Positioned.fill(
                                 bottom: kTextTabBarHeight,
                                 child: IgnorePointer(
+                                  // P2-6：模糊海报背景以「慢显影 + 微缩落定」
+                                  // 登场（1.06→1.0，700ms），封面 Hero 先到、
+                                  // 氛围随后漫开，详情页有了前后景的节奏。
+                                  child: _HeaderSettle(
                                   child: _InfoHeaderBackground(
                                     imageUrl: infoController
                                             .bangumiItem.images['large'] ??
                                         '',
+                                  ),
                                   ),
                                 ),
                               ),
@@ -575,6 +580,27 @@ class _InfoPageState extends State<InfoPage> with TickerProviderStateMixin {
                   icon: Icons.play_arrow_rounded,
                 ),
         ),
+      ),
+    );
+  }
+}
+
+class _HeaderSettle extends StatelessWidget {
+  const _HeaderSettle({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 700),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, v, child) => Opacity(
+        opacity: v,
+        child: Transform.scale(scale: 1.06 - 0.06 * v, child: child),
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'package:miru/utils/haptics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:flutter/services.dart';
@@ -66,7 +67,7 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
     }
     // B1：切 tab 触觉反馈——全 app 频率最高的操作，玻璃滑块的
     // 弹簧过冲配一次 selectionClick 手感才完整。
-    HapticFeedback.selectionClick();
+    MiruHaptics.select();
     _outletKey.currentState?.navigate('/tab${menu.getPath(index)}/');
   }
 

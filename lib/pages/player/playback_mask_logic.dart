@@ -31,7 +31,7 @@ bool playbackActuallyStarted({
 ///
 /// `!actuallyStarted` 不再乘 playback.loading 因子（R-2）：装配结束
 /// （loading=false）到首帧之间遮罩保持覆盖——期间文案由
-/// _ResolveStatusText 显示「已解析完成，正在缓冲视频…」。
+/// PlaybackLoadingView 显示「片源已就绪，正在缓冲」。
 bool playbackMaskVisible({
   required bool pageLoading,
   required bool actuallyStarted,

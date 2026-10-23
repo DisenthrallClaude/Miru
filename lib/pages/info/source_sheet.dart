@@ -5,6 +5,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 // the Flutter one used further down this file.
 import 'package:mobx/mobx.dart' show reaction, ReactionDisposer;
 import 'package:miru/pages/info/info_controller.dart';
+import 'package:miru/bean/widget/staggered_reveal.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/bean/dialog/dialog_helper.dart';
 import 'package:miru/bean/dialog/material_bottom_sheet.dart';
@@ -52,6 +53,9 @@ class _SourceSheetState extends State<SourceSheet> {
   /// once so results from different sites can be compared side by side.
   final Set<String> expandedSources = <String>{};
   ReactionDisposer? autoExpandDisposer;
+
+  /// 底板打开时刻：驱动源卡片错峰入场（只在刚打开时）。
+  final DateTime _sheetEpoch = DateTime.now();
 
   /// Concurrent plugin search service.
   PluginSearchService? pluginSearchService;
@@ -914,7 +918,14 @@ class _SourceSheetState extends State<SourceSheet> {
                 child: ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: cards.length,
-                  itemBuilder: (context, index) => cards[index],
+                  // P2-6：源卡片随底板升起错峰入场，读起来是一叠卡片依次落座。
+                  itemBuilder: (context, index) => StaggeredReveal(
+                    index: index,
+                    epoch: _sheetEpoch,
+                    step: const Duration(milliseconds: 30),
+                    rise: 14,
+                    child: cards[index],
+                  ),
                 ),
               ),
             ],

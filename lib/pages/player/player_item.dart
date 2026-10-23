@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:miru/pages/player/player_item_panel.dart';
+import 'package:miru/pages/player/player_gesture_feedback.dart';
+import 'package:miru/utils/haptics.dart';
 import 'package:miru/pages/player/player_keyboard_shortcuts.dart';
 import 'package:miru/pages/player/controller/player_super_resolution.dart';
 import 'package:miru/pages/player/player_panel_hold.dart';
@@ -145,6 +147,19 @@ class _PlayerItemState extends State<PlayerItem>
 
   /// 双击快进/快退的 HUD 自动收起计时（连续双击时不断续期）。
   Timer? _doubleTapSeekHudTimer;
+
+  // P2-4 手势反馈层状态。
+  final DoubleTapRippleController _rippleController =
+      DoubleTapRippleController();
+  /// 中部纵滑切换全屏的跟手进度（null = 未在该手势中）。
+  final ValueNotifier<double?> _swipeFullscreenProgress =
+      ValueNotifier<double?>(null);
+  /// 本次纵向拖动的模式：0 未定 / 1 亮度音量 / 2 下滑退出全屏 / 3 上滑进入全屏。
+  int _verticalMode = 0;
+  double _swipeFullscreenDy = 0;
+  bool _swipeFullscreenArmed = false;
+  bool _gestureCoachVisible = false;
+  Timer? _gestureCoachTimer;
 
   /// 历史落盘节流（v1.5.3）：播放中从每秒 1 次 Hive 写降为 5 秒 1 次，
   /// 暂停/播放停止与换集/退出（dispose）时立即 flush 兜底。
@@ -443,22 +458,83 @@ class _PlayerItemState extends State<PlayerItem>
       playerController.playOrPause();
       return;
     }
-    _seekWithPlayerTimer(() => playerController.seekBy(
-        Duration(seconds: zone * playerController.playback.buttonSkipTime)));
-    playerController.panel.seekDirection = zone;
-    playerController.panel.showSeekTime = true;
-    _doubleTapSeekHudTimer?.cancel();
-    _doubleTapSeekHudTimer = Timer(const Duration(milliseconds: 800), () {
-      // 期间若用户开始了拖动式 seek（横滑手势），HUD 交给那条路径管理，
-      // 这里的定时器只收起自己触发的提示，避免打断进行中的拖动。
-      if (mounted &&
-          !playerController.seeking.hasActiveInteractiveSeek &&
-          playerController.panel.showSeekTime) {
-        playerController.panel.showSeekTime = false;
-        playerController.panel.seekDirection = 0;
-      }
-      _doubleTapSeekHudTimer = null;
+    final int skip = playerController.playback.buttonSkipTime;
+    _seekWithPlayerTimer(
+        () => playerController.seekBy(Duration(seconds: zone * skip)));
+    // P2-4：双击快进退改用「边缘半月光晕 + 水波 + 累计秒数」反馈，
+    // 不再弹顶部 seek HUD（两者同时出现信息重复）；连续双击同侧累加。
+    MiruHaptics.impact();
+    _rippleController.trigger(
+      side: zone,
+      seconds: skip,
+      origin: details.localPosition,
+    );
+  }
+
+  /// P2-4：首次进入全屏时展示一次手势导览（4 秒后自行淡出）。
+  void _maybeShowGestureCoach() {
+    if (isDesktop() || videoPageController.isPip) return;
+    if (GStorage.getSetting(SettingsKeys.playerGestureCoachShown)) return;
+    unawaited(GStorage.putSetting(SettingsKeys.playerGestureCoachShown, true));
+    setState(() => _gestureCoachVisible = true);
+    _gestureCoachTimer?.cancel();
+    _gestureCoachTimer = Timer(const Duration(milliseconds: 4200), () {
+      if (mounted) setState(() => _gestureCoachVisible = false);
+      _gestureCoachTimer = null;
     });
+  }
+
+  void _dismissGestureCoach() {
+    if (!_gestureCoachVisible) return;
+    _gestureCoachTimer?.cancel();
+    _gestureCoachTimer = null;
+    setState(() => _gestureCoachVisible = false);
+  }
+
+  /// 纵向拖动起手：中部 1/3 是全屏切换手势（全屏下滑退出、竖屏上滑进入），
+  /// 左右两侧维持亮度/音量。模式在起手时一次定死，拖动中不再串区。
+  void _handleVerticalDragStart(DragStartDetails details) {
+    _dismissGestureCoach();
+    _swipeFullscreenDy = 0;
+    _swipeFullscreenArmed = false;
+    final double width = MediaQuery.sizeOf(context).width;
+    final double x = details.globalPosition.dx;
+    final bool middle = x > width / 3 && x < width * 2 / 3;
+    if (middle && !videoPageController.isPip && !isTablet()) {
+      _verticalMode = videoPageController.isFullscreen ? 2 : 3;
+      _swipeFullscreenProgress.value = 0;
+    } else {
+      _verticalMode = 1;
+    }
+  }
+
+  void _handleSwipeFullscreenUpdate(DragUpdateDetails details) {
+    _swipeFullscreenDy += details.delta.dy;
+    final double threshold = MediaQuery.sizeOf(context).height * 0.16;
+    final double travel =
+        _verticalMode == 2 ? _swipeFullscreenDy : -_swipeFullscreenDy;
+    final double progress = (travel / threshold).clamp(0.0, 1.2);
+    _swipeFullscreenProgress.value = progress;
+    final bool armed = progress >= 1.0;
+    if (armed != _swipeFullscreenArmed) {
+      _swipeFullscreenArmed = armed;
+      MiruHaptics.select();
+    }
+  }
+
+  void _finishSwipeFullscreen({required bool commit}) {
+    final bool fire = commit && _swipeFullscreenArmed;
+    final int mode = _verticalMode;
+    _swipeFullscreenProgress.value = null;
+    _swipeFullscreenArmed = false;
+    _swipeFullscreenDy = 0;
+    _verticalMode = 0;
+    if (!fire) return;
+    final bool isFull = videoPageController.isFullscreen;
+    if ((mode == 2 && isFull) || (mode == 3 && !isFull)) {
+      MiruHaptics.heavy();
+      handleFullscreen();
+    }
   }
 
   void _handleMouseScroller() {
@@ -1389,8 +1465,13 @@ class _PlayerItemState extends State<PlayerItem>
     _initPlayerMenu();
     _fullscreenListener = mobx.reaction<bool>(
       (_) => videoPageController.isFullscreen,
-      (_) {
+      (bool isFullscreen) {
         _handleFullscreenChange(context);
+        if (isFullscreen) {
+          _maybeShowGestureCoach();
+        } else {
+          _dismissGestureCoach();
+        }
       },
     );
     _playerSizeListener = mobx.reaction<String>(
@@ -1518,6 +1599,9 @@ class _PlayerItemState extends State<PlayerItem>
     mouseScrollerTimer?.cancel();
     _adjustmentHudHideTimer?.cancel();
     _doubleTapSeekHudTimer?.cancel();
+    _gestureCoachTimer?.cancel();
+    _rippleController.dispose();
+    _swipeFullscreenProgress.dispose();
     _panelVisibilityController.dispose();
     _screenshotFeedbackController.dispose();
     _disposePlayerMenu();
@@ -1630,6 +1714,8 @@ class _PlayerItemState extends State<PlayerItem>
                           return;
                         }
                         // observable 写入自带 Observer 重建，无需 setState。
+                        MiruHaptics.impact();
+                        _dismissGestureCoach();
                         playerController.panel.showPlaySpeed = true;
                         lastPlayerSpeed = playerController.playback.playerSpeed;
                         setPlaybackSpeed(longPressPlaySpeed);
@@ -1638,6 +1724,7 @@ class _PlayerItemState extends State<PlayerItem>
                         if (playerController.panel.lockPanel) {
                           return;
                         }
+                        MiruHaptics.select();
                         playerController.panel.showPlaySpeed = false;
                         setPlaybackSpeed(lastPlayerSpeed);
                       },
@@ -1769,6 +1856,25 @@ class _PlayerItemState extends State<PlayerItem>
                             disableAnimations: widget.disableAnimations,
                             skipOP: skipOP,
                           ),
+                    // P2-4：手势反馈层（均 IgnorePointer，不参与命中）。
+                    Positioned.fill(
+                      child: DoubleTapSeekRipple(
+                        controller: _rippleController,
+                        disableAnimations: widget.disableAnimations,
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: SwipeFullscreenHint(
+                        progress: _swipeFullscreenProgress,
+                        exiting: videoPageController.isFullscreen,
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: GestureCoachOverlay(
+                        visible: _gestureCoachVisible,
+                        brightnessVolumeEnabled: brightnessVolumeGesture,
+                      ),
+                    ),
                     Positioned.fill(
                       left: 16,
                       top: 25,
@@ -1778,6 +1884,8 @@ class _PlayerItemState extends State<PlayerItem>
                           ? Container()
                           : GestureDetector(
                               onHorizontalDragStart: (_) {
+                                MiruHaptics.select();
+                                _dismissGestureCoach();
                                 playerController.panel.seekDirection = 0;
                                 _beginInteractiveSeek();
                               },
@@ -1827,8 +1935,13 @@ class _PlayerItemState extends State<PlayerItem>
                                   _restartPlayerTimer();
                                 }
                               },
+                              onVerticalDragStart: _handleVerticalDragStart,
                               onVerticalDragUpdate:
                                   (DragUpdateDetails details) {
+                                if (_verticalMode == 2 || _verticalMode == 3) {
+                                  _handleSwipeFullscreenUpdate(details);
+                                  return;
+                                }
                                 if (!brightnessVolumeGesture) {
                                   return;
                                 }
@@ -1852,6 +1965,11 @@ class _PlayerItemState extends State<PlayerItem>
                                           delta / level;
                                   final double result =
                                       brightness.clamp(0.0, 1.0);
+                                  if ((result == 0.0 || result == 1.0) &&
+                                      playerController.panel.brightness !=
+                                          result) {
+                                    MiruHaptics.edge();
+                                  }
                                   setBrightness(result);
                                   playerController.panel.brightness = result;
                                 } else {
@@ -1870,14 +1988,28 @@ class _PlayerItemState extends State<PlayerItem>
                                   final double level = (totalHeight) * 0.03;
                                   final double volume =
                                       baseVolume - delta / level;
+                                  if ((volume <= 0 && baseVolume > 0) ||
+                                      (volume >= 100 && baseVolume < 100)) {
+                                    MiruHaptics.edge();
+                                  }
                                   playerController
                                       .setVolumeDuringGesture(volume);
                                 }
                               },
                               onVerticalDragEnd: (_) {
+                                if (_verticalMode == 2 || _verticalMode == 3) {
+                                  _finishSwipeFullscreen(commit: true);
+                                  return;
+                                }
+                                _verticalMode = 0;
                                 _finishAdjustmentGesture();
                               },
                               onVerticalDragCancel: () {
+                                if (_verticalMode == 2 || _verticalMode == 3) {
+                                  _finishSwipeFullscreen(commit: false);
+                                  return;
+                                }
+                                _verticalMode = 0;
                                 _finishAdjustmentGesture();
                               },
                             ),

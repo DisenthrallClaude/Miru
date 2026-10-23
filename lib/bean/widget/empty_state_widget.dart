@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:miru/bean/widget/error_widget.dart';
 
 /// Shared empty state following the onboarding badge idiom:
 /// a tonal circular badge with an icon above a bold title.
@@ -17,7 +18,8 @@ class GeneralEmptyState extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    return Column(
+    return RevealOnMount(
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -40,6 +42,7 @@ class GeneralEmptyState extends StatelessWidget {
           style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
       ],
+      ),
     );
   }
 }

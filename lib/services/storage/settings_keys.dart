@@ -556,6 +556,12 @@ class SettingsKeys {
     '',
     group: SettingGroup.download,
   );
+  /// P2-4：首次全屏手势导览是否已展示过。
+  static const playerGestureCoachShown = SettingKey<bool>(
+    _SettingBoxKey.playerGestureCoachShown,
+    false,
+    group: SettingGroup.misc,
+  );
   static const shortcutDialogShown = SettingKey<bool>(
     _SettingBoxKey.shortcutDialogShown,
     false,
@@ -769,6 +775,7 @@ class SettingsKeys {
     downloadDirectory,
     downloadDirectoryBookmark,
     shortcutDialogShown,
+    playerGestureCoachShown,
     bangumiSyncEnable,
     bangumiAccessToken,
     bangumiSyncPriority,
@@ -885,6 +892,7 @@ class _SettingBoxKey {
       downloadDanmaku = 'downloadDanmaku',
       downloadDirectory = 'downloadDirectory',
       shortcutDialogShown = 'shortcutDialogShown',
+      playerGestureCoachShown = 'playerGestureCoachShown',
       bangumiSyncEnable = 'bangumiSyncEnable',
       bangumiAccessToken = 'bangumiAccessToken',
       bangumiSyncPriority = 'bangumiSyncPriority',

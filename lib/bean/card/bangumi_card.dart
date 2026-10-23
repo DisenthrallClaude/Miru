@@ -1,3 +1,4 @@
+import 'package:miru/utils/haptics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:miru/bean/widget/spring_press.dart';
@@ -37,7 +38,7 @@ class BangumiCardV extends StatelessWidget {
           );
           return;
         }
-        HapticFeedback.selectionClick();
+        MiruHaptics.tap();
         context.pushNamed('/info/', arguments: bangumiItem);
       },
       child: Column(

@@ -1,3 +1,4 @@
+import 'package:miru/utils/haptics.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -493,7 +494,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
   /// v1.6.6（B-1）：球体着陆一拍——整个开屏最有「重量感」的时刻，
   /// 轻震一下（对齐上游原版的 expo-haptics 着陆震动）。
   void _onOrbSettled() {
-    HapticFeedback.lightImpact();
+    MiruHaptics.tap();
   }
 
   /// v1.6.6（A-1）：原生启动层只认系统深色（values-night 一重判定），
@@ -994,7 +995,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
                       borderRadius: BorderRadius.circular(999),
                       onTap: () {
                         // v1.6.6（B-1）：CTA 点击触觉反馈。
-                        HapticFeedback.selectionClick();
+                        MiruHaptics.select();
                         widget.onEnter();
                       },
                       child: Center(
@@ -1047,7 +1048,7 @@ class _LiquidGlassWelcomeState extends State<LiquidGlassWelcome>
                 child: InkWell(
                   onTap: () {
                     // v1.6.6（B-1）：次入口点击触觉反馈。
-                    HapticFeedback.selectionClick();
+                    MiruHaptics.select();
                     widget.onEnterViaGithub();
                   },
                   child: Padding(

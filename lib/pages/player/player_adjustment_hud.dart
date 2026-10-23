@@ -813,13 +813,21 @@ class PlayerSpeedHud extends StatefulWidget {
   State<PlayerSpeedHud> createState() => _PlayerSpeedHudState();
 }
 
-class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
+class _PlayerSpeedHudState extends State<PlayerSpeedHud>
+    with SingleTickerProviderStateMixin {
   late double _displaySpeed;
+
+  /// P2-4：倍速生效期间三枚箭头循环流动，「正在加速」一眼可读。
+  late final AnimationController _flow = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 820),
+  );
 
   @override
   void initState() {
     super.initState();
     _displaySpeed = widget.speed;
+    _syncFlow();
   }
 
   @override
@@ -828,6 +836,22 @@ class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
     if (widget.visible) {
       _displaySpeed = widget.speed;
     }
+    _syncFlow();
+  }
+
+  void _syncFlow() {
+    final bool run = widget.visible && !widget.disableAnimations;
+    if (run && !_flow.isAnimating) {
+      _flow.repeat();
+    } else if (!run && _flow.isAnimating) {
+      _flow.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _flow.dispose();
+    super.dispose();
   }
 
   String get _speedText => '${_displaySpeed.toStringAsFixed(1)}x';
@@ -864,7 +888,7 @@ class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
               child: AnimatedContainer(
                 duration: duration,
                 curve: Curves.easeOutCubic,
-                width: 94,
+                width: 124,
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                 decoration: BoxDecoration(
                   color: surface,
@@ -896,7 +920,29 @@ class _PlayerSpeedHudState extends State<PlayerSpeedHud> {
                         size: 15,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
+                    AnimatedBuilder(
+                      animation: _flow,
+                      builder: (context, _) {
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: List.generate(3, (i) {
+                            final double phase = (_flow.value - i / 3) % 1.0;
+                            final double glow =
+                                phase < 0.5 ? 1 - phase * 2 : 0.0;
+                            return Opacity(
+                              opacity: 0.25 + 0.75 * glow,
+                              child: Icon(
+                                Icons.chevron_right_rounded,
+                                size: 12,
+                                color: colorScheme.onSurface,
+                              ),
+                            );
+                          }),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 2),
                     Expanded(
                       child: Text(
                         _speedText,

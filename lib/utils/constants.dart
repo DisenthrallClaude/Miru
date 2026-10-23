@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:miru/bean/widget/miru_page_transitions.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 
 /// 版面基础常量。数值与 `lib/utils/theme.dart` 中的 `Space` / `Radii`
@@ -35,8 +36,8 @@ const SliderThemeData sliderTheme2024 = SliderThemeData(
 /// avoid overriding these unless the native page transition is intentionally bypassed.
 const PageTransitionsTheme pageTransitionsTheme2024 = PageTransitionsTheme(
   builders: {
-    TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    TargetPlatform.android: MiruPageTransitionsBuilder(),
+    TargetPlatform.iOS: MiruPageTransitionsBuilder(),
     TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
     TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
     TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),

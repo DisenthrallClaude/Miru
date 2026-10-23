@@ -12,10 +12,28 @@ class GeneralErrorWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final colorScheme = Theme.of(context).colorScheme;
+    // P2-5：错误态与空态共用「色环徽章 + 文案」语汇，并以淡入上浮登场，
+    // 不再是光秃秃一行字硬切出现。
+    return RevealOnMount(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: colorScheme.errorContainer.withValues(alpha: 0.55),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.cloud_off_rounded,
+            size: 26,
+            color: colorScheme.onErrorContainer,
+          ),
+        ),
+        const SizedBox(height: 16),
         LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             return ConstrainedBox(
@@ -39,6 +57,39 @@ class GeneralErrorWidget extends StatelessWidget {
             children: actions!,
           ),
       ],
+      ),
+    );
+  }
+}
+
+/// 挂载时淡入并上浮 [rise] 像素（一次性，纯视觉）。
+class RevealOnMount extends StatelessWidget {
+  const RevealOnMount({
+    super.key,
+    required this.child,
+    this.rise = 14,
+    this.duration = const Duration(milliseconds: 460),
+  });
+
+  final Widget child;
+  final double rise;
+  final Duration duration;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, v, child) => Opacity(
+        opacity: v,
+        child: Transform.translate(
+          offset: Offset(0, rise * (1 - v)),
+          child: child,
+        ),
+      ),
     );
   }
 }
