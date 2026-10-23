@@ -43,6 +43,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool playerDebugMode;
   late bool playerDisableAnimations;
   late bool forceAdBlocker;
+  late bool skipSponsorOverlay;
   late bool autoPlayNext;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
@@ -105,6 +106,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     playerDisableAnimations =
         GStorage.getSetting<bool>(SettingsKeys.playerDisableAnimations);
     forceAdBlocker = GStorage.getSetting<bool>(SettingsKeys.forceAdBlocker);
+    skipSponsorOverlay =
+        GStorage.getSetting<bool>(SettingsKeys.skipSponsorOverlay);
     playerLogLevel = GStorage.getSetting<int>(SettingsKeys.playerLogLevel);
 
     brightnessVolumeGesture =
@@ -504,6 +507,18 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   title: Text('广告过滤'),
                   description: Text('强制启用HLS广告过滤，忽略规则设置'),
                   initialValue: forceAdBlocker,
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.skip_next_rounded,
+                  onToggle: (value) async {
+                    skipSponsorOverlay = value ?? !skipSponsorOverlay;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.skipSponsorOverlay, skipSponsorOverlay);
+                    setState(() {});
+                  },
+                  title: Text('跳过片头赞助水印'),
+                  description: Text('从头播放时，自动跳过资源站压在片头画面上的「本片由…赞助」文字广告'),
+                  initialValue: skipSponsorOverlay,
                 ),
                 SettingsTile.switchTile(
                   leading: Icons.animation_rounded,

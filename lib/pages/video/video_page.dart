@@ -944,6 +944,21 @@ class _VideoPageState extends State<VideoPage>
                     );
                   }),
                 ),
+              // v2 去广告：片头赞助水印跳过期间保持遮罩（画面静音试探中）。
+              ValueListenableBuilder<bool>(
+                valueListenable: playerController.sponsorSkipActive,
+                builder: (context, active, _) => active
+                    ? Container(
+                        color: Colors.black,
+                        alignment: Alignment.center,
+                        child: PlaybackLoadingView(
+                          resolving: false,
+                          titleOverride: '正在跳过片头广告',
+                          disableAnimations: disableAnimations,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
               Visibility(
                 visible: (videoPageController.loading || playerLoading) &&
                     showDebugLog,

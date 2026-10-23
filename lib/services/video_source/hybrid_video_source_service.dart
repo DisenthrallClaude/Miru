@@ -780,6 +780,26 @@ class HybridVideoSourceService implements IVideoSourceService {
         }
       }
     }
+    // v2 去广告：FFmpeg hls_ad_filter 只能识别「中途 PTS 回跳」的插播，
+    // 片头广告（清单第一段就是广告）它天生识别不了。直连路径在这里先做
+    // 清单级剔除：有广告段被删时改播本地清单（分片仍直连 CDN），否则
+    // 原样直连。失败/超时一律回退直连，播放链路零回归。
+    if (isHls) {
+      final cleanUrl = await _proxy.registerAdStripped(
+        directUrl,
+        headers: mergedHeaders,
+      );
+      if (cleanUrl != null) {
+        return VideoSource(
+          url: cleanUrl,
+          offset: offset,
+          type: source.type,
+          format: source.format,
+          directUrl: directUrl,
+          playbackHeaders: mergedHeaders,
+        );
+      }
+    }
     return VideoSource(
       url: directUrl,
       offset: offset,

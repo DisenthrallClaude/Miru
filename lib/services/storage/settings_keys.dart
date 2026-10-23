@@ -476,6 +476,12 @@ class SettingsKeys {
     '',
     group: SettingGroup.theme,
   );
+  /// v2 去广告：自动跳过压制进画面的片头赞助水印（「本片由 xx 赞助」）。
+  static const skipSponsorOverlay = SettingKey<bool>(
+    _SettingBoxKey.skipSponsorOverlay,
+    true,
+    group: SettingGroup.player,
+  );
   static const forceAdBlocker = SettingKey<bool>(
     _SettingBoxKey.forceAdBlocker,
     false,
@@ -760,6 +766,7 @@ class SettingsKeys {
     useSystemFont,
     customFontId,
     forceAdBlocker,
+    skipSponsorOverlay,
     backgroundPlayback,
     proxyEnable,
     proxyConfigured,
@@ -878,6 +885,7 @@ class _SettingBoxKey {
       useSystemFont = 'useSystemFont',
       customFontId = 'customFontId',
       forceAdBlocker = 'forceAdBlocker',
+      skipSponsorOverlay = 'skipSponsorOverlay',
       backgroundPlayback = 'backgroundPlayback',
       proxyEnable = 'proxyEnable',
       proxyConfigured = 'proxyConfigured',

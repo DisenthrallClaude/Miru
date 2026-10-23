@@ -13,6 +13,8 @@ import 'package:miru/pages/player/controller/player_aspect_ratio.dart';
 import 'package:miru/pages/player/controller/player_panel_controller.dart';
 import 'package:miru/pages/player/controller/player_playback_controller.dart';
 import 'package:miru/pages/player/controller/player_super_resolution.dart';
+import 'package:miru/pages/player/controller/sponsor_overlay_skipper.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:miru/pages/player/controller/player_syncplay_controller.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -44,6 +46,10 @@ class PlayerController implements Disposable {
   final PlayerDebugController debug = PlayerDebugController();
 
   late final PlayerDanmakuController danmaku;
+
+  /// v2 去广告：片头赞助水印跳过进行中（播放页据此保持遮罩）。
+  final ValueNotifier<bool> sponsorSkipActive = ValueNotifier<bool>(false);
+  int _sponsorGen = 0;
   late final PlayerPlaybackController playback = PlayerPlaybackController(
     shaderAssetService: shaderAssetService,
     debug: debug,
@@ -179,6 +185,12 @@ class PlayerController implements Disposable {
         'PlayerController: ${params.isLocalPlayback ? "local" : "online"} playback, url: ${params.videoUrl}');
 
     playback.resetForInit();
+    // v2 去广告：换集即作废上一集的水印检测流程。
+    _sponsorGen++;
+    sponsorSkipActive.value = false;
+    final int startOffsetSeconds = params.offset;
+    playback.onFirstFrameInternal =
+        () => _maybeRunSponsorSkip(startOffsetSeconds);
     // 秒开链路：本地代理打开失败时用原始直链原地重开。
     // 必须在 resetForInit 之后设置——后者会清空兜底地址，先设后清
     // 会让直连兜底永远拿不到地址（v1.5.3 修复装配顺序缺陷）。
@@ -259,6 +271,55 @@ class PlayerController implements Disposable {
       }
     }
     return true;
+  }
+
+  /// v2 去广告：从头开播时检测压制进画面的片头赞助水印并跳过。
+  /// 详见 [SponsorOverlaySkipper]。任何失败只记日志，不影响播放。
+  void _maybeRunSponsorSkip(int startOffsetSeconds) {
+    // 「可观看」信号（CI 以此为 t0 截取 t3/t10，验证开头不是广告）。
+    void ready(String why) => MiruLogger().i('MIRU_AUTOTEST ready $why');
+    if (isLocalPlayback || startOffsetSeconds > 3) return ready('resume');
+    if (!GStorage.getSetting(SettingsKeys.skipSponsorOverlay)) {
+      return ready('disabled');
+    }
+    final player = playback.mediaPlayer;
+    if (player == null) return ready('no-player');
+    final gen = ++_sponsorGen;
+    final url = videoUrl;
+    bool stale() =>
+        gen != _sponsorGen || videoUrl != url || playback.mediaPlayer != player;
+    final host = SponsorSkipHost(
+      probe: () async {
+        final w = player.state.width;
+        final h = player.state.height;
+        if (w == null || h == null || w <= 0 || h <= 0) return null;
+        final bytes = await player.safeScreenshot(format: null);
+        if (bytes == null || bytes.isEmpty) return null;
+        final stride = bytes.length ~/ h;
+        if (stride < w * 4) return null;
+        return SponsorOverlayDetector.analyze(bytes,
+            width: w, height: h, stride: stride);
+      },
+      seek: (d) => seek(d, enableSync: false),
+      position: () => player.state.position,
+      setMuted: (m) async {
+        try {
+          await (player.platform as NativePlayer)
+              .setProperty('mute', m ? 'yes' : 'no');
+        } catch (_) {}
+      },
+      isStale: stale,
+    );
+    unawaited(SponsorOverlaySkipper.run(host, onActive: (active) {
+      if (gen == _sponsorGen) sponsorSkipActive.value = active;
+    }).then((outcome) {
+      MiruLogger().i('MIRU_AD sponsor outcome=$outcome');
+      ready(outcome.kind);
+    }).catchError((Object e) {
+      if (gen == _sponsorGen) sponsorSkipActive.value = false;
+      MiruLogger().w('MIRU_AD sponsor skip failed', error: e);
+      ready('error');
+    }));
   }
 
   bool _ownsInitialization(AsyncSession initialization, Player player) {

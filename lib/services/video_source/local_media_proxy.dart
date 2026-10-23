@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/services/storage/storage.dart';
+import 'package:miru/utils/hls_ad_stripper.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 本地媒体代理：秒开链路的「数据层」。
@@ -90,6 +91,11 @@ class LocalMediaProxy {
 
   /// token → 改写后的 m3u8 清单（会话内复用，避免重复拉取+改写）。
   final Map<String, String> _rewrittenManifests = {};
+
+  /// v2 去广告：剔除插播/片头广告段后的媒体清单（token → 清单文本）。
+  /// 分片与 KEY 均为绝对直链（mpv 直连 CDN，带全局请求头），代理只提供
+  /// 这一份几 KB 的清单，不经手任何媒体数据。
+  final Map<String, String> _cleanManifests = {};
 
   /// 外部注入的清单原文（seed，阶段 0 / §1.2）：解析层探测时已经拉到
   /// 过 m3u8 文本，代理直接复用，避免二次拉取同一 URL。
@@ -515,6 +521,9 @@ class LocalMediaProxy {
         case 'm3u8':
           await _serveManifest(request, token);
           break;
+        case 'clean':
+          await _serveCleanManifest(request, token);
+          break;
         case 'media':
           await _serveMediaRange(request, token);
           break;
@@ -568,6 +577,64 @@ class LocalMediaProxy {
       // 推进播放头，§2.2(e)）；带重试退避，不再是单发即弃。
       unawaited(_touchPlayheadAndPrefetch(
           -1, built.segmentUrls, headers, warmStart: true));
+    }
+    request.response.statusCode = HttpStatus.ok;
+    request.response.headers.contentType =
+        ContentType('application', 'vnd.apple.mpegurl');
+    request.response.add(utf8.encode(text));
+    await request.response.close();
+  }
+
+  /// v2 去广告：拉取清单 →（多码率跟进子清单）→ 剔除广告段。
+  ///
+  /// 有广告段被删时返回本地清单地址（分片/KEY 为绝对直链，mpv 直连），
+  /// 否则返回 null（调用方照常直连原地址，行为零变化）。带音轨组的
+  /// 主清单不处理（改写 master 会牵动音轨同步，收益不抵风险）。
+  /// 任何失败都返回 null：去广告是增强，绝不能挡住播放。
+  Future<String?> registerAdStripped(
+    String videoUrl, {
+    Map<String, String> headers = const {},
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    if (!videoUrl.startsWith('http')) return null;
+    try {
+      return await _registerAdStripped(videoUrl, headers).timeout(timeout);
+    } catch (e) {
+      MiruLogger().d('MIRU_AD strip skipped for $videoUrl', error: e);
+      return null;
+    }
+  }
+
+  Future<String?> _registerAdStripped(
+      String videoUrl, Map<String, String> headers) async {
+    final raw = _takeSeed(videoUrl)?.text ??
+        await _fetchPlaylistTextRemote(videoUrl, headers);
+    if (raw == null || _hasAudioRenditions(raw)) return null;
+    final resolved = await _resolveToPlayableManifest(videoUrl, raw, headers);
+    if (resolved == null) return null;
+    final stripped = HlsAdStripper.strip(resolved.manifest, resolved.baseUrl);
+    if (!stripped.changed) return null;
+    // 分片与 KEY/MAP 全部归一为绝对直链。
+    final absolute = rewriteManifest(
+      stripped.manifest,
+      resolved.baseUrl,
+      (abs) => abs,
+    );
+    await _ensureStarted();
+    final token = _tokenFor('clean:$videoUrl');
+    _cleanManifests[token] = absolute;
+    MiruLogger().i('MIRU_AD stripped ${stripped.removedGroups} group(s) '
+        '${stripped.removedSeconds.toStringAsFixed(1)}s '
+        'leading=${stripped.leadingRemoved} url=$videoUrl');
+    return 'http://127.0.0.1:$port/$_secret/clean/$token/index.m3u8';
+  }
+
+  Future<void> _serveCleanManifest(HttpRequest request, String token) async {
+    final text = _cleanManifests[token];
+    if (text == null) {
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+      return;
     }
     request.response.statusCode = HttpStatus.ok;
     request.response.headers.contentType =
@@ -1181,8 +1248,17 @@ class LocalMediaProxy {
       final segUrls = await _prefetchableVariantSegments(raw, url, headers);
       return _BuiltManifest(manifest: rewritten, segmentUrls: segUrls);
     }
-    final resolved = await _resolveToPlayableManifest(url, raw, headers);
-    if (resolved == null) return null;
+    final resolved0 = await _resolveToPlayableManifest(url, raw, headers);
+    if (resolved0 == null) return null;
+    // v2 去广告：缓存代理路径同样先剔除插播/片头广告段。
+    final stripped = HlsAdStripper.strip(resolved0.manifest, resolved0.baseUrl);
+    if (stripped.changed) {
+      MiruLogger().i('MIRU_AD proxy stripped ${stripped.removedGroups} group(s) '
+          '${stripped.removedSeconds.toStringAsFixed(1)}s '
+          'leading=${stripped.leadingRemoved} url=$url');
+    }
+    final resolved = _ResolvedManifest(
+        manifest: stripped.manifest, baseUrl: resolved0.baseUrl);
     final segmentUrls = extractSegmentUrls(resolved.manifest, resolved.baseUrl);
     final rewritten = rewriteManifest(
       resolved.manifest,

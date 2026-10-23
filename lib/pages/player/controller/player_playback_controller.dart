@@ -516,6 +516,10 @@ abstract class _PlayerPlaybackController with Store {
   /// hasVideoParams 后自然重新武装。
   void Function()? onFirstFrame;
 
+  /// v2 去广告：播放层内部的首帧钩子（PlayerController 挂片头水印检测），
+  /// 与上行的 [onFirstFrame] 互不覆盖。
+  void Function()? onFirstFrameInternal;
+
   /// 本集是否已发过 playbackDead 通知（错误风暴去重；openMedia 复位）。
   bool _playbackDeadNotified = false;
 
@@ -1085,6 +1089,7 @@ abstract class _PlayerPlaybackController with Store {
             // 异常隔离：回调内的失败绝不能影响播放状态机。
             try {
               onFirstFrame?.call();
+              onFirstFrameInternal?.call();
             } catch (e) {
               MiruLogger()
                   .w('PlayerController: onFirstFrame hook failed', error: e);

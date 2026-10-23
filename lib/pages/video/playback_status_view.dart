@@ -18,11 +18,15 @@ class PlaybackLoadingView extends StatefulWidget {
     super.key,
     required this.resolving,
     this.disableAnimations = false,
+    this.titleOverride,
   });
 
   /// true = 解析层工作中；false = 已解析、播放器缓冲中。
   final bool resolving;
   final bool disableAnimations;
+
+  /// 覆盖主文案（如「正在跳过片头广告」）。
+  final String? titleOverride;
 
   /// 主文案（按阶段）。
   static String titleFor({required bool resolving}) =>
@@ -99,8 +103,9 @@ class _PlaybackLoadingViewState extends State<PlaybackLoadingView>
             ),
           ),
           child: Text(
-            PlaybackLoadingView.titleFor(resolving: widget.resolving),
-            key: ValueKey(widget.resolving),
+            widget.titleOverride ??
+                PlaybackLoadingView.titleFor(resolving: widget.resolving),
+            key: ValueKey('${widget.resolving}${widget.titleOverride}'),
             style: textTheme.titleMedium?.copyWith(
               color: Colors.white,
               letterSpacing: 2,
