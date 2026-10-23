@@ -174,7 +174,7 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '放送开始:',
+                              '放送开始',
                             ),
                             Text(
                               widget.bangumiItem.airDate == ''
@@ -189,8 +189,8 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                             SizedBox(height: 8),
                             Text(
                               widget.showRating
-                                  ? '${widget.bangumiItem.votes} 人评分:'
-                                  : '*** 人评分:',
+                                  ? '${widget.bangumiItem.votes} 人评分'
+                                  : '*** 人评分',
                             ),
                             if (widget.isLoading)
                               // Skeleton Loader 占位符
@@ -236,7 +236,7 @@ class _BangumiInfoCardVState extends State<BangumiInfoCardV> {
                             SizedBox(height: 8),
                             // v1.6.7（F-6）：全中文界面统一，英文标签改中文。
                             Text(
-                              '排名:',
+                              '排名',
                             ),
                             Text(
                               widget.showRating

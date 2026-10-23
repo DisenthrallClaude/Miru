@@ -176,7 +176,7 @@ class _SearchPageState extends State<SearchPage> {
     }
     if (filterState.rankRange?.isValid == true) {
       chips.add(InputChip(
-        label: Text('排名: ${filterState.rankRange!.toToken()}'),
+        label: Text('排名：${filterState.rankRange!.toToken()}'),
         onDeleted: () => _applyFilterState(
           filterState.copyWith(rankRange: null),
           search: true,

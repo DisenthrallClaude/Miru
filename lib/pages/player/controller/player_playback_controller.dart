@@ -16,6 +16,7 @@ import 'package:miru/services/network/system_proxy_service.dart';
 import 'package:miru/services/player/playback_cache_policy.dart';
 import 'package:miru/services/player/playback_timeline.dart';
 import 'package:miru/services/player/player_screenshot_service.dart';
+import 'package:miru/pages/player/controller/player_error_text.dart';
 import 'package:miru/services/storage/storage.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
 import 'package:miru/utils/async_serial_queue.dart';
@@ -343,12 +344,11 @@ abstract class _PlayerPlaybackController with Store {
       final last = _lastErrorToastAt;
       if (last != null && now.difference(last) < _errorToastCooldown) return;
       _lastErrorToastAt = now;
-      // toast 不外泄内部 URL（本地代理地址是 127.0.0.1 长串，既不可读
-      // 也不可操作）；完整错误与 URL 已记入日志，只保留截断的摘要。
-      final detail = event.toString();
-      final brief = detail.length > 64 ? '${detail.substring(0, 64)}…' : detail;
+      // v1.8.1：toast 只给可读、可行动的中文（PlayerErrorText）；
+      // 原始错误与 URL 记日志，供诊断导出。
+      MiruLogger().w('PlayerController: player error shown to user: $event');
       MiruDialog.showToast(
-          message: '播放器内部错误 $brief',
+          message: PlayerErrorText.humanize(event),
           duration: const Duration(seconds: 5),
           showActionButton: true);
     });

@@ -75,7 +75,7 @@ class MiruDialog {
               persist: false,
               action: showActionButton
                   ? SnackBarAction(
-                      label: actionLabel ?? 'Dismiss',
+                      label: actionLabel ?? '知道了',
                       onPressed: () {
                         onActionPressed?.call();
                         messenger.hideCurrentSnackBar();
