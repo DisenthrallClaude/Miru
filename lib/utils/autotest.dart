@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
+import 'package:miru/navigation.dart';
 import 'package:miru/pages/video/video_playback_args.dart';
 import 'package:miru/plugins/plugins_controller.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -80,7 +81,13 @@ Future<void> runAutotest(PluginsController pluginsController) async {
       info: '',
     );
     log('open-video');
-    unawaited(Modular.to.pushNamed(
+    final ctx = rootNavigatorKey.currentContext;
+    if (ctx == null) {
+      log('no-navigator-context');
+      return;
+    }
+    // ignore: use_build_context_synchronously
+    unawaited(ctx.pushNamed(
       '/video/',
       arguments: OnlineVideoPlaybackArgs(
         bangumiItem: bangumi,
