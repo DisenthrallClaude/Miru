@@ -27,7 +27,7 @@ def play(url, headers):
         else:
             hdr.append(f"{k}: {v}")
     cmd = ['mpv', '--no-config', '--ytdl=no', '--vo=null', '--ao=null', '--really-quiet=no', '--msg-level=all=warn',
-           f'--length={secs}', '--term-playing-msg=PLAYING ${=duration} ${width}x${height}']
+           f'--length={secs}', '--script=' + os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pos.lua')]
     cmd += app_props(url) if MODE == 'app' else ['--network-timeout=15']
     if ua: cmd.append(f'--user-agent={ua}')
     if hdr: cmd.append('--http-header-fields=' + ','.join(h.replace(',', '\\,') for h in hdr))
@@ -37,11 +37,14 @@ def play(url, headers):
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=secs + 30)
         out = (p.stdout + p.stderr)
     except subprocess.TimeoutExpired as e:
-        return False, 'mpv timeout', time.time() - t
-    ok = 'PLAYING' in out and p.returncode == 0 and (time.time() - t) >= secs - 0.5
+        return False, 'mpv timeout(>%ds)' % (secs + 30), time.time() - t
+    import re
+    m = re.findall(r'E2EPOS=(-?[0-9.]+)', out)
+    pos = float(m[-1]) if m else -1
+    ok = pos >= secs - 1.5
     # 播放够时长：mpv --length 到点退出 rc=0
-    tail = [l for l in out.splitlines() if l.strip()][-3:]
-    return ok, ' | '.join(tail)[:300], time.time() - t
+    tail = [l for l in out.splitlines() if l.strip() and 'E2EPOS' not in l and 'ytdl' not in l][-3:]
+    return ok, f'pos={pos:.1f}s ' + ' | '.join(tail)[:300], time.time() - t
 
 table = []
 for r in rows:
