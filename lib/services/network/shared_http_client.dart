@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:miru/utils/extra_trusted_roots.dart';
 
 /// 全局共享 HttpClient（阶段 0 / §1.6）。
 ///
@@ -31,7 +30,7 @@ class SharedHttpClient {
     if (existing != null) {
       return existing;
     }
-    return _instance = ExtraTrustedRoots.newHttpClient()
+    return _instance = HttpClient()
       ..maxConnectionsPerHost = 6
       ..idleTimeout = const Duration(seconds: 30)
       ..connectionTimeout = const Duration(seconds: 5)

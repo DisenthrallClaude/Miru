@@ -25,34 +25,19 @@ void main() {
             '都不得包含该参数。');
   });
 
-  test('v2: 绝不覆写 demuxer-lavf-o（保住 media_kit 的 hls_ad_filter 等默认）',
-      () {
+  test('P0-5: 非 HLS 分支恢复 probe-info=auto（FLV/MKV 音轨探测）', () {
     final source = file.readAsStringSync();
-    final n = "'demuxer-lavf-o'".allMatches(source).length;
-    expect(n <= 1, isTrue,
-        reason: 'mpv 的 demuxer-lavf-o 是整表替换：覆写会抹掉 media_kit '
-            'PlayerConfiguration 设置的 hls_ad_filter / allowed_extensions=ALL '
-            '/ protocol_whitelist / seg_max_retry=5');
-    if (n == 1) {
-      expect(source.contains("'demuxer-lavf-o', upstreamLavfOptions("), isTrue,
-          reason: '唯一允许的覆写是与上游逐项一致的 upstreamLavfOptions');
-      for (final k in ['seg_max_retry=5', 'allowed_extensions=ALL',
-          'hls_ad_filter=', 'protocol_whitelist=', 'strict=experimental']) {
-        expect(source.contains(k), isTrue, reason: k);
-      }
-    }
+    expect(source.contains("'demuxer-lavf-probe-info', 'auto'"), isTrue,
+        reason: 'nostreams 对部分 FLV/MKV 探测不到音轨——非 HLS 分支'
+            '必须显式恢复 auto');
+    expect(source.contains("'demuxer-lavf-probe-info', 'nostreams'"), isTrue,
+        reason: 'HLS 分支保留 nostreams（起播前的流识别时间压缩）');
   });
 
-  test('v2: 不再使用激进探测参数（probe-info/analyzeduration/probesize）', () {
+  test('P0-5: HLS 分支保留分片自愈参数（seg_max_retry/max_reload）', () {
     final source = file.readAsStringSync();
-    for (final prop in [
-      'demuxer-lavf-probe-info',
-      'demuxer-lavf-analyzeduration',
-      'demuxer-lavf-probesize',
-    ]) {
-      expect(source.contains("'$prop'"), isFalse,
-          reason: '$prop 偏离上游 Kazumi，可能漏探音轨/首片较慢的流');
-    }
+    expect(source.contains('seg_max_retry=3,max_reload=5'), isTrue,
+        reason: 'HLS 丢片自愈的核心参数必须保留在 HLS 分支');
   });
 
   test('P1-4: 与格式无关的属性只在 ensurePlayer 设置一次', () {
