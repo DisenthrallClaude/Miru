@@ -8,6 +8,9 @@ rows = []
 for key in sorted(glob.glob(os.path.join(d, '*_logcat.txt'))):
     tag = os.path.basename(key)[:-len('_logcat.txt')]
     t = open(key, errors='ignore').read()
+    alt = os.path.join(d, f'e2e-{tag}_logcat_all.txt')
+    if not t.strip() and os.path.exists(alt):
+        t = open(alt, errors='ignore').read()
     fl = [l for l in t.splitlines() if 'I/flutter' in l or 'W/flutter' in l or 'E/flutter' in l]
     txt = '\n'.join(fl)
     def has(p): return re.search(p, txt) is not None
