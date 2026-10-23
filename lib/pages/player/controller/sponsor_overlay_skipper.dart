@@ -170,14 +170,15 @@ abstract final class SponsorOverlaySkipper {
     // v1.8.0：首帧回调时 VO 往往还没出图，取帧返回 null（CI 39945352215：
     // 首帧后 350ms `grab failed`，约 2.5s 后 window 取帧成功）。null 表示
     // 「还看不到画面」而不是「没有水印」——重试直到拿到画面或超出等待上限。
-    var a = await host.probe();
+    var firstProbe = await host.probe();
     var waited = Duration.zero;
-    while (a == null && waited < maxGrabWait) {
+    while (firstProbe == null && waited < maxGrabWait) {
       await Future<void>.delayed(grabRetry);
       waited += grabRetry;
       if (host.isStale()) return const SponsorSkipOutcome('aborted');
-      a = await host.probe();
+      firstProbe = await host.probe();
     }
+    final a = firstProbe;
     if (a == null || !a.hit) {
       log('none first=$a');
       return const SponsorSkipOutcome('none');
