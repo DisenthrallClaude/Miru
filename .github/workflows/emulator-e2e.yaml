@@ -3,21 +3,30 @@ on:
   workflow_dispatch:
     inputs:
       specs:
-        description: '逐源自测清单 规则名|关键词;...'
+        description: '逐源自测清单（JSON 数组）["规则名|关键词", ...]'
         required: false
-        default: 'FQDM|凡人修仙传;MXdm|凡人修仙传;AGE|凡人修仙传;fcdm|凡人修仙传;7sefun|凡人修仙传;dmghg1|凡人修仙传;blbl|凡人修仙传;lblb|凡人修仙传'
+        default: ''
   push:
     branches: [v2-overhaul]
     paths: ['lib/**', 'assets/plugins/**', 'android/**', 'pubspec.*', '.github/workflows/emulator-e2e.yaml', 'tool/ci_emulator_e2e.sh']
 concurrency:
   group: emulator-e2e-${{ github.ref }}
   cancel-in-progress: true
+env:
+  DEFAULT_SPECS: '["FQDM|凡人修仙传","MXdm|凡人修仙传","AGE|凡人修仙传","fcdm|凡人修仙传","7sefun|凡人修仙传","dmghg1|凡人修仙传","blbl|凡人修仙传","lblb|凡人修仙传"]'
 jobs:
-  e2e:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 30
+    outputs:
+      specs: ${{ steps.specs.outputs.specs }}
     steps:
       - uses: actions/checkout@v4
+      - id: specs
+        run: |
+          S='${{ github.event.inputs.specs }}'
+          [ -z "$S" ] && S="$DEFAULT_SPECS"
+          echo "specs=$S" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: subosito/flutter-action@v2
@@ -26,29 +35,52 @@ jobs:
         run: |
           flutter pub get
           flutter build apk --release --target-platform android-x64 -Pmiru.abis=x86_64 --dart-define=MIRU_AUTOTEST='FQDM|凡人修仙传'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-x86_64
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 3
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        spec: ${{ fromJSON(needs.build.outputs.specs) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: apk-x86_64, path: apk }
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - id: tag
+        run: echo "tag=$(echo '${{ matrix.spec }}' | cut -d'|' -f1)" >> "$GITHUB_OUTPUT"
       - name: Run on emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          SPECS: ${{ github.event.inputs.specs || 'FQDM|凡人修仙传;MXdm|凡人修仙传;AGE|凡人修仙传;fcdm|凡人修仙传;7sefun|凡人修仙传;dmghg1|凡人修仙传;blbl|凡人修仙传;lblb|凡人修仙传' }}
+          SPECS: ${{ matrix.spec }}
+          APK: apk/app-release.apk
+          WAIT: '100'
         with:
           api-level: 30
           target: google_apis
           arch: x86_64
           profile: pixel_4
-          ram-size: 3072M
+          ram-size: 2048M
+          cores: 2
           emulator-boot-timeout: 900
           disk-size: 6000M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
           disable-animations: true
-          script: timeout 1500 bash tool/ci_emulator_e2e.sh
+          script: timeout 600 bash tool/ci_emulator_e2e.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: e2e-out
+          name: e2e-${{ steps.tag.outputs.tag }}
           path: e2e-out/
           retention-days: 7
