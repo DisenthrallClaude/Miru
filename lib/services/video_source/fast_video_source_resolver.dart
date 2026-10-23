@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:io';
 
 import 'package:hive_ce/hive.dart';
+import 'package:miru/utils/ad_url_filter.dart';
 import 'package:miru/services/logging/logger.dart';
 import 'package:miru/services/network/shared_http_client.dart';
 import 'package:miru/services/video_source/video_source_format.dart';
@@ -467,6 +468,8 @@ class FastVideoSourceResolver {
     for (final c in candidates) {
       final key = c.url.trim();
       if (key.isEmpty) continue;
+      // v2：所有策略（含 iframe 二跳内层）统一过滤广告片。
+      if (AdUrlFilter.isAd(key)) continue;
       final existing = byUrl[key];
       if (existing == null ||
           _strategyRank(c.strategy) < _strategyRank(existing.strategy)) {
@@ -1125,7 +1128,7 @@ class FastVideoSourceResolver {
     for (final hint in _adHostHints) {
       if (lower.contains(hint)) return true;
     }
-    return false;
+    return AdUrlFilter.isAd(url);
   }
 
   /// 广告/占位路径判定（1.1(f)）。

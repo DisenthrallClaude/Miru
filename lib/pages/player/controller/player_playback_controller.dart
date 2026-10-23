@@ -907,8 +907,6 @@ abstract class _PlayerPlaybackController with Store {
         pp.setProperty('stream-lavf-o',
             'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3,'
                 'timeout=10000000'),
-        pp.setProperty('demuxer-lavf-analyzeduration', '1'),
-        pp.setProperty('demuxer-lavf-probesize', '1048576'),
         pp.setProperty('network-timeout', '8'),
         pp.setProperty('cache-pause-initial', 'no'),
         pp.setProperty('cache-pause-wait', '1'),
@@ -1279,14 +1277,14 @@ abstract class _PlayerPlaybackController with Store {
       await Future.wait([
         pp.setProperty('demuxer-lavf-format', 'hls'),
         pp.setProperty('hls-bitrate', 'no'),
-        pp.setProperty(
-            'demuxer-lavf-o',
-            'http_persistent=1,http_multiple=1,'
-                'seg_max_retry=3,max_reload=5,'
-                'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
-        // probe-info=nostreams 只对 HLS 生效（部分 FLV/MKV 在
-        // nostreams 下探测不到音轨）。
-        pp.setProperty('demuxer-lavf-probe-info', 'nostreams'),
+        // v2：不再逐集覆写 demuxer-lavf-o / probe-info。mpv 的
+        // demuxer-lavf-o 是「整表替换」语义——v1.7.0 每集下发的
+        // http_persistent/... 把 media_kit 在 PlayerConfiguration 里
+        // 设好的 `hls_ad_filter`（插件 adBlocker 开关，Kazumi 补丁的
+        // 插播广告过滤）、`allowed_extensions=ALL`、`protocol_whitelist`、
+        // `strict=experimental`、`seg_max_retry=5` 全部抹掉。现在完全
+        // 沿用 media_kit 默认（与上游 Kazumi 一致），连接层重连仍由
+        // ensurePlayer 里的 stream-lavf-o 负责。
         if (!isLocalPlayback()) ...[
           // 起播阶段小缓冲（§1.7）：首帧后由 _maybePromoteBuffering
           // 提升到 120/10；每集重设（promote 换集必须回落）。
@@ -1307,11 +1305,6 @@ abstract class _PlayerPlaybackController with Store {
     }
       if (!isLocalPlayback()) {
         await Future.wait([
-          // 非 HLS 直链：保留连接层重连，绝不限制 seek。
-          pp.setProperty('demuxer-lavf-o',
-              'reconnect=1,reconnect_streamed=1,reconnect_delay_max=3'),
-          // nostreams 对 FLV/MKV 缺音轨——非 HLS 恢复 auto。
-          pp.setProperty('demuxer-lavf-probe-info', 'auto'),
           pp.setProperty('cache-secs', _cacheSecsStartup),
           pp.setProperty('demuxer-readahead-secs', _readaheadSecsStartup),
         ]);

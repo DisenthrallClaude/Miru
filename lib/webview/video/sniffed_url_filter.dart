@@ -1,3 +1,5 @@
+import 'package:miru/utils/ad_url_filter.dart';
+
 /// 嗅探回调侧统一的广告/统计域黑名单。
 ///
 /// 各 WebView 嗅探实现的 JS 侧只零散排除了 googleads 等少数域；
@@ -17,6 +19,6 @@ abstract final class SniffedUrlFilter {
   /// [url] 是否命中广告/统计域黑名单。
   static bool isAdUrl(String url) {
     final lower = url.toLowerCase();
-    return _adHostHints.any(lower.contains);
+    return _adHostHints.any(lower.contains) || AdUrlFilter.isAd(url);
   }
 }
