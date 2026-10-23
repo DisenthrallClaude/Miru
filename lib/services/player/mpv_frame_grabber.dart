@@ -18,7 +18,7 @@ class GrabbedFrame {
   final int stride;
 }
 
-/// 为去广告画面识别取帧（v1.8.1）。
+/// 为去广告画面识别取帧（v1.8.0）。
 ///
 /// ## 为什么不直接用 `Player.safeScreenshot`
 /// media_kit 的截图固定走 `screenshot-raw video`：mpv 需要把**解码帧**下载

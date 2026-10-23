@@ -53,7 +53,7 @@ class PlayerController implements Disposable {
   /// v2 去广告：片头赞助水印跳过进行中（播放页据此保持遮罩）。
   final ValueNotifier<bool> sponsorSkipActive = ValueNotifier<bool>(false);
 
-  /// v1.8.1：正片中途压字广告的遮罩区域（归一化到视频画面 0..1）。
+  /// v1.8.0：正片中途压字广告的遮罩区域（归一化到视频画面 0..1）。
   final ValueNotifier<List<Rect>> sponsorMasks =
       ValueNotifier<List<Rect>>(const []);
   int _sponsorGen = 0;
@@ -300,7 +300,7 @@ class PlayerController implements Disposable {
         gen != _sponsorGen || videoUrl != url || playback.mediaPlayer != player;
     final host = SponsorSkipHost(
       probe: () async {
-        // v1.8.1：改用 MpvFrameGrabber（screenshot-raw window）——
+        // v1.8.0：改用 MpvFrameGrabber（screenshot-raw window）——
         // safeScreenshot 走 video 模式，mediacodec 硬解下恒为 null。
         final f = await MpvFrameGrabber.grab(player);
         if (f == null) return null;
@@ -329,7 +329,7 @@ class PlayerController implements Disposable {
     }));
   }
 
-  /// v1.8.1：正片中途压字广告（如 fcdm「582316.com」）检测到才遮、只遮那块。
+  /// v1.8.0：正片中途压字广告（如 fcdm「582316.com」）检测到才遮、只遮那块。
   /// 详见 [MidrollSponsorMasker]。任何失败只记日志，不影响播放。
   void _maybeRunMidrollMasker() {
     if (isLocalPlayback) return;

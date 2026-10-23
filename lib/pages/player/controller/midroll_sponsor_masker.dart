@@ -5,7 +5,7 @@ import 'dart:ui' show Rect;
 import 'package:miru/pages/player/controller/sponsor_overlay_skipper.dart';
 import 'package:miru/services/logging/logger.dart';
 
-/// 正片中途压字广告的毛玻璃遮罩（v1.8.1）。
+/// 正片中途压字广告的毛玻璃遮罩（v1.8.0）。
 ///
 /// ## 这是什么广告
 /// 采集站（实测 fcdm 线路 play.modujx10.com，《凡人修仙传》一集 21.5 分钟）

@@ -1,0 +1,21 @@
+{
+  "api": "5",
+  "type": "anime",
+  "name": "milimili",
+  "version": "1.0",
+  "muliSources": true,
+  "useWebview": true,
+  "useNativePlayer": true,
+  "usePost": false,
+  "useLegacyParser": false,
+  "adBlocker": true,
+  "userAgent": "",
+  "baseURL": "https://milimili.nl/",
+  "searchURL": "https://milimili.nl/search?q=@keyword",
+  "searchList": "//ul[contains(@class,'list-unstyled')]/li[.//h6/a]",
+  "searchName": "//h6/a",
+  "searchResult": "//h6/a",
+  "chapterRoads": "//ul[contains(@class,'list-unstyled') and .//li[contains(@class,'ep-col')]]",
+  "chapterResult": "//li/a",
+  "referer": ""
+}

@@ -344,7 +344,7 @@ abstract class _PlayerPlaybackController with Store {
       final last = _lastErrorToastAt;
       if (last != null && now.difference(last) < _errorToastCooldown) return;
       _lastErrorToastAt = now;
-      // v1.8.1：toast 只给可读、可行动的中文（PlayerErrorText）；
+      // v1.8.0：toast 只给可读、可行动的中文（PlayerErrorText）；
       // 原始错误与 URL 记日志，供诊断导出。
       MiruLogger().w('PlayerController: player error shown to user: $event');
       MiruDialog.showToast(

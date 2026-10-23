@@ -1,4 +1,4 @@
-/// v1.8.1：把 mpv/ffmpeg 的原始错误翻译成用户能看懂、能行动的中文。
+/// v1.8.0：把 mpv/ffmpeg 的原始错误翻译成用户能看懂、能行动的中文。
 ///
 /// 之前 toast 直接展示「播放器内部错误 tcp: Connection to tcp://g.xlzyd.com:9999
 /// failed: Connection tim…」（CI UI 巡检截图 ui_v2_09/12），既不可读也不可操作。

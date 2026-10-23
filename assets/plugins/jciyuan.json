@@ -1,0 +1,37 @@
+{
+  "api": "8",
+  "type": "anime",
+  "name": "jciyuan",
+  "version": "1.0",
+  "muliSources": true,
+  "useWebview": true,
+  "useNativePlayer": true,
+  "usePost": false,
+  "useLegacyParser": false,
+  "adBlocker": true,
+  "userAgent": "",
+  "baseURL": "https://www.jciyuan.com/acgdetail/",
+  "searchURL": "",
+  "searchMode": "api",
+  "chapterMode": "xpath",
+  "searchApiConfig": {
+    "request": {
+      "method": "GET",
+      "url": "https://www.jciyuan.com/index.php/ajax/suggest",
+      "query": {
+        "mid": "1",
+        "wd": "@keyword",
+        "limit": "20"
+      }
+    },
+    "listPath": "$.list[*]",
+    "namePath": "$.name",
+    "sourcePath": "$.id"
+  },
+  "searchList": "",
+  "searchName": "",
+  "searchResult": "",
+  "chapterRoads": "//div[contains(@class,'anime-detail-episodes')]",
+  "chapterResult": ".//a",
+  "referer": ""
+}

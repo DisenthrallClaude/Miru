@@ -16,8 +16,8 @@ void main() {
         .whereType<File>()
         .where((f) => f.path.endsWith('.json'))
         .toList();
-    expect(files.length, greaterThanOrEqualTo(15),
-        reason: 'v1.7.0 起应含 15 条内置规则（含 LMM）');
+    expect(files.length, greaterThanOrEqualTo(19),
+        reason: 'v1.8.0 起应含 19 条内置规则（+jciyuan/dmjd/dmttang/milimili）');
     final names = <String>[];
     for (final file in files) {
       final plugin =

@@ -1,0 +1,21 @@
+{
+  "api": "5",
+  "type": "anime",
+  "name": "dmjd",
+  "version": "1.0",
+  "muliSources": true,
+  "useWebview": true,
+  "useNativePlayer": true,
+  "usePost": false,
+  "useLegacyParser": false,
+  "adBlocker": true,
+  "userAgent": "",
+  "baseURL": "https://dmjd.com/",
+  "searchURL": "https://dmjd.com/vodsearch/-------------/?wd=@keyword",
+  "searchList": "//li[contains(@class,'searchlist_item')]",
+  "searchName": "//h4[contains(@class,'vodlist_title')]/a",
+  "searchResult": "//h4[contains(@class,'vodlist_title')]/a",
+  "chapterRoads": "//div[contains(@class,'playlist_full')]/ul",
+  "chapterResult": "//li/a",
+  "referer": ""
+}

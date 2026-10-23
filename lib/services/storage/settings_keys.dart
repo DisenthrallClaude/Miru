@@ -482,7 +482,7 @@ class SettingsKeys {
     true,
     group: SettingGroup.player,
   );
-  /// v1.8.1：正片中途压字广告（「xx.com 赞助/注册即送」）检测到时毛玻璃遮住那一块。
+  /// v1.8.0：正片中途压字广告（「xx.com 赞助/注册即送」）检测到时毛玻璃遮住那一块。
   static const maskMidrollSponsor = SettingKey<bool>(
     _SettingBoxKey.maskMidrollSponsor,
     true,

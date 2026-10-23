@@ -1,4 +1,4 @@
-// v1.8.1 正片中途压字广告遮罩：检测阈值、迟滞状态机、显示区域换算。
+// v1.8.0 正片中途压字广告遮罩：检测阈值、迟滞状态机、显示区域换算。
 import 'dart:typed_data';
 import 'dart:ui' show Rect, Size;
 

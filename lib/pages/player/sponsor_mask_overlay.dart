@@ -2,7 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-/// v1.8.1：正片中途压字广告的毛玻璃遮罩层。
+/// v1.8.0：正片中途压字广告的毛玻璃遮罩层。
 ///
 /// [masks] 为归一化到视频画面（0..1）的矩形；按 [fit] 与视频原始尺寸换算到
 /// 实际显示区域，只遮那几块。磨砂 + 暮色压暗，即使个别设备 BackdropFilter

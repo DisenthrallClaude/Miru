@@ -20,7 +20,7 @@ class CommunityRulesSync {
   CommunityRulesSync._();
 
   /// 镜像前缀，按国内可达性排序；{file} 会替换为目标文件名。
-  /// v1.8.1：参考上游 Kazumi 2.4.2，gh-proxy.org / ghfast.top 前置
+  /// v1.8.0：参考上游 Kazumi 2.4.2，gh-proxy.org / ghfast.top 前置
   /// （jsDelivr 的 @main 有最长 12h 的缓存延迟，且国内节点时好时坏）。
   static const List<String> _mirrors = [
     'https://gh-proxy.org/https://raw.githubusercontent.com/Predidit/KazumiRules/main/',

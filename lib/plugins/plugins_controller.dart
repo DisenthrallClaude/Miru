@@ -4,6 +4,7 @@ import 'package:mobx/mobx.dart';
 import 'package:flutter/services.dart' show rootBundle, AssetManifest;
 import 'package:path_provider/path_provider.dart';
 import 'package:miru/plugins/plugins.dart';
+import 'package:miru/plugins/bundled_rule_priority.dart';
 import 'package:miru/services/plugin/plugin_validity_tracker.dart';
 import 'package:miru/request/apis/plugin_catalog_api.dart';
 import 'package:miru/modules/plugin/plugin_http_module.dart';
@@ -205,6 +206,8 @@ abstract class _PluginsController with Store {
       }
       MiruLogger().i(
           'Plugin: ${bundled.length} bundled plugin files scanned for ${newPluginDirectory!.path}');
+      // v1.8.0：按内置优先级稳定排序（新装用户的初始顺序即此顺序）。
+      BundledRulePriority.sort(bundled);
 
       // v1.6.10：预扫描——没有任何可落盘变更时直接返回，既省掉一次
       // plugins.json 全量重写，也让「启动时内置规则刷新」的常态开销
@@ -258,7 +261,11 @@ abstract class _PluginsController with Store {
               );
               continue;
             }
-            _replacePlugin(plugin);
+            if (local == null) {
+              BundledRulePriority.insertNew(pluginList, plugin);
+            } else {
+              _replacePlugin(plugin);
+            }
           }
         },
         errorMessage: 'Plugin: failed to persist bundled rules',
