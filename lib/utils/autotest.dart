@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:miru/modules/bangumi/bangumi_item.dart';
@@ -13,9 +12,8 @@ import 'package:miru/services/logging/logger.dart';
 /// CI/模拟器自动化播放自测（仅在构建时 `--dart-define=MIRU_AUTOTEST=...`
 /// 注入时启用；正式发布包为空字符串，零行为变化）。
 ///
-/// 格式：`规则名|关键词`，例如 `FQDM|凡人修仙传`。运行时优先读取
-/// `<外部存储应用目录>/autotest.txt`（CI 用 adb 写入，可逐源切换而无需
-/// 重新编译），不存在时用编译期值。
+/// 格式：`规则名|关键词`，例如 `FQDM|凡人修仙传`。运行时优先读取系统属性
+/// `debug.miru.autotest`（CI 逐源切换无需重编译），为空时用编译期值。
 /// 启动完成后自动：该规则搜索 → 取首个匹配结果 → 选集 → 直接打开
 /// 播放页第 1 集。全过程打 `MIRU_AUTOTEST` 前缀日志（logcat 可 grep）。
 const String kMiruAutotest = String.fromEnvironment('MIRU_AUTOTEST');
@@ -26,12 +24,11 @@ Future<void> runAutotest(PluginsController pluginsController) async {
   if (!isAutotestBuild) return;
   var spec = kMiruAutotest;
   try {
-    final dir = await getExternalStorageDirectory();
-    final f = File('${dir?.path}/autotest.txt');
-    if (dir != null && await f.exists()) {
-      final text = (await f.readAsString()).trim();
-      if (text.contains('|')) spec = text;
-    }
+    // CI 用 `adb shell setprop debug.miru.autotest '规则|关键词'` 逐源切换
+    // （Android 11 起 adb 无法写入应用私有外部目录）。
+    final r = await Process.run('getprop', ['debug.miru.autotest']);
+    final text = (r.stdout as String? ?? '').trim();
+    if (text.contains('|')) spec = text;
   } catch (_) {}
   final parts = spec.split('|');
   final pluginName = parts.first.trim();

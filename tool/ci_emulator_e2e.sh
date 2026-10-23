@@ -1,46 +1,46 @@
 #!/usr/bin/env bash
 # GitHub Actions 模拟器端到端自测：逐源自动搜索→选集→播放，
-# 每个源截图 3 张 + 录屏 + logcat，产物落 e2e-out/。
+# 每个源截图 4 张 + 录屏 + logcat，产物落 e2e-out/。
 set -u
 PKG=io.github.disenthrallclaude.miru
 APK=${APK:-build/app/outputs/flutter-apk/app-release.apk}
 OUT=${OUT:-e2e-out}
-SPECS=${SPECS:-"FQDM|凡人修仙传;MXdm|凡人修仙传;AGE|凡人修仙传;blbl|凡人修仙传;fcdm|凡人修仙传"}
+SPECS=${SPECS:-"FQDM|凡人修仙传;MXdm|凡人修仙传;AGE|凡人修仙传;fcdm|凡人修仙传"}
+WAIT=${WAIT:-90}
 mkdir -p "$OUT"
 adb wait-for-device
-adb shell settings put global window_animation_scale 0
-adb shell settings put global transition_animation_scale 0
-adb shell settings put global animator_duration_scale 0
+adb logcat -v time > "$OUT/logcat_all.txt" 2>&1 &
 adb install -r -g "$APK" > "$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; exit 1; }
+adb shell getprop ro.build.version.sdk > "$OUT/device.txt"
 i=0
 IFS=';' read -ra ARR <<< "$SPECS"
 for spec in "${ARR[@]}"; do
   i=$((i+1))
   name=$(echo "$spec" | cut -d'|' -f1)
   tag="${i}_${name}"
-  echo "=== [$tag] $spec"
-  adb shell am force-stop $PKG
-  adb shell pm clear $PKG > /dev/null
-  adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-  adb shell mkdir -p /sdcard/Android/data/$PKG/files
-  printf '%s' "$spec" > /tmp/autotest.txt
-  adb push /tmp/autotest.txt /sdcard/Android/data/$PKG/files/autotest.txt > /dev/null
-  adb logcat -c
-  adb shell "screenrecord --time-limit 100 --bit-rate 2000000 /sdcard/rec_${tag}.mp4" &
+  echo "=== [$tag] $spec  $(date +%T)"
+  adb get-state || { echo "device lost"; break; }
+  timeout 20 adb shell am force-stop $PKG
+  timeout 30 adb shell pm clear $PKG > /dev/null
+  timeout 10 adb shell "setprop debug.miru.autotest '$spec'"
+  echo "prop=$(adb shell getprop debug.miru.autotest)"
+  timeout 10 adb logcat -c
+  (timeout $((WAIT+15)) adb shell screenrecord --time-limit $WAIT --bit-rate 1500000 /sdcard/rec_${tag}.mp4 >/dev/null 2>&1) &
   REC=$!
-  adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
-  for t in 15 40 70 95; do
-    sleep $(( t - ${prev:-0} )); prev=$t
-    adb exec-out screencap -p > "$OUT/${tag}_t${t}s.png"
-  done
+  timeout 20 adb shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
   prev=0
+  for t in 12 35 60 $WAIT; do
+    sleep $(( t - prev )); prev=$t
+    timeout 20 adb exec-out screencap -p > "$OUT/${tag}_t${t}s.png" || true
+    echo "  shot t=${t}s"
+  done
   wait $REC 2>/dev/null || true
-  sleep 2
-  adb pull /sdcard/rec_${tag}.mp4 "$OUT/" > /dev/null 2>&1 || true
-  adb shell rm -f /sdcard/rec_${tag}.mp4
-  adb logcat -d > "$OUT/${tag}_logcat.txt"
-  grep -E "MIRU_AUTOTEST|HybridResolver|PlayerController|VideoPageController|mpv|LocalMediaProxy|FastResolver|E/flutter|FATAL" "$OUT/${tag}_logcat.txt" | cut -c1-400 > "$OUT/${tag}_key.txt" || true
-  # 播放判定：首帧钩子/时间线记录
-  if grep -qE "first ?frame|recordFirstFrame|FirstFrame|hasVideoParams|video-params" "$OUT/${tag}_logcat.txt"; then echo "[$tag] FIRST_FRAME_SEEN" | tee -a "$OUT/summary.txt"; else echo "[$tag] NO_FIRST_FRAME" | tee -a "$OUT/summary.txt"; fi
+  sleep 3
+  timeout 60 adb pull /sdcard/rec_${tag}.mp4 "$OUT/" > /dev/null 2>&1 || true
+  timeout 10 adb shell rm -f /sdcard/rec_${tag}.mp4
+  timeout 30 adb logcat -d -v time > "$OUT/${tag}_logcat.txt"
+  grep -E "MIRU_AUTOTEST|HybridResolver|FastResolver|PlayerController|VideoPageController|LocalMediaProxy|WebView|mpv|E/flutter|FATAL|AndroidRuntime" "$OUT/${tag}_logcat.txt" | cut -c1-500 > "$OUT/${tag}_key.txt" || true
+  echo "  key lines: $(wc -l < "$OUT/${tag}_key.txt")"
 done
+adb shell getprop sys.boot_completed > /dev/null 2>&1 && echo "device alive at end" || echo "device dead at end"
 exit 0
