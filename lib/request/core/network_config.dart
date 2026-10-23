@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:miru/utils/extra_trusted_roots.dart';
 
 import 'package:dio/io.dart';
 import 'package:miru/services/logging/logger.dart';
@@ -30,7 +31,7 @@ class NetworkConfig {
   IOHttpClientAdapter createAdapter() {
     return IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient();
+        final client = ExtraTrustedRoots.newHttpClient();
         if (hasProxy) {
           client.findProxy = (_) => 'PROXY $proxyHost:$proxyPort';
         } else if (Platform.isWindows) {

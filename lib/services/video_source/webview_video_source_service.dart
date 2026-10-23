@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:miru/utils/extra_trusted_roots.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -391,7 +392,7 @@ Future<bool?> _sniffManifestMagic(
 ) async {
   HttpClient? client;
   try {
-    client = HttpClient()
+    client = ExtraTrustedRoots.newHttpClient()
       ..connectionTimeout = const Duration(seconds: 3);
     final request = await client
         .getUrl(Uri.parse(url))

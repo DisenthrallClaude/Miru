@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:miru/utils/extra_trusted_roots.dart';
 import 'dart:io';
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -102,7 +103,7 @@ class _ProxyAwareImageFileService extends FileService {
   }
 
   HttpClient _createHttpClient() {
-    final client = HttpClient()..connectionTimeout = _connectTimeout;
+    final client = ExtraTrustedRoots.newHttpClient()..connectionTimeout = _connectTimeout;
     final proxy = _currentProxy();
     if (proxy == null) {
       if (Platform.isWindows) {

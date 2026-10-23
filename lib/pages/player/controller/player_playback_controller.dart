@@ -97,6 +97,20 @@ abstract class _PlayerPlaybackController with Store {
   );
 
   _OwnedPlayer? _ownedPlayer;
+
+  /// v2：当前实例生效中的 hls_ad_filter 开关（创建期由 media_kit 下发）。
+  bool? _appliedAdBlocker;
+
+  /// v2：与 Predidit/media-kit@994465d real.dart 的 PlayerConfiguration
+  /// 默认 `demuxer-lavf-o` 逐项一致（含 hls_ad_filter）——唯一允许的
+  /// 覆写形态，绝不能少任何一项。
+  static String upstreamLavfOptions(bool adBlocker) => [
+        'seg_max_retry=5',
+        'strict=experimental',
+        'allowed_extensions=ALL',
+        'hls_ad_filter=${adBlocker ? 1 : 0}',
+        'protocol_whitelist=[${const PlayerConfiguration().protocolWhitelist.join(',')}]',
+      ].join(',');
   Player? get mediaPlayer => _ownedPlayer?.player;
   VideoController? videoController;
 
@@ -839,6 +853,19 @@ abstract class _PlayerPlaybackController with Store {
     // 幂等：实例常驻（换集软停后直接复用）
     final existing = _ownedPlayer;
     if (existing != null) {
+      // v2：实例跨集/跨源复用，而 hls_ad_filter 只在创建期按首个源的
+      // adBlocker 下发——同一视频页换到另一个源时广告过滤开关会错位。
+      // 开关变化时按 media_kit 上游语义整表重下发一次（只此一处）。
+      if (_appliedAdBlocker != adBlockerEnabled) {
+        _appliedAdBlocker = adBlockerEnabled;
+        try {
+          await (existing.player.platform as NativePlayer).setProperty(
+              'demuxer-lavf-o', upstreamLavfOptions(adBlockerEnabled));
+        } catch (e) {
+          MiruLogger().w('PlayerController: re-apply hls_ad_filter failed',
+              error: e);
+        }
+      }
       return existing.player;
     }
     if (!canInstall()) {
@@ -868,6 +895,7 @@ abstract class _PlayerPlaybackController with Store {
       return null;
     }
     _ownedPlayer = candidate;
+    _appliedAdBlocker = adBlockerEnabled;
     cachePolicy.startWatching();
 
     try {

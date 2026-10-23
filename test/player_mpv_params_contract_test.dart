@@ -28,10 +28,19 @@ void main() {
   test('v2: 绝不覆写 demuxer-lavf-o（保住 media_kit 的 hls_ad_filter 等默认）',
       () {
     final source = file.readAsStringSync();
-    expect(source.contains("'demuxer-lavf-o'"), isFalse,
+    final n = "'demuxer-lavf-o'".allMatches(source).length;
+    expect(n <= 1, isTrue,
         reason: 'mpv 的 demuxer-lavf-o 是整表替换：覆写会抹掉 media_kit '
             'PlayerConfiguration 设置的 hls_ad_filter / allowed_extensions=ALL '
             '/ protocol_whitelist / seg_max_retry=5');
+    if (n == 1) {
+      expect(source.contains("'demuxer-lavf-o', upstreamLavfOptions("), isTrue,
+          reason: '唯一允许的覆写是与上游逐项一致的 upstreamLavfOptions');
+      for (final k in ['seg_max_retry=5', 'allowed_extensions=ALL',
+          'hls_ad_filter=', 'protocol_whitelist=', 'strict=experimental']) {
+        expect(source.contains(k), isTrue, reason: k);
+      }
+    }
   });
 
   test('v2: 不再使用激进探测参数（probe-info/analyzeduration/probesize）', () {
