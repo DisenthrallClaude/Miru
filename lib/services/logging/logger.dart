@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:miru/utils/autotest.dart' show isAutotestBuild;
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -205,7 +206,8 @@ class MiruLogger {
     // 影响（MiruLogFilter 先查 Zone 标记）。
     // 注意 MiruLogFilter 按 enum index 比较，故「全量」用 trace
     // （最低档）而不是语义化的 all。
-    Logger.level = kReleaseMode ? Level.info : Level.trace;
+    Logger.level =
+        kReleaseMode && !isAutotestBuild ? Level.info : Level.trace;
     _logger = Logger(
       filter: MiruLogFilter(),
       printer: MiruLogPrinter(),

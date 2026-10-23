@@ -25,6 +25,7 @@ import 'package:miru/services/platform/windows_shortcut.dart';
 import 'package:miru/services/platform/platform_environment_service.dart';
 import 'package:miru/services/update/startup_update_check.dart';
 import 'package:miru/navigation.dart';
+import 'package:miru/utils/autotest.dart';
 import 'package:miru/request/config/api_endpoints.dart';
 
 class InitPage extends StatefulWidget {
@@ -119,6 +120,17 @@ class _InitPageState extends State<InitPage> {
 
     await initFutures;
     StartupGate.markPluginsReady();
+
+    // v2：CI 自动化播放自测（仅 --dart-define=MIRU_AUTOTEST 构建生效）。
+    if (isAutotestBuild && mounted) {
+      await GStorage.putSetting(SettingsKeys.onboardingDone, true);
+      await GStorage.putSetting(
+          SettingsKeys.splashLastPlayedVersion, ApiEndpoints.version);
+      await GStorage.putSetting(SettingsKeys.autoUpdate, false);
+      _startDefaultPage();
+      unawaited(runAutotest(pluginsController));
+      return;
+    }
 
     // 三通道云同步延后到首屏导航后错峰触发（见 _delayedCloudSyncInit），
     // 避免全量历史同步的网络/磁盘/Hive 写锁与首屏渲染竞争。
