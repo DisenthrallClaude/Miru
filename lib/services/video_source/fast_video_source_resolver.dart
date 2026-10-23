@@ -419,6 +419,10 @@ class FastVideoSourceResolver {
             format: _formatOf(resolved),
           ));
         }
+      } else if (_isHtmlPageUrl(resolved)) {
+        // v2：player_aaaa.url 指向另一站的 HTML 播放页（如 7sefun →
+        // lmm85 /play/xxx.html）——它不是媒体，按 iframe 二跳处理。
+        iframeUrl = resolved;
       } else {
         direct.add(FastCandidate(
           url: resolved,
@@ -446,7 +450,7 @@ class FastVideoSourceResolver {
     }
 
     // ---- 策略 3 原料：iframe src（页面拉取由调用方执行）----
-    final iframeSrc = _extractIframeSrc(html);
+    final iframeSrc = iframeUrl == null ? _extractIframeSrc(html) : null;
     if (iframeSrc != null) {
       final resolved = _absolutize(iframeSrc, pageUrl);
       if (resolved != null && !isAdUrl(resolved)) {
@@ -890,6 +894,11 @@ class FastVideoSourceResolver {
       var raw = m.group(0)!;
       // 内联 JS 中的转义斜杠还原
       raw = raw.replaceAll(r'\/', '/');
+      // v2：JS 字符串里的 \uXXXX 转义（dmghg 等站中文路径）还原。
+      raw = decodeJsUnicodeEscapes(raw);
+      if (!raw.contains('%') && raw.runes.any((r) => r > 0x7f)) {
+        raw = Uri.encodeFull(raw);
+      }
       if (!isAdUrl(raw) &&
           !_isAdPath(raw) &&
           _videoExtRe.hasMatch(_stripQuery(raw))) {
@@ -902,6 +911,21 @@ class FastVideoSourceResolver {
       if (_stripQuery(c).toLowerCase().endsWith('.m3u8')) return c;
     }
     return candidates.first;
+  }
+
+  /// v2：还原 JS 字符串字面量里的 `\uXXXX` 转义。
+  static String decodeJsUnicodeEscapes(String s) {
+    if (!s.contains(r'\u')) return s;
+    return s.replaceAllMapped(RegExp(r'\\u([0-9a-fA-F]{4})'),
+        (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)));
+  }
+
+  /// v2：是否是 HTML 播放页（而非媒体）——`.html/.htm/.php` 结尾。
+  static bool _isHtmlPageUrl(String url) {
+    final path = (Uri.tryParse(url)?.path ?? url).toLowerCase();
+    return path.endsWith('.html') ||
+        path.endsWith('.htm') ||
+        path.endsWith('.shtml');
   }
 
   /// 提取第一个可用 iframe src（排除 about:blank 与广告域）。
