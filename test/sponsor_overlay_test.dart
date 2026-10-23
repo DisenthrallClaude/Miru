@@ -122,6 +122,27 @@ void main() {
       expect(active, [true, false]);
     }, timeout: const Timeout(Duration(seconds: 60)));
 
+    test('首帧后取帧暂不可用（null）：重试到拿到画面再判定，仍能跳过', () async {
+      var nulls = 3;
+      final hitProbe = analyze(frame(overlay: true));
+      final h = SponsorSkipHost(
+        probe: () async {
+          if (nulls > 0) {
+            nulls--;
+            return null;
+          }
+          return pos.inMilliseconds / 1000 < 15.5 ? hitProbe : OverlayProbe.none;
+        },
+        seek: (d) async => pos = d,
+        position: () => pos,
+        setMuted: (m) async => muted = m,
+        isStale: () => false,
+      );
+      final o = await run(h);
+      expect(o.kind, 'skipped');
+      expect(pos, const Duration(seconds: 16));
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
     test('换集作废：立即中止', () async {
       final o = await run(host(15, stale: true));
       expect(o.kind, 'aborted');

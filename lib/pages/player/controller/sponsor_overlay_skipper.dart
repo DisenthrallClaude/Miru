@@ -152,6 +152,10 @@ abstract final class SponsorOverlaySkipper {
   static const int maxSkipSeconds = 48;
   static const Duration settle = Duration(milliseconds: 650);
 
+  /// 取帧暂不可用（首帧刚到、VO 尚未出图）时的重试间隔与上限。
+  static const Duration grabRetry = Duration(milliseconds: 400);
+  static const Duration maxGrabWait = Duration(seconds: 5);
+
   /// 从头开播、首帧到达后调用。[onActive] 在确认命中后回调 true（UI 遮罩），
   /// 结束时回调 false。
   static Future<SponsorSkipOutcome> run(
@@ -163,7 +167,17 @@ abstract final class SponsorOverlaySkipper {
     void log(String m) => MiruLogger().i('MIRU_AD sponsor $m');
     await Future<void>.delayed(firstDelay);
     if (host.isStale()) return const SponsorSkipOutcome('aborted');
-    final a = await host.probe();
+    // v1.8.0：首帧回调时 VO 往往还没出图，取帧返回 null（CI 39945352215：
+    // 首帧后 350ms `grab failed`，约 2.5s 后 window 取帧成功）。null 表示
+    // 「还看不到画面」而不是「没有水印」——重试直到拿到画面或超出等待上限。
+    var a = await host.probe();
+    var waited = Duration.zero;
+    while (a == null && waited < maxGrabWait) {
+      await Future<void>.delayed(grabRetry);
+      waited += grabRetry;
+      if (host.isStale()) return const SponsorSkipOutcome('aborted');
+      a = await host.probe();
+    }
     if (a == null || !a.hit) {
       log('none first=$a');
       return const SponsorSkipOutcome('none');
