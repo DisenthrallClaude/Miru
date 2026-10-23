@@ -17,6 +17,10 @@ if (flutterVersionCode == null) {
     flutterVersionCode = '1'
 }
 
+// v2：目标 ABI 可配置（默认 arm64-v8a 单架构；模拟器/CI 用 -Pmiru.abis=x86_64）
+def miruAbis = (project.findProperty('miru.abis') ?: 'arm64-v8a').toString().split(',').collect { it.trim() }
+def miruExcludedAbis = ['armeabi-v7a', 'x86', 'x86_64', 'arm64-v8a'].findAll { !miruAbis.contains(it) }
+
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
     flutterVersionName = '1.0'
@@ -46,7 +50,7 @@ android {
             // shared_preferences_android 传递依赖的 androidx.datastore 1.1.x
             // 会带全 ABI 的 shared_counter so(约 10KB),与本包 arm64 单架构
             // 定位不符,打包阶段剔除(defaultConfig 的 abiFilters 管不到它)。
-            excludes += ['**/armeabi-v7a/**', '**/x86/**', '**/x86_64/**']
+            excludes += miruExcludedAbis.collect { "**/${it}/**".toString() }
         }
     }
 
@@ -71,7 +75,7 @@ android {
         // 插件传递依赖(如 androidx.datastore 的 shared_counter)会带全 ABI
         // 的 so,不钉死会把 armeabi-v7a/x86_64 碎文件混进包里。
         ndk {
-            abiFilters 'arm64-v8a'
+            abiFilters(*miruAbis)
         }
     }
 
