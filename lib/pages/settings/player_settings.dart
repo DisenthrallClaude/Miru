@@ -44,6 +44,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
   late bool playerDisableAnimations;
   late bool forceAdBlocker;
   late bool skipSponsorOverlay;
+  late bool maskMidrollSponsor;
   late bool autoPlayNext;
   late bool backgroundPlayback;
   late bool brightnessVolumeGesture;
@@ -108,6 +109,8 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
     forceAdBlocker = GStorage.getSetting<bool>(SettingsKeys.forceAdBlocker);
     skipSponsorOverlay =
         GStorage.getSetting<bool>(SettingsKeys.skipSponsorOverlay);
+    maskMidrollSponsor =
+        GStorage.getSetting<bool>(SettingsKeys.maskMidrollSponsor);
     playerLogLevel = GStorage.getSetting<int>(SettingsKeys.playerLogLevel);
 
     brightnessVolumeGesture =
@@ -519,6 +522,18 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   title: Text('跳过片头赞助水印'),
                   description: Text('从头播放时，自动跳过资源站压在片头画面上的「本片由…赞助」文字广告'),
                   initialValue: skipSponsorOverlay,
+                ),
+                SettingsTile.switchTile(
+                  leading: Icons.blur_on_rounded,
+                  onToggle: (value) async {
+                    maskMidrollSponsor = value ?? !maskMidrollSponsor;
+                    await GStorage.putSetting<bool>(
+                        SettingsKeys.maskMidrollSponsor, maskMidrollSponsor);
+                    setState(() {});
+                  },
+                  title: Text('遮挡正片压字广告'),
+                  description: Text('识别到画面上压制的「xx.com 赞助 / 注册即送」文字时，用毛玻璃只遮住那一块；其余画面不受影响，下一集生效'),
+                  initialValue: maskMidrollSponsor,
                 ),
                 SettingsTile.switchTile(
                   leading: Icons.animation_rounded,

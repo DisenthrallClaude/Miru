@@ -3,6 +3,7 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:miru/pages/player/playback_mask_logic.dart';
 import 'package:miru/pages/player/player_controller.dart';
+import 'package:miru/pages/player/sponsor_mask_overlay.dart';
 
 class PlayerItemSurface extends StatefulWidget {
   const PlayerItemSurface({
@@ -83,13 +84,35 @@ class _PlayerItemSurfaceState extends State<PlayerItemSurface> {
         ),
       );
 
+      // v1.8.1：正片中途压字广告遮罩，与 Video 同框同 fit 换算。
+      final masked = Stack(
+        fit: StackFit.passthrough,
+        children: [
+          video,
+          Positioned.fill(
+            child: ValueListenableBuilder<List<Rect>>(
+              valueListenable: playerController.sponsorMasks,
+              builder: (context, masks, _) {
+                final state = playerController.playback.mediaPlayer?.state;
+                return SponsorMaskOverlay(
+                  masks: masks,
+                  videoWidth: state?.width,
+                  videoHeight: state?.height,
+                  fit: aspectRatioMode.fit,
+                );
+              },
+            ),
+          ),
+        ],
+      );
+
       final frameAspectRatio = aspectRatioMode.frameAspectRatio;
       if (frameAspectRatio == null) {
-        return video;
+        return masked;
       }
       return AspectRatio(
         aspectRatio: frameAspectRatio,
-        child: video,
+        child: masked,
       );
     });
   }

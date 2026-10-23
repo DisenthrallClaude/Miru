@@ -14,6 +14,9 @@ import 'package:miru/pages/player/controller/player_panel_controller.dart';
 import 'package:miru/pages/player/controller/player_playback_controller.dart';
 import 'package:miru/pages/player/controller/player_super_resolution.dart';
 import 'package:miru/pages/player/controller/sponsor_overlay_skipper.dart';
+import 'package:miru/pages/player/controller/midroll_sponsor_masker.dart';
+import 'package:miru/services/player/mpv_frame_grabber.dart';
+import 'dart:ui' show Rect;
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:miru/pages/player/controller/player_syncplay_controller.dart';
 import 'package:miru/services/storage/storage.dart';
@@ -49,6 +52,10 @@ class PlayerController implements Disposable {
 
   /// v2 去广告：片头赞助水印跳过进行中（播放页据此保持遮罩）。
   final ValueNotifier<bool> sponsorSkipActive = ValueNotifier<bool>(false);
+
+  /// v1.8.1：正片中途压字广告的遮罩区域（归一化到视频画面 0..1）。
+  final ValueNotifier<List<Rect>> sponsorMasks =
+      ValueNotifier<List<Rect>>(const []);
   int _sponsorGen = 0;
   late final PlayerPlaybackController playback = PlayerPlaybackController(
     shaderAssetService: shaderAssetService,
@@ -188,9 +195,12 @@ class PlayerController implements Disposable {
     // v2 去广告：换集即作废上一集的水印检测流程。
     _sponsorGen++;
     sponsorSkipActive.value = false;
+    sponsorMasks.value = const [];
     final int startOffsetSeconds = params.offset;
-    playback.onFirstFrameInternal =
-        () => _maybeRunSponsorSkip(startOffsetSeconds);
+    playback.onFirstFrameInternal = () {
+      _maybeRunSponsorSkip(startOffsetSeconds);
+      _maybeRunMidrollMasker();
+    };
     // 秒开链路：本地代理打开失败时用原始直链原地重开。
     // 必须在 resetForInit 之后设置——后者会清空兜底地址，先设后清
     // 会让直连兜底永远拿不到地址（v1.5.3 修复装配顺序缺陷）。
@@ -290,15 +300,12 @@ class PlayerController implements Disposable {
         gen != _sponsorGen || videoUrl != url || playback.mediaPlayer != player;
     final host = SponsorSkipHost(
       probe: () async {
-        final w = player.state.width;
-        final h = player.state.height;
-        if (w == null || h == null || w <= 0 || h <= 0) return null;
-        final bytes = await player.safeScreenshot(format: null);
-        if (bytes == null || bytes.isEmpty) return null;
-        final stride = bytes.length ~/ h;
-        if (stride < w * 4) return null;
-        return SponsorOverlayDetector.analyze(bytes,
-            width: w, height: h, stride: stride);
+        // v1.8.1：改用 MpvFrameGrabber（screenshot-raw window）——
+        // safeScreenshot 走 video 模式，mediacodec 硬解下恒为 null。
+        final f = await MpvFrameGrabber.grab(player);
+        if (f == null) return null;
+        return SponsorOverlayDetector.analyze(f.bytes,
+            width: f.width, height: f.height, stride: f.stride);
       },
       seek: (d) => seek(d, enableSync: false),
       position: () => player.state.position,
@@ -319,6 +326,36 @@ class PlayerController implements Disposable {
       if (gen == _sponsorGen) sponsorSkipActive.value = false;
       MiruLogger().w('MIRU_AD sponsor skip failed', error: e);
       ready('error');
+    }));
+  }
+
+  /// v1.8.1：正片中途压字广告（如 fcdm「582316.com」）检测到才遮、只遮那块。
+  /// 详见 [MidrollSponsorMasker]。任何失败只记日志，不影响播放。
+  void _maybeRunMidrollMasker() {
+    if (isLocalPlayback) return;
+    if (!GStorage.getSetting(SettingsKeys.maskMidrollSponsor)) return;
+    final player = playback.mediaPlayer;
+    if (player == null) return;
+    final gen = _sponsorGen;
+    final url = videoUrl;
+    bool stale() =>
+        gen != _sponsorGen || videoUrl != url || playback.mediaPlayer != player;
+    final host = MidrollMaskHost(
+      grab: () async {
+        final f = await MpvFrameGrabber.grab(player);
+        if (f == null) return null;
+        return MidrollSponsorDetector.analyzeAll(f.bytes,
+            width: f.width, height: f.height, stride: f.stride);
+      },
+      isPlaying: () => player.state.playing,
+      isPaused: () => sponsorSkipActive.value,
+      isStale: stale,
+      onMasks: (masks) {
+        if (gen == _sponsorGen) sponsorMasks.value = masks;
+      },
+    );
+    unawaited(MidrollSponsorMasker.run(host).catchError((Object e) {
+      MiruLogger().w('MIRU_AD midroll mask failed', error: e);
     }));
   }
 
